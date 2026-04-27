@@ -1,0 +1,80 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { LocalFileSystemProvider } from "../../../src/storage/local-fs.provider.js";
+import { existsSync, rmSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+const TEST_DIR = join(tmpdir(), `skill-mcp-storage-test-${process.pid}`);
+
+describe("LocalFileSystemProvider", () => {
+  let provider: LocalFileSystemProvider;
+
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    mkdirSync(TEST_DIR, { recursive: true });
+    provider = new LocalFileSystemProvider(TEST_DIR);
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("should put and get a file", async () => {
+    await provider.put("test/file.txt", Buffer.from("hello world"));
+    const result = await provider.get("test/file.txt");
+    expect(result).not.toBeNull();
+    expect(result!.toString()).toBe("hello world");
+  });
+
+  it("should return null for non-existent file", async () => {
+    const result = await provider.get("nonexistent.txt");
+    expect(result).toBeNull();
+  });
+
+  it("should check file existence", async () => {
+    await provider.put("exists.txt", Buffer.from("data"));
+    expect(await provider.exists("exists.txt")).toBe(true);
+    expect(await provider.exists("nope.txt")).toBe(false);
+  });
+
+  it("should delete a file", async () => {
+    await provider.put("to-delete.txt", Buffer.from("data"));
+    await provider.delete("to-delete.txt");
+    expect(await provider.exists("to-delete.txt")).toBe(false);
+  });
+
+  it("should not throw when deleting non-existent file", async () => {
+    await expect(provider.delete("nonexistent.txt")).resolves.not.toThrow();
+  });
+
+  it("should recursively delete a directory", async () => {
+    await provider.put("dir/a.txt", Buffer.from("a"));
+    await provider.put("dir/sub/b.txt", Buffer.from("b"));
+    await provider.put("dir/sub/c.txt", Buffer.from("c"));
+
+    await provider.deleteDir("dir");
+    expect(await provider.exists("dir/a.txt")).toBe(false);
+    expect(await provider.exists("dir/sub/b.txt")).toBe(false);
+  });
+
+  it("should list files in a directory", async () => {
+    await provider.put("list/file1.txt", Buffer.from("a"));
+    await provider.put("list/file2.txt", Buffer.from("b"));
+
+    const files = await provider.list("list");
+    expect(files).toHaveLength(2);
+    expect(files).toContain("list/file1.txt");
+    expect(files).toContain("list/file2.txt");
+  });
+
+  it("should return empty array for non-existent directory", async () => {
+    const files = await provider.list("nonexistent");
+    expect(files).toEqual([]);
+  });
+
+  it("should get file size", async () => {
+    await provider.put("sized.txt", Buffer.from("hello"));
+    const size = await provider.size("sized.txt");
+    expect(size).toBe(5);
+  });
+});
