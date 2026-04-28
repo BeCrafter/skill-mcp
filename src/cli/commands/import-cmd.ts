@@ -29,6 +29,7 @@ export async function importAction(
   try {
     const result = await importer.import(source, options);
     console.log(`✓ ${result.action === "created" ? "Created" : "Updated"} skill:`);
+    console.log(`  ID: ${result.id}`);
     console.log(`  Slug: ${result.slug}`);
     console.log(`  Name: ${result.name}`);
     console.log(`  Version: ${result.version}`);

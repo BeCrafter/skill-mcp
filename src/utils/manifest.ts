@@ -4,35 +4,54 @@ import { createHash } from "node:crypto";
 import type { SkillManifest, SkillFileInput } from "../types/index.js";
 
 /**
- * Parse manifest.json from a skill directory
+ * Parse manifest from a skill directory.
+ * Prefers manifest.json, falls back to SKILL.md frontmatter.
  */
 export function parseManifest(dirPath: string): SkillManifest {
   const manifestPath = join(dirPath, "manifest.json");
 
-  if (!existsSync(manifestPath)) {
-    throw new Error(`manifest.json not found in ${dirPath}`);
+  if (existsSync(manifestPath)) {
+    try {
+      const content = readFileSync(manifestPath, "utf-8");
+      const manifest = JSON.parse(content) as SkillManifest;
+
+      if (!manifest.name || typeof manifest.name !== "string") {
+        throw new Error("manifest.name is required and must be a string");
+      }
+
+      return {
+        name: manifest.name,
+        version: manifest.version,
+        entry: manifest.entry ?? "SKILL.md",
+        files: manifest.files,
+      };
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(`Invalid JSON in manifest.json: ${error.message}`);
+      }
+      throw error;
+    }
   }
 
-  try {
-    const content = readFileSync(manifestPath, "utf-8");
-    const manifest = JSON.parse(content) as SkillManifest;
-
-    if (!manifest.name || typeof manifest.name !== "string") {
-      throw new Error("manifest.name is required and must be a string");
-    }
-
-    return {
-      name: manifest.name,
-      version: manifest.version,
-      entry: manifest.entry ?? "SKILL.md",
-      files: manifest.files,
-    };
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(`Invalid JSON in manifest.json: ${error.message}`);
-    }
-    throw error;
+  const skillMdPath = join(dirPath, "SKILL.md");
+  if (!existsSync(skillMdPath)) {
+    throw new Error(`Neither manifest.json nor SKILL.md found in ${dirPath}`);
   }
+
+  const skillContent = readFileSync(skillMdPath, "utf-8");
+  const { frontmatter } = extractFrontmatter(skillContent);
+
+  const name = frontmatter["name"];
+  if (!name || typeof name !== "string") {
+    throw new Error("name is required in SKILL.md frontmatter or manifest.json");
+  }
+
+  return {
+    name: name as string,
+    version: (frontmatter["version"] as string) ?? undefined,
+    entry: "SKILL.md",
+    files: undefined,
+  };
 }
 
 /**

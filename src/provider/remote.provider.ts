@@ -48,6 +48,16 @@ export class RemoteSkillProvider implements ISkillProvider {
     return data.data ?? null;
   }
 
+  async getSkillMetaById(id: string): Promise<SkillMeta | null> {
+    const resp = await fetch(`${this.cloudServiceUrl}/api/skills/by-id/${id}`, {
+      headers: this.getHeaders(),
+    });
+    if (resp.status === 404) return null;
+    if (!resp.ok) throw new Error(`Failed to get skill by id: ${resp.statusText}`);
+    const data = (await resp.json()) as ApiResponse<SkillMeta>;
+    return data.data ?? null;
+  }
+
   async getSkillEntry(slug: string): Promise<string> {
     const cacheKey = `skill:entry:${slug}`;
     const cached = await this.cache.get<string>(cacheKey);
@@ -107,8 +117,17 @@ export class RemoteSkillProvider implements ISkillProvider {
     return tree;
   }
 
-  async skillExists(slug: string): Promise<boolean> {
-    const meta = await this.getSkillMeta(slug);
+  async skillExists(identifier: string): Promise<boolean> {
+    const meta = await this.resolveSkill(identifier);
     return meta !== null;
+  }
+
+  private async resolveSkill(identifier: string): Promise<SkillMeta | null> {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    if (isUuid) {
+      const byId = await this.getSkillMetaById(identifier);
+      if (byId) return byId;
+    }
+    return this.getSkillMeta(identifier);
   }
 }

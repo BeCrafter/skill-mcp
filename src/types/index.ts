@@ -84,6 +84,7 @@ export interface ImportOptions {
 
 /** Import result */
 export interface ImportResult {
+  id: string;
   slug: string;
   name: string;
   version: string;

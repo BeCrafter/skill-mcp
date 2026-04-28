@@ -27,6 +27,10 @@ export class LocalSkillProvider implements ISkillProvider {
     return this.skillRepo.findBySlug(slug);
   }
 
+  async getSkillMetaById(id: string): Promise<SkillMeta | null> {
+    return this.skillRepo.findById(id);
+  }
+
   async getSkillEntry(slug: string): Promise<string> {
     const skill = await this.skillRepo.findBySlug(slug);
     if (!skill) throw new SkillNotFoundError(slug);

@@ -63,7 +63,18 @@ export class SkillImporter {
     // 4. Compute content hash
     const contentHash = computeContentHash(skillFiles);
 
-    // 5. Handle duplicate name
+    // 5. Extract description and tags from options or SKILL.md frontmatter
+    let description = options.description;
+    if (!description && entryContent) {
+      const { frontmatter } = extractFrontmatter(entryContent);
+      description = (frontmatter.description as string) ?? extractDescription(entryContent);
+    }
+
+    const tags = options.tags ?? (
+      entryContent ? (extractFrontmatter(entryContent).frontmatter.tags as string[] ?? []) : []
+    );
+
+    // 6. Handle duplicate name
     const existing = await this.skillRepo.findByName(manifest.name);
     let targetSkill = null;
     let slug: string;
@@ -76,18 +87,46 @@ export class SkillImporter {
         throw new SkillNotFoundError(options.targetId);
       }
       if (targetSkill.contentHash === contentHash) {
+        if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
+          await this.updateMetadata(targetSkill, options, tags, targetSkill.slug);
+          this.logger.info({ slug: targetSkill.slug, name: manifest.name }, "Skill metadata updated (content unchanged)");
+          return {
+            id: targetSkill.id,
+            slug: targetSkill.slug,
+            name: manifest.name,
+            version: targetSkill.version,
+            fileCount: skillFiles.length,
+            category: options.category ?? targetSkill.category ?? undefined,
+            tags: options.tags ?? (targetSkill.tags as string[] ?? []),
+            action: "updated",
+          };
+        }
         throw new ContentUnchangedError(manifest.name);
       }
       slug = targetSkill.slug;
       storagePath = targetSkill.storagePath;
       action = "updated";
-    } else if (existing.length > 0) {
+    } else if (existing.length >0) {
       if (!options.overwrite) {
         throw new DuplicateSkillNameError(manifest.name, existing.map(s => ({ slug: s.slug, version: s.version })));
       }
       // Overwrite first match
       targetSkill = existing[0];
       if (targetSkill.contentHash === contentHash) {
+        if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
+          await this.updateMetadata(targetSkill, options, tags, existing[0].slug);
+          this.logger.info({ slug: existing[0].slug, name: manifest.name }, "Skill metadata updated (content unchanged)");
+          return {
+            id: existing[0].id,
+            slug: existing[0].slug,
+            name: manifest.name,
+            version: targetSkill.version,
+            fileCount: skillFiles.length,
+            category: options.category ?? targetSkill.category ?? undefined,
+            tags: options.tags ?? (targetSkill.tags as string[] ?? []),
+            action: "updated",
+          };
+        }
         throw new ContentUnchangedError(manifest.name);
       }
       slug = targetSkill.slug;
@@ -98,26 +137,13 @@ export class SkillImporter {
       storagePath = `skills/${slug}/`;
     }
 
-    // 6. Write files to storage
     for (const file of skillFiles) {
       await this.storage.put(`${storagePath}${file.path}`, file.buffer);
     }
 
-    // 7. Extract description from SKILL.md frontmatter if not provided
-    let description = options.description;
-    if (!description && entryContent) {
-      const { frontmatter } = extractFrontmatter(entryContent);
-      description = (frontmatter.description as string) ?? extractDescription(entryContent);
-    }
-
-    // 8. Write/update DB
     const version = targetSkill
       ? bumpVersion(targetSkill.version, options.versionBump)
       : (manifest.version ?? "1.0.0");
-
-    const tags = options.tags ?? (
-      entryContent ? (extractFrontmatter(entryContent).frontmatter.tags as string[] ?? []) : []
-    );
 
     let skillId: string;
 
@@ -148,7 +174,6 @@ export class SkillImporter {
       skillId = created.id;
     }
 
-    // 9. Write/update skill_files table
     await this.skillFileRepo.deleteBySkillId(skillId);
     for (const file of skillFiles) {
       await this.skillFileRepo.create(skillId, {
@@ -159,13 +184,13 @@ export class SkillImporter {
       });
     }
 
-    // 10. Clear cache for this skill only
     await this.cache.clearByPrefix(`skill:entry:${slug}`);
     await this.cache.clearByPrefix(`skill:file:${slug}`);
 
     this.logger.info({ slug, name: manifest.name, version, action, fileCount: skillFiles.length }, "Skill imported");
 
     return {
+      id: skillId,
       slug,
       name: manifest.name,
       version,
@@ -188,9 +213,56 @@ export class SkillImporter {
 
   private parseManifestFromFiles(files: SkillFileInput[]): { name: string; version?: string; entry?: string; files?: string[] } {
     const manifestFile = files.find(f => f.path === "manifest.json");
-    if (!manifestFile) {
-      throw new Error("manifest.json not found in skill files");
+    if (manifestFile) {
+      return JSON.parse(manifestFile.buffer.toString("utf-8"));
     }
-    return JSON.parse(manifestFile.buffer.toString("utf-8"));
+
+    const skillFile = files.find(f => f.path === "SKILL.md" || f.path.endsWith("/SKILL.md"));
+    if (!skillFile) {
+      throw new Error("Neither manifest.json nor SKILL.md found in skill files");
+    }
+
+    const { frontmatter } = extractFrontmatter(skillFile.buffer.toString("utf-8"));
+    const name = frontmatter["name"];
+    if (!name || typeof name !== "string") {
+      throw new Error("name is required in SKILL.md frontmatter or manifest.json");
+    }
+
+    return {
+      name: name as string,
+      version: (frontmatter["version"] as string) ?? undefined,
+      entry: "SKILL.md",
+      files: undefined,
+    };
+  }
+
+  private shouldUpdateMetadata(
+    targetSkill: { category: string | null; tags: unknown; description: string | null },
+    options: ImportOptions,
+    tags: string[],
+    description: string | null | undefined,
+  ): boolean {
+    if (options.category !== undefined && options.category !== targetSkill.category) return true;
+    if (options.tags !== undefined) {
+      const currentTags = (targetSkill.tags as string[]) ?? [];
+      if (JSON.stringify(currentTags.sort()) !== JSON.stringify([...tags].sort())) return true;
+    }
+    if (options.description !== undefined && options.description !== (targetSkill.description ?? "")) return true;
+    return false;
+  }
+
+  private async updateMetadata(
+    targetSkill: { id: string; slug: string; category: string | null; tags: unknown; description: string | null },
+    options: ImportOptions,
+    tags: string[],
+    slug: string,
+  ): Promise<void> {
+    const updates: Record<string, unknown> = { updatedAt: Date.now() };
+    if (options.category !== undefined) updates.category = options.category;
+    if (options.tags !== undefined) updates.tags = tags;
+    if (options.description !== undefined) updates.description = options.description ?? null;
+    await this.skillRepo.update(targetSkill.id, updates);
+    await this.cache.clearByPrefix(`skill:entry:${slug}`);
+    await this.cache.clearByPrefix(`skill:file:${slug}`);
   }
 }

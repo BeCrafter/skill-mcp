@@ -1,5 +1,7 @@
 export const SKILL_LIST_DESC = [
-  "【必检资源】列出所有可用的云端技能索引（slug 和简短描述）。",
+  "【必检资源】列出所有可用的扩展技能索引（slug、id 和简短描述）。",
+  "",
+  "这些是通过 MCP 提供的扩展技能，应与系统内置技能一起使用。",
   "",
   "每次回复前，你必须扫描此列表。如果有任何技能与用户请求相关",
   "（哪怕只是部分相关），你必须先调用 skill_view 加载该技能的",
@@ -7,7 +9,7 @@ export const SKILL_LIST_DESC = [
   "",
   "宁可加载一个不需要的技能，也不要遗漏可能需要的技能。",
   "技能包含专业的工作流、API 用法和已知陷阱，能显著优于通用方案。",
-  "列表中的 slug 是技能的唯一标识符，调用 skill_view 时请使用 slug。",
+  "列表格式：- slug [id:uuid]: 描述。可用 skill_view(slug) 或 skill_view(id) 调用。",
 ].join("\n");
 
 export const SKILL_VIEW_DESC = [
@@ -19,7 +21,8 @@ export const SKILL_VIEW_DESC = [
   "",
   "加载后如果指令中引用了其他文件（references/、templates/、scripts/），",
   "再使用 skill_file 批量加载。仅在 skill_list 中发现相关技能后才调用此工具。",
-  "使用 skill_view(skill_slug) 加载技能，其中 skill_slug 为技能列表中的唯一标识符。",
+  "支持用 skill_view(skill_slug) 或 skill_view(skill_id) 加载技能，",
+  "其中 skill_slug 为列表中的 slug，skill_id 为列表中的 [id:xxx]。",
 ].join("\n");
 
 export const SKILL_FILE_DESC = [
@@ -30,6 +33,6 @@ export const SKILL_FILE_DESC = [
   "不要主动遍历或猜测技能包中的文件——仅加载主文件指令中提到的文件。",
   "",
   "支持一次传入多个文件路径以批量并发读取，减少加载轮次。",
-  "使用 skill_file(skill_slug, file_paths) 加载辅助文件。",
+  "支持用 skill_file(skill_slug, file_paths) 或 skill_file(skill_id, file_paths) 加载辅助文件。",
   "文本文件返回内容，图片/视频以 base64 编码返回。",
 ].join("\n");

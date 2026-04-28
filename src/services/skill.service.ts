@@ -35,7 +35,7 @@ export class SkillService {
       const desc = (s.description ?? "").length > 80
         ? s.description.slice(0, 77) + "..."
         : s.description;
-      return `    - ${s.slug}: ${desc}`;
+      return `    - ${s.slug} [id:${s.id}]: ${desc}`;
     });
 
     // Access log
@@ -51,25 +51,35 @@ export class SkillService {
     return lines.join("\n");
   }
 
+  private async resolveSkill(identifier: string): Promise<SkillMeta | null> {
+    // UUID format: search by id first, fallback to slug
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    if (isUuid) {
+      const byId = await this.skillProvider.getSkillMetaById(identifier);
+      if (byId) return byId;
+    }
+    return this.skillProvider.getSkillMeta(identifier);
+  }
+
   /** View skill entry (SKILL.md) with activation guidance injection */
-  async viewSkillEntry(slug: string): Promise<string> {
+  async viewSkillEntry(identifier: string): Promise<string> {
     const start = Date.now();
 
-    const skill = await this.skillProvider.getSkillMeta(slug);
-    if (!skill) throw new SkillNotFoundError(slug);
+    const skill = await this.resolveSkill(identifier);
+    if (!skill) throw new SkillNotFoundError(identifier);
 
     const allowed = await this.permissionFilter.check(skill.id);
-    if (!allowed) throw new PermissionDeniedError(slug);
+    if (!allowed) throw new PermissionDeniedError(identifier);
 
-    const content = await this.skillProvider.getSkillEntry(slug);
+    const content = await this.skillProvider.getSkillEntry(skill.slug);
 
     // Security scan
     const scanResult = scanForInjection(content);
     if (!scanResult.safe) {
-      this.logger.warn({ slug, issues: scanResult.issues }, "Skill content contains suspicious patterns");
+      this.logger.warn({ identifier, issues: scanResult.issues }, "Skill content contains suspicious patterns");
     }
 
-    const fileTree = await this.skillProvider.getSkillFileTree(slug);
+    const fileTree = await this.skillProvider.getSkillFileTree(skill.slug);
     const filePaths = fileTree
       .filter(f => f.path !== "SKILL.md" && f.path !== "manifest.json")
       .map(f => f.path)
@@ -79,39 +89,39 @@ export class SkillService {
     if (this.accessLog) {
       this.accessLog.log({
         skillId: skill.id,
-        skillSlug: slug,
+        skillSlug: skill.slug,
         action: "view_entry",
         latencyMs: Date.now() - start,
       }).catch(() => {});
     }
 
     return [
-      `[SYSTEM: The user is using the "${slug}" skill. Below are the full instructions. Follow them strictly.]`,
+      `[SYSTEM: The user is using the "${skill.slug}" skill. Below are the full instructions. Follow them strictly.]`,
       "",
       content,
       "",
       filePaths ? `[Available files: ${filePaths}]` : "",
-      filePaths ? `[Tip: Use skill_file("${slug}", ["path1", "path2"]) to batch-load files]` : "",
+      filePaths ? `[Tip: Use skill_file("${skill.slug}", ["path1", "path2"]) to batch-load files]` : "",
     ].filter(Boolean).join("\n");
   }
 
   /** Read skill files (batch) */
-  async readSkillFiles(slug: string, filePaths: string[]): Promise<SkillFileContent[]> {
+  async readSkillFiles(identifier: string, filePaths: string[]): Promise<SkillFileContent[]> {
     const start = Date.now();
 
-    const skill = await this.skillProvider.getSkillMeta(slug);
-    if (!skill) throw new SkillNotFoundError(slug);
+    const skill = await this.resolveSkill(identifier);
+    if (!skill) throw new SkillNotFoundError(identifier);
 
     const allowed = await this.permissionFilter.check(skill.id);
-    if (!allowed) throw new PermissionDeniedError(slug);
+    if (!allowed) throw new PermissionDeniedError(identifier);
 
-    const results = await this.skillProvider.getSkillFiles(slug, filePaths);
+    const results = await this.skillProvider.getSkillFiles(skill.slug, filePaths);
 
     // Access log
     if (this.accessLog) {
       this.accessLog.log({
         skillId: skill.id,
-        skillSlug: slug,
+        skillSlug: skill.slug,
         action: "read_files",
         filePaths,
         latencyMs: Date.now() - start,
@@ -122,12 +132,13 @@ export class SkillService {
   }
 
   /** Check if a skill exists */
-  async skillExists(slug: string): Promise<boolean> {
-    return this.skillProvider.skillExists(slug);
+  async skillExists(identifier: string): Promise<boolean> {
+    const skill = await this.resolveSkill(identifier);
+    return !!skill;
   }
 
   /** Get skill metadata */
-  async getSkillMeta(slug: string): Promise<SkillMeta | null> {
-    return this.skillProvider.getSkillMeta(slug);
+  async getSkillMeta(identifier: string): Promise<SkillMeta | null> {
+    return this.resolveSkill(identifier);
   }
 }

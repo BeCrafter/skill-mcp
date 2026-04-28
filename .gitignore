@@ -143,3 +143,8 @@ vite.config.ts.timestamp-*
 .vite/
 data/
 serve
+import
+info
+list
+update
+help

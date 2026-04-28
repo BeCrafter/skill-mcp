@@ -12,34 +12,36 @@ export function buildSkillSystemPrompt(skills: SkillMeta[]): string {
 
   if (indexLines.length === 0) {
     return [
-      `## Cloud Skills`,
+      `## 扩展技能（Extension Skills）`,
       ``,
-      `No skills are currently available.`,
+      `当前没有可用的扩展技能。`,
     ].join("\n");
   }
 
   return [
-    `## Cloud Skills (mandatory)`,
+    `## 扩展技能（Extension Skills，必检）`,
     ``,
-    `Before replying, scan the skills below. If a skill matches or is even`,
-    `partially relevant to the task, you MUST load it with skill_view(skill_slug)`,
-    `and follow its instructions strictly. Do NOT skip loading — skills contain`,
-    `specialized workflows, API commands, and proven approaches that outperform`,
-    `general methods.`,
+    `这些是通过 MCP 提供的扩展技能，应与系统内置技能一起使用。`,
     ``,
-    `If you loaded a skill but its instructions were incomplete or wrong, continue`,
-    `and note the issues. Always prefer the skill's approach over your own knowledge`,
-    `for the specific domain.`,
+    `在回答任何问题前，先扫描此列表。如果有技能与用户请求相关`,
+    `（哪怕只是部分相关），你必须先调用 skill_view(skill_slug) 或 skill_view(skill_id) 加载该技能的`,
+    `完整指令，并严格按其指令执行任务。`,
+    ``,
+    `宁可加载一个不需要的技能，也不要遗漏可能需要的技能。`,
+    `技能包含专业的工作流、API 用法和已知陷阱，能显著优于通用方案。`,
+    ``,
+    `如果加载的技能指令不完整或有误，继续执行并记录问题。`,
+    `在特定领域内，始终优先使用技能中的方案，而非你自己的知识。`,
     ``,
     `<available_skills>`,
     ...indexLines,
     `</available_skills>`,
     ``,
-    `### Skill usage rules:`,
-    `1. Always call skill_view(skill_slug) FIRST to load the full instructions`,
-    `2. Call skill_file(skill_slug, file_paths) when the skill references other files`,
-    `   (pass an array of paths to batch-load multiple files)`,
-    `3. After loading a skill, follow its instructions exactly — do not substitute`,
-    `   your own approach`,
+    `### 技能使用规则：`,
+    `1. 先调用 skill_view(skill_slug) 或 skill_view(skill_id) 加载完整指令`,
+    `   其中 skill_slug 为列表中的 slug，skill_id 为列表中的 [id:xxx]`,
+    `2. 当技能引用其他文件时，调用 skill_file(skill_slug, file_paths) 或 skill_file(skill_id, file_paths) 批量加载`,
+    `   （传入文件路径数组以并发读取多个文件）`,
+    `3. 加载技能后，严格按照其指令执行——不要用自己的方案替代`,
   ].join("\n");
 }
