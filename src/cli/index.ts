@@ -22,13 +22,13 @@ export async function createCli(): Promise<Command> {
     .option("--transport <type>", "Transport type: stdio|sse|http", config.transport.type)
     .option("--port <number>", "HTTP port (for sse/http)", String(config.transport.port))
     .option("--host <host>", "HTTP host", config.transport.host)
-    .option("--mode <mode>", "Deployment mode: standalone|gateway", config.deployment.mode)
+    .option("--mode <mode>", "Deployment mode: standalone|gateway|cloud-service-only", config.deployment.mode)
     .action(async (opts) => {
       await serveAction({
         transport: opts.transport as "stdio" | "sse" | "http",
         port: parseInt(opts.port, 10),
         host: opts.host,
-        mode: opts.mode as "standalone" | "gateway",
+        mode: opts.mode as "standalone" | "gateway" | "cloud-service-only",
       });
     });
 

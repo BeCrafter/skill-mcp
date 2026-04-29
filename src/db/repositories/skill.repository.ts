@@ -84,7 +84,7 @@ export class SkillRepository {
       status: input.status ?? "draft",
       visibility: input.visibility ?? "public",
       entryFile: input.entryFile ?? "SKILL.md",
-      storagePath: input.storagePath ?? `skills/${input.slug}/`,
+      storagePath: input.storagePath ?? `${input.slug}/`,
       contentHash: input.contentHash ?? null,
       conditions: input.conditions ? toJson(input.conditions) : null,
       assignedGroups: toJson(input.assignedGroups ?? []),

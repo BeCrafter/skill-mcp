@@ -3,13 +3,25 @@ import type { SkillMeta, SkillFileContent, FileInfo } from "../types/index.js";
 import type { ICacheProvider } from "../cache/provider.interface.js";
 import { validateFilePath } from "../utils/security.js";
 import { SkillNotFoundError } from "../utils/errors.js";
+import { getLogger } from "../utils/logger.js";
+
+const logger = getLogger();
 
 interface ApiResponse<T> {
   data?: T;
   success?: boolean;
 }
 
+interface FetchOptions {
+  timeout?: number;
+  retries?: number;
+}
+
 export class RemoteSkillProvider implements ISkillProvider {
+  private readonly timeout: number = 10000;
+  private readonly maxRetries: number = 3;
+  private readonly retryDelay: number = 500;
+
   constructor(
     private cloudServiceUrl: string,
     private authToken: string,
@@ -23,14 +35,50 @@ export class RemoteSkillProvider implements ISkillProvider {
     };
   }
 
+  private async fetchWithRetry(url: string, options: RequestInit & FetchOptions): Promise<Response> {
+    const { timeout = this.timeout, retries = this.maxRetries, ...fetchOptions } = options;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        const response = await fetch(url, {
+          ...fetchOptions,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        return response;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const isRetryable = lastError.name === "AbortError" || error instanceof TypeError;
+
+        if (attempt < retries && isRetryable) {
+          logger.warn(
+            { url, attempt, error: lastError.message, retryIn: this.retryDelay },
+            "Remote provider request failed, retrying",
+          );
+          await new Promise(resolve => setTimeout(resolve, this.retryDelay * (attempt + 1)));
+          continue;
+        }
+
+        throw lastError;
+      }
+    }
+
+    throw lastError || new Error("Unknown error");
+  }
+
   async listSkills(options?: { category?: string; tags?: string[] }): Promise<SkillMeta[]> {
     const params = new URLSearchParams();
     if (options?.category) params.set("category", options.category);
     if (options?.tags?.length) params.set("tags", options.tags.join(","));
 
     const queryStr = params.toString();
-    const url = `${this.cloudServiceUrl}/api/skills${queryStr ? `?${queryStr}` : ""}`;
-    const resp = await fetch(url, {
+    const url = `${this.cloudServiceUrl}/api/gateway/skills${queryStr ? `?${queryStr}` : ""}`;
+    const resp = await this.fetchWithRetry(url, {
       headers: this.getHeaders(),
     });
     if (!resp.ok) throw new Error(`Failed to list skills: ${resp.statusText}`);
@@ -39,7 +87,8 @@ export class RemoteSkillProvider implements ISkillProvider {
   }
 
   async getSkillMeta(slug: string): Promise<SkillMeta | null> {
-    const resp = await fetch(`${this.cloudServiceUrl}/api/skills/${slug}`, {
+    const url = `${this.cloudServiceUrl}/api/gateway/skills/${slug}`;
+    const resp = await this.fetchWithRetry(url, {
       headers: this.getHeaders(),
     });
     if (resp.status === 404) return null;
@@ -49,7 +98,8 @@ export class RemoteSkillProvider implements ISkillProvider {
   }
 
   async getSkillMetaById(id: string): Promise<SkillMeta | null> {
-    const resp = await fetch(`${this.cloudServiceUrl}/api/skills/by-id/${id}`, {
+    const url = `${this.cloudServiceUrl}/api/gateway/skills/${id}`;
+    const resp = await this.fetchWithRetry(url, {
       headers: this.getHeaders(),
     });
     if (resp.status === 404) return null;
@@ -63,7 +113,8 @@ export class RemoteSkillProvider implements ISkillProvider {
     const cached = await this.cache.get<string>(cacheKey);
     if (cached) return cached;
 
-    const resp = await fetch(`${this.cloudServiceUrl}/api/skills/${slug}/entry`, {
+    const url = `${this.cloudServiceUrl}/api/gateway/skills/${slug}/entry`;
+    const resp = await this.fetchWithRetry(url, {
       headers: this.getHeaders(),
     });
     if (!resp.ok) {
@@ -83,7 +134,8 @@ export class RemoteSkillProvider implements ISkillProvider {
     const cached = await this.cache.get<SkillFileContent[]>(cacheKey);
     if (cached) return cached;
 
-    const resp = await fetch(`${this.cloudServiceUrl}/api/skills/${slug}/files`, {
+    const url = `${this.cloudServiceUrl}/api/gateway/skills/${slug}/files`;
+    const resp = await this.fetchWithRetry(url, {
       method: "POST",
       headers: this.getHeaders(),
       body: JSON.stringify({ paths: safePaths }),
@@ -105,7 +157,8 @@ export class RemoteSkillProvider implements ISkillProvider {
     const cached = await this.cache.get<FileInfo[]>(cacheKey);
     if (cached) return cached;
 
-    const resp = await fetch(`${this.cloudServiceUrl}/api/skills/${slug}/file-tree`, {
+    const url = `${this.cloudServiceUrl}/api/gateway/skills/${slug}/file-tree`;
+    const resp = await this.fetchWithRetry(url, {
       headers: this.getHeaders(),
     });
     if (!resp.ok) throw new Error(`Failed to get file tree: ${resp.statusText}`);

@@ -23,11 +23,22 @@ export interface ServeOptions {
   transport: "stdio" | "sse" | "http";
   port: number;
   host: string;
-  mode: "standalone" | "gateway";
+  mode: "standalone" | "gateway" | "cloud-service-only";
 }
 
 export async function serveAction(options: ServeOptions): Promise<void> {
   const config = getConfig();
+
+  // Validate deployment mode with transport
+  if (options.mode === "cloud-service-only" && options.transport === "stdio") {
+    logger.error("cloud-service-only mode cannot use stdio transport (MCP not available). Use --transport sse or --transport http");
+    process.exit(1);
+  }
+
+  logger.info(
+    { deploymentMode: options.mode, transport: options.transport, port: options.port, host: options.host },
+    `Starting MCP Server in ${options.mode} mode`,
+  );
 
   // Run migrations
   runMigrations(config.database.path);

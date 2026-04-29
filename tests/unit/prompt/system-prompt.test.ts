@@ -28,7 +28,7 @@ describe("buildSkillSystemPrompt", () => {
     ];
 
     const prompt = buildSkillSystemPrompt(skills);
-    expect(prompt).toContain("Cloud Skills (mandatory)");
+    expect(prompt).toContain("扩展技能（Extension Skills，必检）");
     expect(prompt).toContain("prompt-writer");
     expect(prompt).toContain("Professional prompt writing");
     expect(prompt).toContain("<available_skills>");
@@ -65,6 +65,6 @@ describe("buildSkillSystemPrompt", () => {
 
   it("should handle empty skills list", () => {
     const prompt = buildSkillSystemPrompt([]);
-    expect(prompt).toContain("No skills are currently available");
+    expect(prompt).toContain("当前没有可用的扩展技能");
   });
 });

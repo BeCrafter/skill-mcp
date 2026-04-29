@@ -16,6 +16,30 @@ A Model Context Protocol (MCP) server that provides a managed skill file system 
 - **CLI Management** — Full command-line interface for importing, listing, searching, and managing skills
 - **Flexible Storage Backends** — Local filesystem or Aliyun OSS for skill file storage
 
+## 📚 Documentation Navigation
+
+### For Different Roles
+
+**👨‍💻 New Developers**
+1. Start with [Quick Start](./docs/QUICK_START.md) (5 minutes)
+2. Read [Contributing Guide](./CONTRIBUTING.md) (development process)
+3. Check [Claude Code Guide](./CLAUDE.md) (IDE setup)
+
+**🚀 DevOps / Deployment**
+- [Production Deployment](./docs/PRODUCTION_DEPLOYMENT.md) — Production setup
+- [Scenarios](./docs/SCENARIOS/) — Different deployment modes (A/B/C)
+
+**🏗️ Architects / Maintainers**
+- [Architecture Overview](./docs/ARCHITECTURE.md) — System design
+- [Organization Rules](./docs/ORGANIZATION.md) — Code structure
+- [API Reference](./docs/API_REFERENCE.md) — MCP tools & REST APIs
+
+**🧪 QA / Testing**
+- [Testing Guide](./docs/TESTING_GUIDE.md) — How to run tests
+
+**📖 Additional Resources**
+- [Code Organization Analysis](./docs.local/CODE_ORGANIZATION_ANALYSIS.md) — Codebase structure analysis
+
 ## Prerequisites
 
 - Node.js >= 22.0.0
@@ -27,19 +51,36 @@ npm install
 npm run build
 ```
 
+## 📋 Choose Your Deployment Scenario
+
+This project supports **three flexible deployment modes**:
+
+| Scenario | Transport | Storage | Use Case |
+|----------|-----------|---------|----------|
+| **A** - Local | stdio | Local | Development, single user |
+| **B** - Mixed | stdio | Remote | Local MCP + shared storage |
+| **C** - Distributed | HTTP | Local/Remote | Production, multi-client |
+
+👉 **[Quick Start Guide →](./docs/QUICK_START.md)**
+
+- **Scenario A** - [Local Development](./docs/SCENARIOS/SCENARIO_A.md)
+- **Scenario B** - [Hybrid Deployment](./docs/SCENARIOS/SCENARIO_B.md)
+- **Scenario C** - [Distributed Deployment](./docs/SCENARIOS/SCENARIO_C.md)
+- **Full Architecture** - [Complete Reference](./docs/ARCHITECTURE.md)
+
 ## Quick Start
 
 ### 1. Start the MCP Server
 
 ```bash
-# stdio transport (default, for MCP clients)
-npm run serve
+# Scenario A: Local stdio (recommended for development)
+npm start
 
-# SSE transport
-npm run serve -- --transport sse --port 3000
+# Scenario B: Remote HTTP storage (coming soon)
+npm start -- --mode gateway --cloud-url http://storage:3000
 
-# Streamable HTTP transport
-npm run serve -- --transport http --port 3000
+# Scenario C: HTTP server (production)
+TRANSPORT_TYPE=http npm start
 ```
 
 ### 2. Import a Skill

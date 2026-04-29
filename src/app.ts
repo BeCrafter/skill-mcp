@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { URL as URLParser } from "node:url";
 import { createMcpServer } from "./mcp/server.js";
 import { getLogger } from "./utils/logger.js";
+import { getConfig } from "./config/index.js";
+import { createApiKeyAuthMiddleware } from "./middleware/apikey-auth.js";
 import type { SkillService } from "./services/skill.service.js";
 import type { ISkillProvider } from "./provider/interface.js";
 import type { SkillRepository } from "./db/repositories/skill.repository.js";
@@ -48,8 +50,27 @@ function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(body);
 }
 
+function getSafeHost(headerHost: string | undefined): string {
+  // Use X-Forwarded-Host if behind proxy, otherwise use Host header
+  const host = headerHost ?? "localhost";
+  // Validate host format to prevent header injection
+  if (!/^[a-zA-Z0-9:.-]+$/.test(host)) {
+    return "localhost";
+  }
+  return host;
+}
+
+function isValidSlug(slug: string): boolean {
+  // Allow alphanumeric, hyphens, underscores (skill slugs)
+  // Reject anything with path traversal patterns
+  if (!slug || slug.length > 255) return false;
+  if (slug.includes("/") || slug.includes("\\") || slug.includes("..") || slug.includes("~")) return false;
+  return /^[a-zA-Z0-9_-]+$/.test(slug);
+}
+
 function parsePagination(url: string, headers: Record<string, string | undefined>): { offset: number; limit: number } {
-  const urlObj = new URLParser(url, `http://${headers.host ?? "localhost"}`);
+  const safeHost = getSafeHost(headers.host);
+  const urlObj = new URLParser(url, `http://${safeHost}`);
   const offset = Math.max(0, parseInt(urlObj.searchParams.get("offset") ?? "0", 10));
   const limit = Math.min(100, Math.max(1, parseInt(urlObj.searchParams.get("limit") ?? "50", 10)));
   return { offset, limit };
@@ -60,13 +81,17 @@ export async function createApp(
   transportConfig: TransportConfig,
 ): Promise<Server> {
   const httpServer = createServer();
+  const appConfig = getConfig();
 
   // =========================================================
   // MCP Transport setup
   // =========================================================
   let mcpHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | null = null;
 
-  if (transportConfig.type === "http") {
+  const isCloudServiceOnlyMode = appConfig.deployment.mode === "cloud-service-only";
+  if (isCloudServiceOnlyMode) {
+    logger.info("Cloud Service only mode: MCP transport disabled");
+  } else if (transportConfig.type === "http") {
     const mcpServer = await createMcpServer(
       deps.skillService,
       deps.skillProvider,
@@ -84,9 +109,7 @@ export async function createApp(
     };
 
     logger.info("Streamable HTTP transport configured at /mcp");
-  }
-
-  if (transportConfig.type === "sse") {
+  } else if (transportConfig.type === "sse") {
     const { SSEServerTransport } = await import("@modelcontextprotocol/sdk/server/sse.js");
     const sseTransports = new Map<string, InstanceType<typeof SSEServerTransport>>();
 
@@ -141,18 +164,50 @@ export async function createApp(
   // =========================================================
   // Request router
   // =========================================================
+  const apiKeyAuth = createApiKeyAuthMiddleware(appConfig.apiKey ?? { enabled: false, keys: [] });
+
   httpServer.on("request", async (req, res) => {
     try {
       const url = req.url?.split("?")[0] ?? "";
 
       // MCP routes → SDK transport (raw streams, no body consumption)
-      if (mcpHandler && (url === "/mcp" || url === "/mcp/sse" || url === "/mcp/messages")) {
-        await mcpHandler(req, res);
+      if (url === "/mcp" || url === "/mcp/sse" || url === "/mcp/messages") {
+        if (mcpHandler) {
+          await mcpHandler(req, res);
+          return;
+        } else if (isCloudServiceOnlyMode) {
+          json(res, 403, { error: "MCP not available in cloud-service-only mode" });
+          return;
+        }
+      }
+
+      // If MCP-only mode, reject all non-MCP routes
+      if (appConfig.transport.mcpOnlyMode) {
+        json(res, 404, { error: "Not found (MCP-only mode)" });
         return;
       }
 
-      // Admin API routes
-      await handleAdminRoute(req, res, deps);
+      // Gateway API routes (require authentication if enabled)
+      if (url.startsWith("/api/gateway/")) {
+        const authed = await apiKeyAuth(req, res);
+        if (!authed) return;
+        await handleGatewayRoute(req, res, deps);
+        return;
+      }
+
+      // Admin API routes (internal use, no auth required)
+      if (url.startsWith("/api/admin/")) {
+        await handleAdminRoute(req, res, deps);
+        return;
+      }
+
+      // Legacy /api/health endpoint for backward compatibility
+      if (url === "/api/health") {
+        json(res, 200, { status: "ok", timestamp: new Date().toISOString() });
+        return;
+      }
+
+      json(res, 404, { error: "Not found" });
     } catch (err) {
       logger.error({ err, url: req.url }, "Request handler error");
       if (!res.headersSent) {
@@ -171,16 +226,11 @@ async function handleAdminRoute(
 ): Promise<void> {
   const { skillRepo, skillProvider, accessLogRepo, storage, cache, importer } = deps;
   const url = req.url?.split("?")[0] ?? "";
-  const urlObj = new URLParser(req.url ?? "/", `http://${req.headers.host}`);
-
-  // Health check
-  if (req.method === "GET" && url === "/api/health") {
-    json(res, 200, { status: "ok", timestamp: new Date().toISOString() });
-    return;
-  }
+  const safeHost = getSafeHost(req.headers.host);
+  const urlObj = new URLParser(req.url ?? "/", `http://${safeHost}`);
 
   // List skills (with pagination + attributes filtering)
-  if (req.method === "GET" && url === "/api/skills") {
+  if (req.method === "GET" && url === "/api/admin/skills") {
     const category = urlObj.searchParams.get("category") ?? undefined;
     const tags = urlObj.searchParams.get("tags")?.split(",").filter(Boolean);
     const { offset, limit } = parsePagination(req.url ?? "/", req.headers as Record<string, string | undefined>);
@@ -212,9 +262,13 @@ async function handleAdminRoute(
   }
 
   // Get skill by slug
-  const slugMatch = url.match(/^\/api\/skills\/([^/]+)$/);
+  const slugMatch = url.match(/^\/api\/admin\/skills\/([^/]+)$/);
   if (slugMatch) {
     const slug = decodeURIComponent(slugMatch[1]);
+    if (!isValidSlug(slug)) {
+      json(res, 400, { success: false, error: "Invalid skill slug" });
+      return;
+    }
 
     if (req.method === "GET") {
       const skill = await skillRepo.findBySlug(slug);
@@ -247,7 +301,13 @@ async function handleAdminRoute(
 
     if (req.method === "PUT") {
       const body = await readBody(req);
-      const data = JSON.parse(body.toString());
+      let data;
+      try {
+        data = JSON.parse(body.toString());
+      } catch (err) {
+        json(res, 400, { success: false, error: "Invalid JSON in request body" });
+        return;
+      }
       const skill = await skillRepo.findBySlug(slug);
       if (!skill) {
         json(res, 404, { success: false, error: "Skill not found" });
@@ -262,9 +322,13 @@ async function handleAdminRoute(
   }
 
   // Get skill entry file
-  const entryMatch = url.match(/^\/api\/skills\/([^/]+)\/entry$/);
+  const entryMatch = url.match(/^\/api\/admin\/skills\/([^/]+)\/entry$/);
   if (entryMatch && req.method === "GET") {
     const slug = decodeURIComponent(entryMatch[1]);
+    if (!isValidSlug(slug)) {
+      json(res, 400, { success: false, error: "Invalid skill slug" });
+      return;
+    }
     try {
       const content = await skillProvider.getSkillEntry(slug);
       res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
@@ -280,11 +344,22 @@ async function handleAdminRoute(
   }
 
   // Batch read skill files
-  const filesMatch = url.match(/^\/api\/skills\/([^/]+)\/files$/);
+  const filesMatch = url.match(/^\/api\/admin\/skills\/([^/]+)\/files$/);
   if (filesMatch && req.method === "POST") {
     const slug = decodeURIComponent(filesMatch[1]);
+    if (!isValidSlug(slug)) {
+      json(res, 400, { success: false, error: "Invalid skill slug" });
+      return;
+    }
     const body = await readBody(req);
-    const { paths } = JSON.parse(body.toString()) as { paths: string[] };
+    let data: { paths?: string[] };
+    try {
+      data = JSON.parse(body.toString());
+    } catch (err) {
+      json(res, 400, { success: false, error: "Invalid JSON in request body" });
+      return;
+    }
+    const { paths } = data;
     if (!Array.isArray(paths)) {
       json(res, 400, { success: false, error: "paths must be an array" });
       return;
@@ -303,9 +378,13 @@ async function handleAdminRoute(
   }
 
   // Get skill file tree
-  const fileTreeMatch = url.match(/^\/api\/skills\/([^/]+)\/file-tree$/);
+  const fileTreeMatch = url.match(/^\/api\/admin\/skills\/([^/]+)\/file-tree$/);
   if (fileTreeMatch && req.method === "GET") {
     const slug = decodeURIComponent(fileTreeMatch[1]);
+    if (!isValidSlug(slug)) {
+      json(res, 400, { success: false, error: "Invalid skill slug" });
+      return;
+    }
     try {
       const tree = await skillProvider.getSkillFileTree(slug);
       json(res, 200, { success: true, data: tree });
@@ -320,7 +399,7 @@ async function handleAdminRoute(
   }
 
   // Upload skill package
-  if (req.method === "POST" && url === "/api/skills") {
+  if (req.method === "POST" && url === "/api/admin/skills") {
     const contentType = req.headers["content-type"] ?? "";
     let result;
     try {
@@ -332,7 +411,13 @@ async function handleAdminRoute(
 
       // JSON body with source path for import
       const body = await readBody(req);
-      const data = JSON.parse(body.toString());
+      let data;
+      try {
+        data = JSON.parse(body.toString());
+      } catch (err) {
+        json(res, 400, { success: false, error: "Invalid JSON in request body" });
+        return;
+      }
       if (!data.source) {
         json(res, 400, { success: false, error: "source is required" });
         return;
@@ -358,7 +443,7 @@ async function handleAdminRoute(
   }
 
   // Search by name
-  const nameMatch = url.match(/^\/api\/skills\/name\/([^/]+)$/);
+  const nameMatch = url.match(/^\/api\/admin\/skills\/name\/([^/]+)$/);
   if (nameMatch && req.method === "GET") {
     const name = decodeURIComponent(nameMatch[1]);
     const skills = await skillRepo.findByName(name);
@@ -367,7 +452,7 @@ async function handleAdminRoute(
   }
 
   // Access logs
-  if (req.method === "GET" && url === "/api/logs") {
+  if (req.method === "GET" && url === "/api/admin/logs") {
     const skillSlug = urlObj.searchParams.get("skill_slug") ?? "";
     const limit = Math.min(200, Math.max(1, parseInt(urlObj.searchParams.get("limit") ?? "50", 10)));
     if (!skillSlug) {
@@ -380,9 +465,159 @@ async function handleAdminRoute(
   }
 
   // Stats
-  if (req.method === "GET" && url === "/api/stats") {
+  if (req.method === "GET" && url === "/api/admin/stats") {
     const total = await skillRepo.count();
     json(res, 200, { success: true, data: { totalSkills: total } });
+    return;
+  }
+
+  // 404 - should not reach here since routing is checked in createApp
+  json(res, 404, { error: "Not found" });
+}
+
+async function handleGatewayRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: AppDependencies,
+): Promise<void> {
+  const { skillRepo, skillProvider, storage, cache } = deps;
+  const url = req.url?.split("?")[0] ?? "";
+  const safeHost = getSafeHost(req.headers.host);
+  const urlObj = new URLParser(req.url ?? "/", `http://${safeHost}`);
+
+  logger.debug({ url, method: req.method }, "Gateway API route");
+
+  // Health check
+  if (req.method === "GET" && url === "/api/gateway/health") {
+    json(res, 200, { status: "ok", timestamp: new Date().toISOString() });
+    return;
+  }
+
+  // List skills (with pagination + attributes filtering)
+  if (req.method === "GET" && url === "/api/gateway/skills") {
+    const category = urlObj.searchParams.get("category") ?? undefined;
+    const tags = urlObj.searchParams.get("tags")?.split(",").filter(Boolean);
+    const { offset, limit } = parsePagination(req.url ?? "/", req.headers as Record<string, string | undefined>);
+
+    const attributes: Record<string, string> = {};
+    for (const [key, value] of urlObj.searchParams) {
+      if (key.startsWith("attributes.")) {
+        attributes[key.slice("attributes.".length)] = value;
+      }
+    }
+
+    const skills = await skillRepo.findAll({
+      category,
+      tags,
+      attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
+    });
+
+    const paginated = skills.slice(offset, offset + limit);
+    json(res, 200, {
+      success: true,
+      data: paginated,
+      total: skills.length,
+      offset,
+      limit,
+    });
+    return;
+  }
+
+  // Get skill by slug or ID
+  const slugMatch = url.match(/^\/api\/gateway\/skills\/([^/]+)$/);
+  if (slugMatch && req.method === "GET") {
+    const identifier = decodeURIComponent(slugMatch[1]);
+    // Validate slug format to prevent injection
+    if (!isValidSlug(identifier) && !/^[0-9a-f-]{36}$/i.test(identifier)) {
+      json(res, 400, { success: false, error: "Invalid skill identifier" });
+      return;
+    }
+    let skill = await skillRepo.findBySlug(identifier);
+    if (!skill) {
+      skill = await skillRepo.findById(identifier);
+    }
+    if (!skill) {
+      json(res, 404, { success: false, error: "Skill not found" });
+      return;
+    }
+    json(res, 200, { success: true, data: skill });
+    return;
+  }
+
+  // Get skill entry file
+  const entryMatch = url.match(/^\/api\/gateway\/skills\/([^/]+)\/entry$/);
+  if (entryMatch && req.method === "GET") {
+    const slug = decodeURIComponent(entryMatch[1]);
+    if (!isValidSlug(slug)) {
+      json(res, 400, { success: false, error: "Invalid skill slug" });
+      return;
+    }
+    try {
+      const content = await skillProvider.getSkillEntry(slug);
+      res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
+      res.end(content);
+    } catch (error) {
+      if ((error as Error).constructor.name === "SkillNotFoundError") {
+        json(res, 404, { success: false, error: "Skill not found" });
+      } else {
+        json(res, 500, { success: false, error: "Failed to read entry file" });
+      }
+    }
+    return;
+  }
+
+  // Batch read skill files
+  const filesMatch = url.match(/^\/api\/gateway\/skills\/([^/]+)\/files$/);
+  if (filesMatch && req.method === "POST") {
+    const slug = decodeURIComponent(filesMatch[1]);
+    if (!isValidSlug(slug)) {
+      json(res, 400, { success: false, error: "Invalid skill slug" });
+      return;
+    }
+    const body = await readBody(req);
+    let data: { paths?: string[] };
+    try {
+      data = JSON.parse(body.toString());
+    } catch (err) {
+      json(res, 400, { success: false, error: "Invalid JSON in request body" });
+      return;
+    }
+    const { paths } = data;
+    if (!Array.isArray(paths)) {
+      json(res, 400, { success: false, error: "paths must be an array" });
+      return;
+    }
+    try {
+      const files = await skillProvider.getSkillFiles(slug, paths);
+      json(res, 200, { success: true, data: files });
+    } catch (error) {
+      if ((error as Error).constructor.name === "SkillNotFoundError") {
+        json(res, 404, { success: false, error: "Skill not found" });
+      } else {
+        json(res, 500, { success: false, error: "Failed to read files" });
+      }
+    }
+    return;
+  }
+
+  // Get skill file tree
+  const fileTreeMatch = url.match(/^\/api\/gateway\/skills\/([^/]+)\/file-tree$/);
+  if (fileTreeMatch && req.method === "GET") {
+    const slug = decodeURIComponent(fileTreeMatch[1]);
+    if (!isValidSlug(slug)) {
+      json(res, 400, { success: false, error: "Invalid skill slug" });
+      return;
+    }
+    try {
+      const tree = await skillProvider.getSkillFileTree(slug);
+      json(res, 200, { success: true, data: tree });
+    } catch (error) {
+      if ((error as Error).constructor.name === "SkillNotFoundError") {
+        json(res, 404, { success: false, error: "Skill not found" });
+      } else {
+        json(res, 500, { success: false, error: "Failed to get file tree" });
+      }
+    }
     return;
   }
 

@@ -39,7 +39,7 @@ export const configSchema = z.object({
   }),
 
   deployment: z.object({
-    mode: z.enum(["standalone", "gateway"]).default("standalone"),
+    mode: z.enum(["standalone", "gateway", "cloud-service-only"]).default("standalone"),
   }),
 
   gateway: gatewayConfigSchema,
@@ -56,10 +56,12 @@ export const configSchema = z.object({
     type: z.enum(["stdio", "sse", "http"]).default("stdio"),
     port: z.number().default(3000),
     host: z.string().default("0.0.0.0"),
+    mcpOnlyMode: z.boolean().default(false),
   }).default({
     type: "stdio",
     port: 3000,
     host: "0.0.0.0",
+    mcpOnlyMode: false,
   }),
 
   security: z.object({
@@ -67,6 +69,11 @@ export const configSchema = z.object({
   }).default({
     enableInjectionScan: true,
   }),
+
+  apiKey: z.object({
+    enabled: z.boolean().default(false),
+    keys: z.array(z.string()).default([]),
+  }).optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

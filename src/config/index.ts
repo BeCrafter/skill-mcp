@@ -39,9 +39,17 @@ function loadConfig(): AppConfig {
       type: (process.env.TRANSPORT_TYPE as "stdio" | "sse" | "http") ?? "stdio",
       port: parseInt(process.env.TRANSPORT_PORT ?? "3000", 10),
       host: process.env.TRANSPORT_HOST ?? "0.0.0.0",
+      mcpOnlyMode: process.env.MCP_ONLY_MODE === "true",
     },
     security: {
       enableInjectionScan: process.env.SECURITY_INJECTION_SCAN !== "false",
+    },
+    apiKey: process.env.ENABLE_API_KEY_AUTH === "true" ? {
+      enabled: true,
+      keys: (process.env.API_KEYS ?? "").split(",").filter(Boolean),
+    } : {
+      enabled: false,
+      keys: [],
     },
   };
 

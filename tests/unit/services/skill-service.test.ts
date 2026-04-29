@@ -83,7 +83,7 @@ describe("SkillService", () => {
     expect(index).toContain("test-skill");
     expect(index).toContain("A test skill for testing");
     expect(index).not.toContain("draft-skill");
-    expect(index).toContain("    - test-skill:"); // indented flat list
+    expect(index).toContain("    - test-skill [id:"); // indented flat list with id
   });
 
   it("should view skill entry with activation guidance", async () => {

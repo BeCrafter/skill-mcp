@@ -134,7 +134,7 @@ export class SkillImporter {
       action = "updated";
     } else {
       slug = slugify(manifest.name);
-      storagePath = `skills/${slug}/`;
+      storagePath = `${slug}/`;
     }
 
     for (const file of skillFiles) {
