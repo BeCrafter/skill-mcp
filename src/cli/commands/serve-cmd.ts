@@ -19,7 +19,9 @@ import { UserRepository } from "../../db/repositories/user.repository.js";
 import { RoleRepository } from "../../db/repositories/role.repository.js";
 import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
 import { SkillFeedbackRepository } from "../../db/repositories/skill-feedback.repository.js";
+import { SkillVersionRepository } from "../../db/repositories/skill-version.repository.js";
 import { SkillImporter } from "../../import/importer.js";
+import { DomainEventBus } from "../../events/event-bus.js";
 import { getLogger } from "../../utils/logger.js";
 
 const logger = getLogger();
@@ -57,6 +59,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   const roleRepo = new RoleRepository(db);
   const userRoleRepo = new UserRoleRepository(db);
   const feedbackRepo = new SkillFeedbackRepository(db);
+  const versionRepo = new SkillVersionRepository(db);
 
   // Initialize cache
   const cache = new CompositeCacheProvider({
@@ -87,11 +90,22 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // Initialize services
   const permissionFilter = new NoopPermissionFilter();
   const accessLogService = new AccessLogService(accessLogRepo, logger);
-  const skillService = new SkillService(skillProvider, cache, permissionFilter, logger, accessLogService, feedbackRepo);
+  const skillService = new SkillService(
+    skillProvider,
+    cache,
+    permissionFilter,
+    logger,
+    accessLogService,
+    feedbackRepo,
+    versionRepo,
+    skillRepo,
+    storage,
+  );
   const contextBuilder = createContextBuilder(userRepo, userRoleRepo);
 
-  // Initialize importer for admin routes
-  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger);
+  // Initialize event bus and importer
+  const eventBus = new DomainEventBus();
+  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo);
 
   // Start based on transport
   if (options.transport === "stdio") {
@@ -113,6 +127,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
         storage,
         cache,
         importer,
+        eventBus,
         userRepo,
         roleRepo,
         userRoleRepo,

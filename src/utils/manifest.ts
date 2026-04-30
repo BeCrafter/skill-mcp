@@ -1,41 +1,20 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { SkillManifest, SkillFileInput } from "../types/index.js";
+import { getLogger } from "./logger.js";
+import type { SkillFrontmatter, SkillFileInput } from "../types/index.js";
 
 /**
- * Parse manifest from a skill directory.
- * Prefers manifest.json, falls back to SKILL.md frontmatter.
+ * Parse skill metadata from SKILL.md frontmatter.
  */
-export function parseManifest(dirPath: string): SkillManifest {
-  const manifestPath = join(dirPath, "manifest.json");
-
-  if (existsSync(manifestPath)) {
-    try {
-      const content = readFileSync(manifestPath, "utf-8");
-      const manifest = JSON.parse(content) as SkillManifest;
-
-      if (!manifest.name || typeof manifest.name !== "string") {
-        throw new Error("manifest.name is required and must be a string");
-      }
-
-      return {
-        name: manifest.name,
-        version: manifest.version,
-        entry: manifest.entry ?? "SKILL.md",
-        files: manifest.files,
-      };
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        throw new Error(`Invalid JSON in manifest.json: ${error.message}`);
-      }
-      throw error;
-    }
+export function parseSkillMeta(dirPath: string): SkillFrontmatter {
+  if (existsSync(join(dirPath, "manifest.json"))) {
+    getLogger().warn("manifest.json is deprecated; metadata should be defined in SKILL.md frontmatter");
   }
 
   const skillMdPath = join(dirPath, "SKILL.md");
   if (!existsSync(skillMdPath)) {
-    throw new Error(`Neither manifest.json nor SKILL.md found in ${dirPath}`);
+    throw new Error(`SKILL.md not found in ${dirPath}`);
   }
 
   const skillContent = readFileSync(skillMdPath, "utf-8");
@@ -43,40 +22,47 @@ export function parseManifest(dirPath: string): SkillManifest {
 
   const name = frontmatter["name"];
   if (!name || typeof name !== "string") {
-    throw new Error("name is required in SKILL.md frontmatter or manifest.json");
+    throw new Error("name is required in SKILL.md frontmatter");
   }
 
   return {
     name: name as string,
     version: (frontmatter["version"] as string) ?? undefined,
-    entry: "SKILL.md",
-    files: undefined,
+    description: (frontmatter["description"] as string) ?? undefined,
+    entry: (frontmatter["entry"] as string) ?? "SKILL.md",
+    files: frontmatter["files"] as string[] | undefined,
+    tags: frontmatter["tags"] as string[] | undefined,
+    category: (frontmatter["category"] as string) ?? undefined,
   };
 }
 
+/** @deprecated Use parseSkillMeta instead */
+export const parseManifest = parseSkillMeta;
+
 /**
- * Validate manifest against actual files in directory
+ * Validate skill metadata against actual files in directory
  */
-export function validateManifest(manifest: SkillManifest, dirPath: string): void {
-  const entryPath = join(dirPath, manifest.entry ?? "SKILL.md");
+export function validateSkillMeta(meta: SkillFrontmatter, dirPath: string): void {
+  const entryPath = join(dirPath, meta.entry ?? "SKILL.md");
   if (!existsSync(entryPath)) {
-    throw new Error(`Entry file not found: ${manifest.entry ?? "SKILL.md"}`);
+    throw new Error(`Entry file not found: ${meta.entry ?? "SKILL.md"}`);
   }
 }
 
+/** @deprecated Use validateSkillMeta instead */
+export const validateManifest = validateSkillMeta;
+
 /**
- * Read all files from a skill directory
- * @param dirPath - Path to the skill directory
- * @param manifest - Parsed manifest (if available, respects the files list)
+ * Read all files from a skill directory.
+ * If meta.files is specified, only those files are read.
  */
-export function readSkillFiles(dirPath: string, manifest?: SkillManifest): SkillFileInput[] {
+export function readSkillFiles(dirPath: string, meta?: SkillFrontmatter): SkillFileInput[] {
   const files: SkillFileInput[] = [];
 
   function walk(currentDir: string, relativeDir: string): void {
     const entries = readdirSync(currentDir, { withFileTypes: true });
 
     for (const entry of entries) {
-      // Skip .git and node_modules
       if ([".git", "node_modules"].includes(entry.name)) continue;
 
       const fullPath = join(currentDir, entry.name);
@@ -91,9 +77,8 @@ export function readSkillFiles(dirPath: string, manifest?: SkillManifest): Skill
     }
   }
 
-  if (manifest?.files && manifest.files.length > 0) {
-    // Read only files listed in manifest
-    for (const filePath of manifest.files) {
+  if (meta?.files && meta.files.length > 0) {
+    for (const filePath of meta.files) {
       const fullPath = join(dirPath, filePath);
       if (existsSync(fullPath) && statSync(fullPath).isFile()) {
         const buffer = readFileSync(fullPath);

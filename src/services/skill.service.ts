@@ -4,14 +4,21 @@ import type { ICacheProvider } from "../cache/provider.interface.js";
 import type { IPermissionFilter } from "../permission/filter.interface.js";
 import type { AccessLogService } from "./access-log.service.js";
 import type { SkillFeedbackRepository } from "../db/repositories/skill-feedback.repository.js";
+import type { SkillVersionRepository } from "../db/repositories/skill-version.repository.js";
+import type { SkillRepository } from "../db/repositories/skill.repository.js";
+import type { IStorageProvider } from "../storage/provider.interface.js";
 import { TagPermissionFilter } from "../permission/tag-filter.js";
 import { scanForInjection } from "../utils/security.js";
 import { PermissionDeniedError, SkillNotFoundError } from "../utils/errors.js";
-import type { SkillMeta, SkillFileContent, RequestContext } from "../types/index.js";
+import { bumpVersion } from "../db/repositories/skill.repository.js";
+import type { SkillMeta, SkillFileContent, RequestContext, VersionBump } from "../types/index.js";
 
 export class SkillService {
   private accessLog: AccessLogService | null;
   private feedbackRepo: SkillFeedbackRepository | null;
+  private versionRepo: SkillVersionRepository | null;
+  private skillRepo: SkillRepository | null;
+  private storage: IStorageProvider | null;
 
   constructor(
     private skillProvider: ISkillProvider,
@@ -20,9 +27,15 @@ export class SkillService {
     private logger: Logger,
     accessLog?: AccessLogService,
     feedbackRepo?: SkillFeedbackRepository,
+    versionRepo?: SkillVersionRepository,
+    skillRepo?: SkillRepository,
+    storage?: IStorageProvider,
   ) {
     this.accessLog = accessLog ?? null;
     this.feedbackRepo = feedbackRepo ?? null;
+    this.versionRepo = versionRepo ?? null;
+    this.skillRepo = skillRepo ?? null;
+    this.storage = storage ?? null;
   }
 
   /** Build the skills index for MCP instructions (flat list, no grouping) */
@@ -114,7 +127,7 @@ export class SkillService {
 
     const fileTree = await this.skillProvider.getSkillFileTree(skill.slug);
     const filePaths = fileTree
-      .filter(f => f.path !== "SKILL.md" && f.path !== "manifest.json")
+      .filter(f => f.path !== "SKILL.md")
       .map(f => f.path)
       .join(", ");
 
@@ -222,5 +235,70 @@ export class SkillService {
   async getEffectivenessRates(days?: number): Promise<Map<string, { rate: number; count: number }>> {
     if (!this.feedbackRepo) return new Map();
     return this.feedbackRepo.getEffectivenessRates(days);
+  }
+
+  /** Get version history for a skill */
+  async getVersions(slug: string, limit?: number) {
+    if (!this.versionRepo || !this.skillRepo) throw new Error("Version repository not configured");
+    const skill = await this.skillProvider.getSkillMeta(slug);
+    if (!skill) throw new SkillNotFoundError(slug);
+    return this.versionRepo.findBySkillId(skill.id, limit);
+  }
+
+  /** Rollback skill to a specific version */
+  async rollbackToVersion(slug: string, targetVersion: string, bump: VersionBump = "patch"): Promise<void> {
+    if (!this.versionRepo || !this.skillRepo || !this.storage) {
+      throw new Error("Version repository, skill repository, or storage not configured");
+    }
+
+    const skill = await this.skillProvider.getSkillMeta(slug);
+    if (!skill) throw new SkillNotFoundError(slug);
+
+    const version = this.versionRepo.findByVersion(skill.id, targetVersion);
+    if (!version) throw new Error(`Version ${targetVersion} not found for skill ${slug}`);
+
+    // 1. Snapshot current version before rollback
+    const currentVersionPath = `${skill.storagePath}.versions/${skill.version}/`;
+    const currentFiles = await this.storage.listRecursive(skill.storagePath);
+    let currentFileCount = 0;
+    for (const filePath of currentFiles) {
+      if (!filePath.startsWith(".versions/")) {
+        const content = await this.storage.get(`${skill.storagePath}${filePath}`);
+        if (content) {
+          await this.storage.put(`${currentVersionPath}${filePath}`, content);
+          currentFileCount++;
+        }
+      }
+    }
+    this.versionRepo.create({
+      skillId: skill.id,
+      version: skill.version,
+      contentHash: skill.contentHash!,
+      storagePath: currentVersionPath,
+      entryFile: skill.entryFile,
+      fileCount: currentFileCount,
+      changeSummary: `Pre-rollback snapshot before restoring to ${targetVersion}`,
+    });
+
+    // 2. Restore files from version snapshot
+    const versionFiles = await this.storage.listRecursive(version.storagePath);
+    for (const filePath of versionFiles) {
+      const content = await this.storage.get(`${version.storagePath}${filePath}`);
+      if (content) {
+        await this.storage.put(`${skill.storagePath}${filePath}`, content);
+      }
+    }
+
+    // 3. Update database (increment version number, don't reuse old version)
+    const newVersion = bumpVersion(skill.version, bump);
+    await this.skillRepo.update(skill.id, {
+      version: newVersion,
+      contentHash: version.contentHash,
+    });
+
+    this.cache.clearByPrefix(`skill:entry:${slug}`);
+    this.cache.clearByPrefix(`skill:file:${slug}`);
+
+    this.logger.info({ slug, from: skill.version, to: newVersion, restored: targetVersion }, "Skill rolled back");
   }
 }

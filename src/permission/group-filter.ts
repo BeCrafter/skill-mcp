@@ -25,7 +25,7 @@ export class GroupPermissionFilter implements IPermissionFilter {
     return skills.filter(skill => this.canAccess(skill));
   }
 
-  async check(skillId: string): Promise<boolean> {
+  async check(_skillId: string): Promise<boolean> {
     return true;
   }
 

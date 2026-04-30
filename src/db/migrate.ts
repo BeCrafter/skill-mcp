@@ -84,6 +84,19 @@ CREATE TABLE IF NOT EXISTS skill_feedbacks (
   created_at      INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS skill_versions (
+  id              TEXT PRIMARY KEY,
+  skill_id        TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  version         TEXT NOT NULL,
+  content_hash    TEXT NOT NULL,
+  storage_path    TEXT NOT NULL,
+  entry_file      TEXT DEFAULT 'SKILL.md',
+  file_count      INTEGER NOT NULL DEFAULT 0,
+  created_by      TEXT,
+  change_summary  TEXT,
+  created_at      INTEGER NOT NULL
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_slug ON skills(slug);
 CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
 CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status);
@@ -94,6 +107,9 @@ CREATE INDEX IF NOT EXISTS idx_users_token ON users(token);
 CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles(user_id);
 CREATE INDEX IF NOT EXISTS idx_feedbacks_skill_slug ON skill_feedbacks(skill_slug);
 CREATE INDEX IF NOT EXISTS idx_feedbacks_created_at ON skill_feedbacks(created_at);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_skill_id ON skill_versions(skill_id);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_version ON skill_versions(skill_id, version);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_created_at ON skill_versions(created_at);
 `;
 
 export function runMigrations(dbPath: string): void {

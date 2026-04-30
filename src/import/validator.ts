@@ -1,4 +1,4 @@
-import type { SkillManifest } from "../types/index.js";
+import type { SkillFrontmatter } from "../types/index.js";
 import { scanForInjection, type ScanResult } from "../utils/security.js";
 
 export interface ValidationResult {
@@ -8,27 +8,24 @@ export interface ValidationResult {
 }
 
 export function validateSkillPackage(
-  manifest: SkillManifest,
+  meta: SkillFrontmatter,
   entryContent: string | null,
   enableInjectionScan: boolean = true,
 ): ValidationResult {
   const errors: string[] = [];
 
-  // Validate manifest
-  if (!manifest.name || typeof manifest.name !== "string") {
-    errors.push("manifest.name is required and must be a string");
+  if (!meta.name || typeof meta.name !== "string") {
+    errors.push("name is required in SKILL.md frontmatter and must be a string");
   }
 
-  if (manifest.name && manifest.name.length > 100) {
-    errors.push("manifest.name must be 100 characters or less");
+  if (meta.name && meta.name.length > 100) {
+    errors.push("name must be 100 characters or less");
   }
 
-  // Validate entry file
   if (!entryContent) {
     errors.push("Entry file (SKILL.md) is missing or empty");
   }
 
-  // Security scan
   let scanResult: ScanResult | undefined;
   if (enableInjectionScan && entryContent) {
     scanResult = scanForInjection(entryContent);

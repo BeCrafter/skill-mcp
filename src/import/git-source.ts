@@ -4,12 +4,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { SkillFileInput } from "../types/index.js";
-import { parseManifest, validateManifest, readSkillFiles } from "../utils/manifest.js";
+import { parseSkillMeta, validateSkillMeta, readSkillFiles } from "../utils/manifest.js";
 
 export class GitSourceResolver {
-  /**
-   * Resolve skill files from a Git repository URL
-   */
   async resolve(
     repoUrl: string,
     options?: { branch?: string; subDir?: string },
@@ -24,7 +21,6 @@ export class GitSourceResolver {
       }
       await git.clone(repoUrl, tmpDir, cloneArgs);
 
-      // Find skill root directory
       let skillDir = tmpDir;
       if (options?.subDir) {
         skillDir = join(tmpDir, options.subDir);
@@ -36,16 +32,16 @@ export class GitSourceResolver {
         throw new Error(`Skill directory not found: ${options?.subDir ?? "root"}`);
       }
 
-      const manifest = parseManifest(skillDir);
-      validateManifest(manifest, skillDir);
-      return readSkillFiles(skillDir, manifest);
+      const meta = parseSkillMeta(skillDir);
+      validateSkillMeta(meta, skillDir);
+      return readSkillFiles(skillDir, meta);
     } finally {
       await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 
   private async findSkillRoot(dir: string): Promise<string> {
-    if (existsSync(join(dir, "manifest.json"))) {
+    if (existsSync(join(dir, "SKILL.md"))) {
       return dir;
     }
 
@@ -53,7 +49,7 @@ export class GitSourceResolver {
     for (const entry of entries) {
       if (entry.isDirectory() && !entry.name.startsWith(".")) {
         const sub = join(dir, entry.name);
-        if (existsSync(join(sub, "manifest.json"))) {
+        if (existsSync(join(sub, "SKILL.md"))) {
           return sub;
         }
       }

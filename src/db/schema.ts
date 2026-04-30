@@ -1,5 +1,4 @@
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
-import { sql } from "drizzle-orm";
 
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey(),
@@ -96,4 +95,21 @@ export const skillFeedbacks = sqliteTable("skill_feedbacks", {
 }, (table) => [
   index("idx_feedbacks_skill_slug").on(table.skillSlug),
   index("idx_feedbacks_created_at").on(table.createdAt),
+]);
+
+export const skillVersions = sqliteTable("skill_versions", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
+  version: text("version").notNull(),
+  contentHash: text("content_hash").notNull(),
+  storagePath: text("storage_path").notNull(),
+  entryFile: text("entry_file").default("SKILL.md"),
+  fileCount: integer("file_count").notNull().default(0),
+  createdBy: text("created_by"),
+  changeSummary: text("change_summary"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("idx_skill_versions_skill_id").on(table.skillId),
+  index("idx_skill_versions_version").on(table.skillId, table.version),
+  index("idx_skill_versions_created_at").on(table.createdAt),
 ]);

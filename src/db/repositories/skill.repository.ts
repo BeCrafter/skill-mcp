@@ -1,7 +1,7 @@
-import { eq, and, like, sql, type SQL } from "drizzle-orm";
+import { eq, and, sql, type SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDB } from "../connection.js";
-import { skills, skillFiles } from "../schema.js";
+import { skills } from "../schema.js";
 import type { SkillMeta, SkillMetaInput, SkillStatus, VersionBump } from "../../types/index.js";
 
 function parseJson<T>(value: string | null): T {

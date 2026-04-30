@@ -3,7 +3,9 @@ import type { IStorageProvider } from "../storage/provider.interface.js";
 import type { ICacheProvider } from "../cache/provider.interface.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { SkillFileRepository } from "../db/repositories/skill-file.repository.js";
-import type { ImportOptions, ImportResult, SkillFileInput } from "../types/index.js";
+import type { SkillVersionRepository } from "../db/repositories/skill-version.repository.js";
+import type { ImportOptions, ImportResult, SkillFileInput, SkillFrontmatter, SkillMeta } from "../types/index.js";
+import type { DomainEventBus } from "../events/event-bus.js";
 import { LocalSourceResolver } from "./local-source.js";
 import { GitSourceResolver } from "./git-source.js";
 import { validateSkillPackage } from "./validator.js";
@@ -28,6 +30,8 @@ export class SkillImporter {
     private skillFileRepo: SkillFileRepository,
     private cache: ICacheProvider,
     private logger: Logger,
+    private eventBus?: DomainEventBus,
+    private versionRepo?: SkillVersionRepository,
   ) {}
 
   async import(source: string, options: ImportOptions): Promise<ImportResult> {
@@ -37,22 +41,22 @@ export class SkillImporter {
     const skillFiles = await this.resolveSource(source, options);
     this.logger.info({ fileCount: skillFiles.length }, "Files resolved");
 
-    // 2. Parse manifest
-    let manifest;
+    // 2. Parse SKILL.md frontmatter
+    let meta: SkillFrontmatter;
     try {
       if (source.startsWith("http") || source.startsWith("git@")) {
-        manifest = this.parseManifestFromFiles(skillFiles);
+        meta = this.parseFrontmatterFromFiles(skillFiles);
       } else {
-        manifest = this.localSource.parseManifest(source);
+        meta = this.localSource.parseSkillMeta(source);
       }
     } catch (error) {
       throw new InvalidManifestError((error as Error).message);
     }
 
     // 3. Validate
-    const entryFile = skillFiles.find(f => f.path === (manifest.entry ?? "SKILL.md"));
+    const entryFile = skillFiles.find(f => f.path === (meta.entry ?? "SKILL.md"));
     const entryContent = entryFile ? entryFile.buffer.toString("utf-8") : null;
-    const validation = validateSkillPackage(manifest, entryContent);
+    const validation = validateSkillPackage(meta, entryContent);
     if (!validation.valid) {
       if (validation.scanResult && !validation.scanResult.safe) {
         throw new SecurityError(validation.scanResult.issues);
@@ -75,7 +79,7 @@ export class SkillImporter {
     );
 
     // 6. Handle duplicate name
-    const existing = await this.skillRepo.findByName(manifest.name);
+    const existing = await this.skillRepo.findByName(meta.name);
     let targetSkill = null;
     let slug: string;
     let storagePath: string;
@@ -83,17 +87,17 @@ export class SkillImporter {
 
     if (options.targetId) {
       targetSkill = await this.skillRepo.findById(options.targetId);
-      if (!targetSkill || targetSkill.name !== manifest.name) {
+      if (!targetSkill || targetSkill.name !== meta.name) {
         throw new SkillNotFoundError(options.targetId);
       }
       if (targetSkill.contentHash === contentHash) {
         if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
           await this.updateMetadata(targetSkill, options, tags, targetSkill.slug);
-          this.logger.info({ slug: targetSkill.slug, name: manifest.name }, "Skill metadata updated (content unchanged)");
+          this.logger.info({ slug: targetSkill.slug, name: meta.name }, "Skill metadata updated (content unchanged)");
           return {
             id: targetSkill.id,
             slug: targetSkill.slug,
-            name: manifest.name,
+            name: meta.name,
             version: targetSkill.version,
             fileCount: skillFiles.length,
             category: options.category ?? targetSkill.category ?? undefined,
@@ -101,25 +105,25 @@ export class SkillImporter {
             action: "updated",
           };
         }
-        throw new ContentUnchangedError(manifest.name);
+        throw new ContentUnchangedError(meta.name);
       }
       slug = targetSkill.slug;
       storagePath = targetSkill.storagePath;
       action = "updated";
     } else if (existing.length >0) {
       if (!options.overwrite) {
-        throw new DuplicateSkillNameError(manifest.name, existing.map(s => ({ slug: s.slug, version: s.version })));
+        throw new DuplicateSkillNameError(meta.name, existing.map(s => ({ slug: s.slug, version: s.version })));
       }
       // Overwrite first match
       targetSkill = existing[0];
       if (targetSkill.contentHash === contentHash) {
         if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
           await this.updateMetadata(targetSkill, options, tags, existing[0].slug);
-          this.logger.info({ slug: existing[0].slug, name: manifest.name }, "Skill metadata updated (content unchanged)");
+          this.logger.info({ slug: existing[0].slug, name: meta.name }, "Skill metadata updated (content unchanged)");
           return {
             id: existing[0].id,
             slug: existing[0].slug,
-            name: manifest.name,
+            name: meta.name,
             version: targetSkill.version,
             fileCount: skillFiles.length,
             category: options.category ?? targetSkill.category ?? undefined,
@@ -127,13 +131,13 @@ export class SkillImporter {
             action: "updated",
           };
         }
-        throw new ContentUnchangedError(manifest.name);
+        throw new ContentUnchangedError(meta.name);
       }
       slug = targetSkill.slug;
       storagePath = targetSkill.storagePath;
       action = "updated";
     } else {
-      slug = slugify(manifest.name);
+      slug = slugify(meta.name);
       storagePath = `${slug}/`;
     }
 
@@ -143,11 +147,14 @@ export class SkillImporter {
 
     const version = targetSkill
       ? bumpVersion(targetSkill.version, options.versionBump)
-      : (manifest.version ?? "1.0.0");
+      : (meta.version ?? "1.0.0");
 
     let skillId: string;
 
     if (action === "updated" && targetSkill) {
+      // Snapshot current version before update
+      await this.snapshotCurrentVersion(targetSkill);
+
       await this.skillRepo.update(targetSkill.id, {
         description: description ?? targetSkill.description,
         version,
@@ -161,7 +168,7 @@ export class SkillImporter {
     } else {
       const created = await this.skillRepo.create({
         slug,
-        name: manifest.name,
+        name: meta.name,
         description: description ?? "",
         version,
         category: options.category,
@@ -169,7 +176,7 @@ export class SkillImporter {
         contentHash,
         storagePath,
         status: "published",
-        entryFile: manifest.entry ?? "SKILL.md",
+        entryFile: meta.entry ?? "SKILL.md",
       });
       skillId = created.id;
     }
@@ -184,15 +191,14 @@ export class SkillImporter {
       });
     }
 
-    await this.cache.clearByPrefix(`skill:entry:${slug}`);
-    await this.cache.clearByPrefix(`skill:file:${slug}`);
+    this.eventBus?.publish({ type: "skill:imported", slug });
 
-    this.logger.info({ slug, name: manifest.name, version, action, fileCount: skillFiles.length }, "Skill imported");
+    this.logger.info({ slug, name: meta.name, version, action, fileCount: skillFiles.length }, "Skill imported");
 
     return {
       id: skillId,
       slug,
-      name: manifest.name,
+      name: meta.name,
       version,
       fileCount: skillFiles.length,
       category: options.category,
@@ -211,28 +217,26 @@ export class SkillImporter {
     return this.localSource.resolve(source);
   }
 
-  private parseManifestFromFiles(files: SkillFileInput[]): { name: string; version?: string; entry?: string; files?: string[] } {
-    const manifestFile = files.find(f => f.path === "manifest.json");
-    if (manifestFile) {
-      return JSON.parse(manifestFile.buffer.toString("utf-8"));
-    }
-
+  private parseFrontmatterFromFiles(files: SkillFileInput[]): SkillFrontmatter {
     const skillFile = files.find(f => f.path === "SKILL.md" || f.path.endsWith("/SKILL.md"));
     if (!skillFile) {
-      throw new Error("Neither manifest.json nor SKILL.md found in skill files");
+      throw new Error("SKILL.md not found in skill files");
     }
 
     const { frontmatter } = extractFrontmatter(skillFile.buffer.toString("utf-8"));
     const name = frontmatter["name"];
     if (!name || typeof name !== "string") {
-      throw new Error("name is required in SKILL.md frontmatter or manifest.json");
+      throw new Error("name is required in SKILL.md frontmatter");
     }
 
     return {
       name: name as string,
       version: (frontmatter["version"] as string) ?? undefined,
-      entry: "SKILL.md",
-      files: undefined,
+      description: (frontmatter["description"] as string) ?? undefined,
+      entry: (frontmatter["entry"] as string) ?? "SKILL.md",
+      files: frontmatter["files"] as string[] | undefined,
+      tags: frontmatter["tags"] as string[] | undefined,
+      category: (frontmatter["category"] as string) ?? undefined,
     };
   }
 
@@ -240,7 +244,7 @@ export class SkillImporter {
     targetSkill: { category: string | null; tags: unknown; description: string | null },
     options: ImportOptions,
     tags: string[],
-    description: string | null | undefined,
+    _description: string | null | undefined,
   ): boolean {
     if (options.category !== undefined && options.category !== targetSkill.category) return true;
     if (options.tags !== undefined) {
@@ -262,7 +266,42 @@ export class SkillImporter {
     if (options.tags !== undefined) updates.tags = tags;
     if (options.description !== undefined) updates.description = options.description ?? null;
     await this.skillRepo.update(targetSkill.id, updates);
-    await this.cache.clearByPrefix(`skill:entry:${slug}`);
-    await this.cache.clearByPrefix(`skill:file:${slug}`);
+    this.eventBus?.publish({ type: "skill:updated", slug });
+  }
+
+  private async snapshotCurrentVersion(skill: SkillMeta): Promise<void> {
+    if (!this.versionRepo) return;
+
+    const versionPath = `${skill.storagePath}.versions/${skill.version}/`;
+
+    try {
+      // List files in current skill directory (excluding .versions subdir)
+      const files = await this.storage.listRecursive(skill.storagePath);
+      let fileCount = 0;
+
+      for (const filePath of files) {
+        if (!filePath.startsWith(".versions/")) {
+          const content = await this.storage.get(`${skill.storagePath}${filePath}`);
+          if (content) {
+            await this.storage.put(`${versionPath}${filePath}`, content);
+            fileCount++;
+          }
+        }
+      }
+
+      // Record version in database
+      this.versionRepo.create({
+        skillId: skill.id,
+        version: skill.version,
+        contentHash: skill.contentHash!,
+        storagePath: versionPath,
+        entryFile: skill.entryFile,
+        fileCount,
+      });
+
+      this.logger.debug({ skillId: skill.id, version: skill.version, fileCount }, "Version snapshot created");
+    } catch (error) {
+      this.logger.warn({ error, skillId: skill.id, version: skill.version }, "Failed to snapshot version");
+    }
   }
 }

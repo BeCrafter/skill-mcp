@@ -62,12 +62,15 @@ export interface SkillFileInput {
   buffer: Buffer;
 }
 
-/** Manifest.json structure */
-export interface SkillManifest {
+/** Skill metadata parsed from SKILL.md frontmatter */
+export interface SkillFrontmatter {
   name: string;
   version?: string;
+  description?: string;
   entry?: string;
   files?: string[];
+  tags?: string[];
+  category?: string;
 }
 
 /** Import options */
@@ -134,5 +137,19 @@ export interface SkillFeedbackEntry {
   outcome: "success" | "partial" | "failure" | "irrelevant";
   context: string | null;
   agentComment: string | null;
+  createdAt: number;
+}
+
+/** Skill version entry */
+export interface SkillVersionEntry {
+  id: string;
+  skillId: string;
+  version: string;
+  contentHash: string;
+  storagePath: string;
+  entryFile: string;
+  fileCount: number;
+  createdBy: string | null;
+  changeSummary: string | null;
   createdAt: number;
 }

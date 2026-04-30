@@ -36,7 +36,7 @@ export function createDatabase(dbPath: string): DrizzleDB {
 
 export function closeDatabase(): void {
   if (_sqlite) {
-    try { _sqlite.close(); } catch (e) {
+    try { _sqlite.close(); } catch {
       // Connection already closed or error during close
     }
     _sqlite = null;

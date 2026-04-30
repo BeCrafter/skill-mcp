@@ -1,6 +1,7 @@
 import type { ICacheProvider } from "./provider.interface.js";
 import { MemoryLRUCacheProvider } from "./memory-lru.provider.js";
 import { FileCacheProvider } from "./file.provider.js";
+import { metrics } from "../telemetry/metrics.js";
 
 export class CompositeCacheProvider implements ICacheProvider {
   private l1: ICacheProvider;
@@ -27,14 +28,20 @@ export class CompositeCacheProvider implements ICacheProvider {
   async get<T>(key: string): Promise<T | null> {
     // L1 → L2
     const l1Value = await this.l1.get<T>(key);
-    if (l1Value !== null) return l1Value;
+    if (l1Value !== null) {
+      metrics.cacheOps.inc({ layer: "l1", result: "hit" });
+      return l1Value;
+    }
+    metrics.cacheOps.inc({ layer: "l1", result: "miss" });
 
     const l2Value = await this.l2.get<T>(key);
     if (l2Value !== null) {
+      metrics.cacheOps.inc({ layer: "l2", result: "hit" });
       // Promote to L1
       await this.l1.set(key, l2Value);
       return l2Value;
     }
+    metrics.cacheOps.inc({ layer: "l2", result: "miss" });
 
     return null;
   }
@@ -68,7 +75,7 @@ export class CompositeCacheProvider implements ICacheProvider {
 /** No-op cache for when caching is disabled */
 class NoopCacheProvider implements ICacheProvider {
   async get<T>(): Promise<T | null> { return null; }
-  async set<T>(): Promise<void> {}
+  async set(): Promise<void> {}
   async has(): Promise<boolean> { return false; }
   async delete(): Promise<void> {}
   async clear(): Promise<void> {}

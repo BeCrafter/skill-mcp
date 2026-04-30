@@ -39,7 +39,6 @@ export function createTransport(options: TransportOptions): CreatedTransport {
         res: import("node:http").ServerResponse
       ): Promise<void> => {
         const url = req.url?.split("?")[0] ?? "";
-        const urlObj = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
         if (req.method === "GET" && url === "/mcp/sse") {
           sseTransport = new SSEServerTransport(messagePath, res);

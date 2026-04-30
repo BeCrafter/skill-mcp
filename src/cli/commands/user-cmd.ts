@@ -42,7 +42,7 @@ export async function userListAction(): Promise<void> {
 }
 
 export async function userCreateAction(opts: { name?: string; roleIds?: string[] }): Promise<void> {
-  const { userRepo, userRoleRepo, roleRepo } = initRepos();
+  const { userRepo, userRoleRepo } = initRepos();
   const token = `sk-live-${randomUUID().replace(/-/g, "").slice(0, 24)}`;
   const hash = sha256(token);
   const user = await userRepo.create({ name: opts.name, token: hash });
@@ -96,7 +96,7 @@ export async function userDeleteAction(userId: string): Promise<void> {
 }
 
 export async function userAssignRolesAction(userId: string, roleIds: string[]): Promise<void> {
-  const { userRepo, userRoleRepo, roleRepo } = initRepos();
+  const { userRepo, userRoleRepo } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {
     console.error(`User not found: ${userId}`);

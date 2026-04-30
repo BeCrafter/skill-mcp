@@ -7,6 +7,10 @@ import { infoAction } from "./commands/info-cmd.js";
 import { searchAction } from "./commands/search-cmd.js";
 import { removeAction } from "./commands/remove-cmd.js";
 import { updateAction } from "./commands/update-cmd.js";
+import { versionsAction } from "./commands/versions-cmd.js";
+import { rollbackAction } from "./commands/rollback-cmd.js";
+import { lintAction } from "./commands/lint-cmd.js";
+import { pipelineValidateAction, pipelineGraphAction, pipelineRunAction } from "./commands/pipeline-cmd.js";
 import { userListAction, userCreateAction, userGetAction, userDeleteAction, userAssignRolesAction } from "./commands/user-cmd.js";
 import { roleListAction, roleCreateAction, roleGetAction, roleUpdateAction, roleDeleteAction } from "./commands/role-cmd.js";
 
@@ -103,6 +107,68 @@ export async function createCli(): Promise<Command> {
         tags: opts.tags ? (opts.tags as string).split(",").map((t: string) => t.trim()) : undefined,
         description: opts.description as string | undefined,
         displayName: opts.displayName as string | undefined,
+      });
+    });
+
+  program
+    .command("versions <slug>")
+    .description("Show skill version history")
+    .option("--show <version>", "Show details for a specific version")
+    .action(async (slug, opts) => {
+      await versionsAction(slug, { show: opts.show as string | undefined });
+    });
+
+  program
+    .command("rollback <slug>")
+    .description("Rollback skill to a previous version")
+    .requiredOption("--to <version>", "Target version to rollback to")
+    .option("--bump <type>", "Version bump type: major|minor|patch", "patch")
+    .action(async (slug, opts) => {
+      await rollbackAction(slug, {
+        to: opts.to as string,
+        bump: (opts.bump as "major" | "minor" | "patch") ?? "patch",
+      });
+    });
+
+  program
+    .command("lint <path>")
+    .description("Lint a skill package directory")
+    .action(async (path) => {
+      await lintAction(path);
+    });
+
+  // =========================================================
+  // Pipeline management commands
+  // =========================================================
+  const pipelineCmd = program
+    .command("pipeline")
+    .description("Manage skill pipelines (DAG orchestration)");
+
+  pipelineCmd
+    .command("validate <yaml-path>")
+    .description("Validate pipeline YAML definition")
+    .action(async (yamlPath) => {
+      await pipelineValidateAction(yamlPath);
+    });
+
+  pipelineCmd
+    .command("graph <yaml-path>")
+    .description("Visualize pipeline DAG as ASCII")
+    .action(async (yamlPath) => {
+      await pipelineGraphAction(yamlPath);
+    });
+
+  pipelineCmd
+    .command("run <yaml-path>")
+    .description("Execute pipeline (dry-run by default)")
+    .option("--input <key=value...>", "Pipeline inputs (repeatable)", (value, prev: string[]) => {
+      return prev ? [...prev, value] : [value];
+    }, [] as string[])
+    .option("--dry-run", "Dry-run mode (default: true)", true)
+    .action(async (yamlPath, opts) => {
+      await pipelineRunAction(yamlPath, {
+        input: opts.input as string[] | undefined,
+        dryRun: opts.dryRun as boolean,
       });
     });
 
