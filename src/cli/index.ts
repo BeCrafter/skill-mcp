@@ -7,6 +7,8 @@ import { infoAction } from "./commands/info-cmd.js";
 import { searchAction } from "./commands/search-cmd.js";
 import { removeAction } from "./commands/remove-cmd.js";
 import { updateAction } from "./commands/update-cmd.js";
+import { userListAction, userCreateAction, userGetAction, userDeleteAction, userAssignRolesAction } from "./commands/user-cmd.js";
+import { roleListAction, roleCreateAction, roleGetAction, roleUpdateAction, roleDeleteAction } from "./commands/role-cmd.js";
 
 export async function createCli(): Promise<Command> {
   const config = getConfig();
@@ -103,6 +105,99 @@ export async function createCli(): Promise<Command> {
         displayName: opts.displayName as string | undefined,
       });
     });
+
+  // =========================================================
+  // User management commands
+  // =========================================================
+  const userCmd = program
+    .command("user")
+    .description("Manage users");
+
+  userCmd
+    .command("list")
+    .description("List all users")
+    .action(async () => { await userListAction(); });
+
+  userCmd
+    .command("create")
+    .description("Create a new user")
+    .option("--name <name>", "User name")
+    .option("--role-ids <ids>", "Comma-separated role IDs to assign")
+    .action(async (opts) => {
+      await userCreateAction({
+        name: opts.name as string | undefined,
+        roleIds: opts.roleIds ? (opts.roleIds as string).split(",").map((s: string) => s.trim()) : undefined,
+      });
+    });
+
+  userCmd
+    .command("get <userId>")
+    .description("Get user details")
+    .action(async (userId) => { await userGetAction(userId); });
+
+  userCmd
+    .command("delete <userId>")
+    .description("Delete a user")
+    .action(async (userId) => { await userDeleteAction(userId); });
+
+  userCmd
+    .command("assign-roles <userId>")
+    .description("Assign roles to a user (replaces existing)")
+    .requiredOption("--role-ids <ids>", "Comma-separated role IDs")
+    .action(async (userId, opts) => {
+      const roleIds = (opts.roleIds as string).split(",").map((s: string) => s.trim());
+      await userAssignRolesAction(userId, roleIds);
+    });
+
+  // =========================================================
+  // Role management commands
+  // =========================================================
+  const roleCmd = program
+    .command("role")
+    .description("Manage roles");
+
+  roleCmd
+    .command("list")
+    .description("List all roles")
+    .action(async () => { await roleListAction(); });
+
+  roleCmd
+    .command("create")
+    .description("Create a new role")
+    .requiredOption("--name <name>", "Role name")
+    .requiredOption("--tags <tags>", "Comma-separated tags")
+    .option("--description <desc>", "Role description")
+    .action(async (opts) => {
+      await roleCreateAction({
+        name: opts.name as string,
+        description: opts.description as string | undefined,
+        tags: (opts.tags as string).split(",").map((t: string) => t.trim()),
+      });
+    });
+
+  roleCmd
+    .command("get <roleId>")
+    .description("Get role details")
+    .action(async (roleId) => { await roleGetAction(roleId); });
+
+  roleCmd
+    .command("update <roleId>")
+    .description("Update a role")
+    .option("--name <name>", "New name")
+    .option("--tags <tags>", "New tags (comma-separated)")
+    .option("--description <desc>", "New description")
+    .action(async (roleId, opts) => {
+      await roleUpdateAction(roleId, {
+        name: opts.name as string | undefined,
+        description: opts.description as string | undefined,
+        tags: opts.tags ? (opts.tags as string).split(",").map((t: string) => t.trim()) : undefined,
+      });
+    });
+
+  roleCmd
+    .command("delete <roleId>")
+    .description("Delete a role")
+    .action(async (roleId) => { await roleDeleteAction(roleId); });
 
   return program;
 }

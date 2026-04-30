@@ -1,14 +1,21 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { URL as URLParser } from "node:url";
+import { randomUUID, createHash } from "node:crypto";
 import { createMcpServer } from "./mcp/server.js";
 import { getLogger } from "./utils/logger.js";
 import { getConfig } from "./config/index.js";
 import { createApiKeyAuthMiddleware } from "./middleware/apikey-auth.js";
+import { createContextBuilder, extractBearerToken, buildRequestContextFromHttp } from "./permission/context-builder.js";
+import { TagPermissionFilter } from "./permission/tag-filter.js";
 import type { SkillService } from "./services/skill.service.js";
 import type { ISkillProvider } from "./provider/interface.js";
 import type { SkillRepository } from "./db/repositories/skill.repository.js";
 import type { SkillFileRepository } from "./db/repositories/skill-file.repository.js";
 import type { AccessLogRepository } from "./db/repositories/access-log.repository.js";
+import type { UserRepository } from "./db/repositories/user.repository.js";
+import type { RoleRepository } from "./db/repositories/role.repository.js";
+import type { UserRoleRepository } from "./db/repositories/user-role.repository.js";
+import type { SkillFeedbackRepository } from "./db/repositories/skill-feedback.repository.js";
 import type { IStorageProvider } from "./storage/provider.interface.js";
 import type { ICacheProvider } from "./cache/provider.interface.js";
 import { SkillImporter } from "./import/importer.js";
@@ -26,6 +33,10 @@ export interface AppDependencies {
   storage: IStorageProvider;
   cache: ICacheProvider;
   importer: SkillImporter;
+  userRepo?: UserRepository;
+  roleRepo?: RoleRepository;
+  userRoleRepo?: UserRoleRepository;
+  feedbackRepo?: SkillFeedbackRepository;
 }
 
 export interface TransportConfig {
@@ -89,6 +100,10 @@ export async function createApp(
   let mcpHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | null = null;
 
   const isCloudServiceOnlyMode = appConfig.deployment.mode === "cloud-service-only";
+  const contextBuilder = deps.userRepo && deps.userRoleRepo
+    ? createContextBuilder(deps.userRepo, deps.userRoleRepo)
+    : undefined;
+
   if (isCloudServiceOnlyMode) {
     logger.info("Cloud Service only mode: MCP transport disabled");
   } else if (transportConfig.type === "http") {
@@ -97,6 +112,7 @@ export async function createApp(
       deps.skillProvider,
       deps.serverName,
       deps.serverVersion,
+      contextBuilder,
     );
     const { StreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
     const transport = new StreamableHTTPServerTransport({
@@ -125,6 +141,7 @@ export async function createApp(
           deps.skillProvider,
           deps.serverName,
           deps.serverVersion,
+          contextBuilder,
         );
         const transport = new SSEServerTransport("/mcp/messages", res);
         sseTransports.set(sessionId, transport);
@@ -471,6 +488,161 @@ async function handleAdminRoute(
     return;
   }
 
+  // =========================================================
+  // User management (Admin API)
+  // =========================================================
+  if (deps.userRepo && deps.roleRepo && deps.userRoleRepo) {
+    const { userRepo, roleRepo, userRoleRepo } = deps;
+
+    // List users
+    if (req.method === "GET" && url === "/api/admin/users") {
+      const users = await userRepo.findAll();
+      json(res, 200, { success: true, data: users });
+      return;
+    }
+
+    // Create user
+    if (req.method === "POST" && url === "/api/admin/users") {
+      const body = await readBody(req);
+      let data: { name?: string; role_ids?: string[] };
+      try { data = JSON.parse(body.toString()); } catch { json(res, 400, { success: false, error: "Invalid JSON" }); return; }
+      const token = `sk-live-${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+      const hash = createHash("sha256").update(token).digest("hex");
+      const user = await userRepo.create({ name: data.name, token: hash });
+      if (data.role_ids?.length) {
+        await userRoleRepo.replaceUserRoles(user.id, data.role_ids);
+      }
+      const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
+      const roleIds = await userRoleRepo.findRoleIdsByUserId(user.id);
+      const roleNames: string[] = [];
+      for (const rid of roleIds) {
+        const r = await roleRepo.findById(rid);
+        if (r) roleNames.push(r.name);
+      }
+      json(res, 201, { success: true, data: { id: user.id, name: user.name, token, roles: roleNames, tags } });
+      return;
+    }
+
+    // Get user by ID
+    const userIdMatch = url.match(/^\/api\/admin\/users\/([^/]+)$/);
+    if (userIdMatch) {
+      const userId = decodeURIComponent(userIdMatch[1]);
+      if (req.method === "GET") {
+        const user = await userRepo.findById(userId);
+        if (!user) { json(res, 404, { success: false, error: "User not found" }); return; }
+        const tags = await userRoleRepo.getAggregatedTagsByUserId(userId);
+        const roleIds = await userRoleRepo.findRoleIdsByUserId(userId);
+        const roles: Array<{ id: string; name: string; tags: string[] }> = [];
+        for (const rid of roleIds) {
+          const r = await roleRepo.findById(rid);
+          if (r) roles.push({ id: r.id, name: r.name, tags: r.tags });
+        }
+        json(res, 200, { success: true, data: { ...user, roles, tags } });
+        return;
+      }
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        let data: { name?: string; status?: string };
+        try { data = JSON.parse(body.toString()); } catch { json(res, 400, { success: false, error: "Invalid JSON" }); return; }
+        const updated = await userRepo.update(userId, data);
+        if (!updated) { json(res, 404, { success: false, error: "User not found" }); return; }
+        json(res, 200, { success: true, data: updated });
+        return;
+      }
+      if (req.method === "DELETE") {
+        await userRoleRepo.deleteByUserId(userId);
+        const deleted = await userRepo.delete(userId);
+        if (!deleted) { json(res, 404, { success: false, error: "User not found" }); return; }
+        json(res, 200, { success: true });
+        return;
+      }
+    }
+
+    // Assign roles to user
+    const assignMatch = url.match(/^\/api\/admin\/users\/([^/]+)\/roles$/);
+    if (assignMatch && req.method === "PUT") {
+      const userId = decodeURIComponent(assignMatch[1]);
+      const body = await readBody(req);
+      let data: { role_ids: string[] };
+      try { data = JSON.parse(body.toString()); } catch { json(res, 400, { success: false, error: "Invalid JSON" }); return; }
+      const user = await userRepo.findById(userId);
+      if (!user) { json(res, 404, { success: false, error: "User not found" }); return; }
+      await userRoleRepo.replaceUserRoles(userId, data.role_ids ?? []);
+      // Invalidate user's skill list cache
+      await cache.delete(`skill:list:${userId}`);
+      json(res, 200, { success: true });
+      return;
+    }
+
+    // List roles
+    if (req.method === "GET" && url === "/api/admin/roles") {
+      const rolesList = await roleRepo.findAll();
+      json(res, 200, { success: true, data: rolesList });
+      return;
+    }
+
+    // Create role
+    if (req.method === "POST" && url === "/api/admin/roles") {
+      const body = await readBody(req);
+      let data: { name: string; description?: string; tags: string[] };
+      try { data = JSON.parse(body.toString()); } catch { json(res, 400, { success: false, error: "Invalid JSON" }); return; }
+      if (!data.name || !data.tags) { json(res, 400, { success: false, error: "name and tags required" }); return; }
+      const role = await roleRepo.create(data);
+      json(res, 201, { success: true, data: role });
+      return;
+    }
+
+    // Get/update/delete role by ID
+    const roleIdMatch = url.match(/^\/api\/admin\/roles\/([^/]+)$/);
+    if (roleIdMatch) {
+      const roleId = decodeURIComponent(roleIdMatch[1]);
+      if (req.method === "GET") {
+        const role = await roleRepo.findById(roleId);
+        if (!role) { json(res, 404, { success: false, error: "Role not found" }); return; }
+        json(res, 200, { success: true, data: role });
+        return;
+      }
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        let data: { name?: string; description?: string; tags?: string[] };
+        try { data = JSON.parse(body.toString()); } catch { json(res, 400, { success: false, error: "Invalid JSON" }); return; }
+        const updated = await roleRepo.update(roleId, data);
+        if (!updated) { json(res, 404, { success: false, error: "Role not found" }); return; }
+        // Invalidate caches for all users with this role
+        const affectedUserIds = await userRoleRepo.findUserIdsByRoleId(roleId);
+        for (const uid of affectedUserIds) {
+          await cache.delete(`skill:list:${uid}`);
+        }
+        json(res, 200, { success: true, data: updated });
+        return;
+      }
+      if (req.method === "DELETE") {
+        await userRoleRepo.deleteByRoleId?.(roleId) ?? Promise.resolve();
+        const deleted = await roleRepo.delete(roleId);
+        if (!deleted) { json(res, 404, { success: false, error: "Role not found" }); return; }
+        json(res, 200, { success: true });
+        return;
+      }
+    }
+  }
+
+  // Effectiveness report
+  if (req.method === "GET" && url === "/api/admin/skills/effectiveness-report") {
+    const days = parseInt(urlObj.searchParams.get("days") ?? "30", 10);
+    const rates = await deps.skillService.getEffectivenessRates(days);
+    const report = [];
+    for (const [slug, { rate, count }] of rates) {
+      let recommendation: string;
+      if (rate >= 0.8) recommendation = "Performing well";
+      else if (rate >= 0.5) recommendation = "Needs attention";
+      else if (count >= 10) recommendation = "Consider deprecating or rewriting";
+      else recommendation = "Insufficient data, continue monitoring";
+      report.push({ slug, effectiveness: Math.round(rate * 100) / 100, feedback_count: count, recommendation });
+    }
+    json(res, 200, { success: true, data: { report, generated_at: new Date().toISOString() } });
+    return;
+  }
+
   // 404 - should not reach here since routing is checked in createApp
   json(res, 404, { error: "Not found" });
 }
@@ -485,6 +657,14 @@ async function handleGatewayRoute(
   const safeHost = getSafeHost(req.headers.host);
   const urlObj = new URLParser(req.url ?? "/", `http://${safeHost}`);
 
+  // Build RequestContext for Gateway API
+  let context: import("./types/index.js").RequestContext | undefined;
+  if (deps.userRepo && deps.userRoleRepo) {
+    const token = extractBearerToken(req.headers.authorization);
+    const sessionId = (req.headers["x-session-id"] as string) || randomUUID();
+    context = await buildRequestContextFromHttp(token, sessionId, deps.userRepo, deps.userRoleRepo);
+  }
+
   logger.debug({ url, method: req.method }, "Gateway API route");
 
   // Health check
@@ -493,7 +673,7 @@ async function handleGatewayRoute(
     return;
   }
 
-  // List skills (with pagination + attributes filtering)
+  // List skills (with pagination + attributes filtering + permission filtering)
   if (req.method === "GET" && url === "/api/gateway/skills") {
     const category = urlObj.searchParams.get("category") ?? undefined;
     const tags = urlObj.searchParams.get("tags")?.split(",").filter(Boolean);
@@ -506,11 +686,17 @@ async function handleGatewayRoute(
       }
     }
 
-    const skills = await skillRepo.findAll({
+    let skills = await skillRepo.findAll({
       category,
       tags,
       attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
     });
+
+    // Apply permission filtering
+    if (context) {
+      const filter = new TagPermissionFilter(context);
+      skills = await filter.filter(skills);
+    }
 
     const paginated = skills.slice(offset, offset + limit);
     json(res, 200, {
@@ -540,6 +726,14 @@ async function handleGatewayRoute(
       json(res, 404, { success: false, error: "Skill not found" });
       return;
     }
+    // Permission check
+    if (context) {
+      const filter = new TagPermissionFilter(context);
+      if (!filter.canAccess(skill)) {
+        json(res, 403, { success: false, error: "Access denied" });
+        return;
+      }
+    }
     json(res, 200, { success: true, data: skill });
     return;
   }
@@ -551,6 +745,13 @@ async function handleGatewayRoute(
     if (!isValidSlug(slug)) {
       json(res, 400, { success: false, error: "Invalid skill slug" });
       return;
+    }
+    // Permission check
+    if (context) {
+      const skill = await skillRepo.findBySlug(slug);
+      if (!skill) { json(res, 404, { success: false, error: "Skill not found" }); return; }
+      const filter = new TagPermissionFilter(context);
+      if (!filter.canAccess(skill)) { json(res, 403, { success: false, error: "Access denied" }); return; }
     }
     try {
       const content = await skillProvider.getSkillEntry(slug);
@@ -573,6 +774,13 @@ async function handleGatewayRoute(
     if (!isValidSlug(slug)) {
       json(res, 400, { success: false, error: "Invalid skill slug" });
       return;
+    }
+    // Permission check
+    if (context) {
+      const skill = await skillRepo.findBySlug(slug);
+      if (!skill) { json(res, 404, { success: false, error: "Skill not found" }); return; }
+      const filter = new TagPermissionFilter(context);
+      if (!filter.canAccess(skill)) { json(res, 403, { success: false, error: "Access denied" }); return; }
     }
     const body = await readBody(req);
     let data: { paths?: string[] };
@@ -607,6 +815,13 @@ async function handleGatewayRoute(
     if (!isValidSlug(slug)) {
       json(res, 400, { success: false, error: "Invalid skill slug" });
       return;
+    }
+    // Permission check
+    if (context) {
+      const skill = await skillRepo.findBySlug(slug);
+      if (!skill) { json(res, 404, { success: false, error: "Skill not found" }); return; }
+      const filter = new TagPermissionFilter(context);
+      if (!filter.canAccess(skill)) { json(res, 403, { success: false, error: "Access denied" }); return; }
     }
     try {
       const tree = await skillProvider.getSkillFileTree(slug);

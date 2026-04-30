@@ -15,6 +15,8 @@ export class AccessLogRepository {
       action: entry.action,
       filePaths: entry.filePaths ? JSON.stringify(entry.filePaths) : null,
       latencyMs: entry.latencyMs ?? null,
+      userId: entry.userId ?? null,
+      sessionId: entry.sessionId ?? null,
       createdAt: Date.now(),
     }).run();
   }
@@ -32,6 +34,8 @@ export class AccessLogRepository {
       action: row.action as AccessLogEntry["action"],
       filePaths: row.filePaths ? JSON.parse(row.filePaths) : undefined,
       latencyMs: row.latencyMs ?? undefined,
+      userId: row.userId ?? undefined,
+      sessionId: row.sessionId ?? undefined,
       createdAt: row.createdAt,
     }));
   }

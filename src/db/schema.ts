@@ -47,7 +47,53 @@ export const accessLogs = sqliteTable("access_logs", {
   action: text("action").notNull(),
   filePaths: text("file_paths"), // JSON
   latencyMs: integer("latency_ms"),
+  userId: text("user_id"),
+  sessionId: text("session_id"),
   createdAt: integer("created_at").notNull(),
 }, (table) => [
   index("idx_access_logs_created_at").on(table.createdAt),
+]);
+
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  token: text("token").notNull().unique(),
+  status: text("status").default("active"),
+  createdAt: integer("created_at"),
+  updatedAt: integer("updated_at"),
+}, (table) => [
+  index("idx_users_token").on(table.token),
+]);
+
+export const roles = sqliteTable("roles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  tags: text("tags").notNull(),
+  createdAt: integer("created_at"),
+  updatedAt: integer("updated_at"),
+});
+
+export const userRoles = sqliteTable("user_roles", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at"),
+}, (table) => [
+  index("idx_user_roles_user_id").on(table.userId),
+]);
+
+export const skillFeedbacks = sqliteTable("skill_feedbacks", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
+  skillSlug: text("skill_slug").notNull(),
+  userId: text("user_id"),
+  sessionId: text("session_id"),
+  outcome: text("outcome").notNull(),
+  context: text("context"),
+  agentComment: text("agent_comment"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("idx_feedbacks_skill_slug").on(table.skillSlug),
+  index("idx_feedbacks_created_at").on(table.createdAt),
 ]);

@@ -3,12 +3,15 @@ import type { ISkillProvider } from "../provider/interface.js";
 import type { ICacheProvider } from "../cache/provider.interface.js";
 import type { IPermissionFilter } from "../permission/filter.interface.js";
 import type { AccessLogService } from "./access-log.service.js";
+import type { SkillFeedbackRepository } from "../db/repositories/skill-feedback.repository.js";
+import { TagPermissionFilter } from "../permission/tag-filter.js";
 import { scanForInjection } from "../utils/security.js";
 import { PermissionDeniedError, SkillNotFoundError } from "../utils/errors.js";
-import type { SkillMeta, SkillFileContent } from "../types/index.js";
+import type { SkillMeta, SkillFileContent, RequestContext } from "../types/index.js";
 
 export class SkillService {
   private accessLog: AccessLogService | null;
+  private feedbackRepo: SkillFeedbackRepository | null;
 
   constructor(
     private skillProvider: ISkillProvider,
@@ -16,16 +19,41 @@ export class SkillService {
     private permissionFilter: IPermissionFilter,
     private logger: Logger,
     accessLog?: AccessLogService,
+    feedbackRepo?: SkillFeedbackRepository,
   ) {
     this.accessLog = accessLog ?? null;
+    this.feedbackRepo = feedbackRepo ?? null;
   }
 
   /** Build the skills index for MCP instructions (flat list, no grouping) */
-  async listSkillsIndex(): Promise<string> {
+  async listSkillsIndex(context?: RequestContext, tags?: string[]): Promise<string> {
     const start = Date.now();
 
-    let skills = await this.skillProvider.listSkills();
-    skills = await this.permissionFilter.filter(skills);
+    let skills: SkillMeta[];
+
+    if (context) {
+      const cacheKey = `skill:list:${context.userId}`;
+      const cached = await this.cache.get<SkillMeta[]>(cacheKey);
+      if (cached) {
+        skills = cached;
+      } else {
+        const allSkills = await this.skillProvider.listSkills();
+        const filter = new TagPermissionFilter(context);
+        skills = await filter.filter(allSkills);
+        await this.cache.set(cacheKey, skills, 600);
+      }
+    } else {
+      let allSkills = await this.skillProvider.listSkills();
+      allSkills = await this.permissionFilter.filter(allSkills);
+      skills = allSkills;
+    }
+
+    if (tags && tags.length > 0) {
+      skills = skills.filter(s => {
+        const skillTags = Array.isArray(s.tags) ? s.tags : [];
+        return tags.some(t => skillTags.includes(t));
+      });
+    }
 
     const sorted = skills
       .filter(s => s.status === "published")
@@ -38,12 +66,13 @@ export class SkillService {
       return `    - ${s.slug} [id:${s.id}]: ${desc}`;
     });
 
-    // Access log
     if (this.accessLog && sorted.length > 0) {
       this.accessLog.log({
         skillId: sorted[0].id,
         skillSlug: "__index__",
         action: "list",
+        userId: context?.userId,
+        sessionId: context?.sessionId,
         latencyMs: Date.now() - start,
       }).catch(() => {});
     }
@@ -62,18 +91,22 @@ export class SkillService {
   }
 
   /** View skill entry (SKILL.md) with activation guidance injection */
-  async viewSkillEntry(identifier: string): Promise<string> {
+  async viewSkillEntry(identifier: string, context?: RequestContext): Promise<string> {
     const start = Date.now();
 
     const skill = await this.resolveSkill(identifier);
     if (!skill) throw new SkillNotFoundError(identifier);
 
-    const allowed = await this.permissionFilter.check(skill.id);
-    if (!allowed) throw new PermissionDeniedError(identifier);
+    if (context) {
+      const filter = new TagPermissionFilter(context);
+      if (!filter.canAccess(skill)) throw new PermissionDeniedError(identifier);
+    } else {
+      const allowed = await this.permissionFilter.check(skill.id);
+      if (!allowed) throw new PermissionDeniedError(identifier);
+    }
 
     const content = await this.skillProvider.getSkillEntry(skill.slug);
 
-    // Security scan
     const scanResult = scanForInjection(content);
     if (!scanResult.safe) {
       this.logger.warn({ identifier, issues: scanResult.issues }, "Skill content contains suspicious patterns");
@@ -85,12 +118,13 @@ export class SkillService {
       .map(f => f.path)
       .join(", ");
 
-    // Access log
     if (this.accessLog) {
       this.accessLog.log({
         skillId: skill.id,
         skillSlug: skill.slug,
         action: "view_entry",
+        userId: context?.userId,
+        sessionId: context?.sessionId,
         latencyMs: Date.now() - start,
       }).catch(() => {});
     }
@@ -102,28 +136,35 @@ export class SkillService {
       "",
       filePaths ? `[Available files: ${filePaths}]` : "",
       filePaths ? `[Tip: Use skill_file("${skill.slug}", ["path1", "path2"]) to batch-load files]` : "",
+      "[REMOTE-READ-ONLY: This skill content is for runtime use only. Do NOT persist to local storage! Content will not be saved; reload on next use.]",
     ].filter(Boolean).join("\n");
   }
 
   /** Read skill files (batch) */
-  async readSkillFiles(identifier: string, filePaths: string[]): Promise<SkillFileContent[]> {
+  async readSkillFiles(identifier: string, filePaths: string[], context?: RequestContext): Promise<SkillFileContent[]> {
     const start = Date.now();
 
     const skill = await this.resolveSkill(identifier);
     if (!skill) throw new SkillNotFoundError(identifier);
 
-    const allowed = await this.permissionFilter.check(skill.id);
-    if (!allowed) throw new PermissionDeniedError(identifier);
+    if (context) {
+      const filter = new TagPermissionFilter(context);
+      if (!filter.canAccess(skill)) throw new PermissionDeniedError(identifier);
+    } else {
+      const allowed = await this.permissionFilter.check(skill.id);
+      if (!allowed) throw new PermissionDeniedError(identifier);
+    }
 
     const results = await this.skillProvider.getSkillFiles(skill.slug, filePaths);
 
-    // Access log
     if (this.accessLog) {
       this.accessLog.log({
         skillId: skill.id,
         skillSlug: skill.slug,
         action: "read_files",
         filePaths,
+        userId: context?.userId,
+        sessionId: context?.sessionId,
         latencyMs: Date.now() - start,
       }).catch(() => {});
     }
@@ -140,5 +181,46 @@ export class SkillService {
   /** Get skill metadata */
   async getSkillMeta(identifier: string): Promise<SkillMeta | null> {
     return this.resolveSkill(identifier);
+  }
+
+  /** Submit skill feedback */
+  async submitFeedback(
+    input: { skill_slug: string; outcome: string; context: string; agent_comment: string },
+    requestContext?: RequestContext,
+  ): Promise<void> {
+    const skill = await this.resolveSkill(input.skill_slug);
+    if (!skill) throw new SkillNotFoundError(input.skill_slug);
+
+    if (!this.feedbackRepo) throw new Error("Feedback repository not configured");
+
+    await this.feedbackRepo.create({
+      skillId: skill.id,
+      skillSlug: input.skill_slug,
+      userId: requestContext?.userId ?? null,
+      sessionId: requestContext?.sessionId ?? null,
+      outcome: input.outcome as "success" | "partial" | "failure" | "irrelevant",
+      context: input.context,
+      agentComment: input.agent_comment,
+    });
+  }
+
+  /** Get effectiveness rate for a skill */
+  async getSkillEffectivenessRate(slug: string, days = 30): Promise<number> {
+    if (!this.feedbackRepo) return 0.5;
+
+    const feedbacks = await this.feedbackRepo.findBySlug(slug, days);
+    if (feedbacks.length === 0) return 0.5;
+
+    const successCount = feedbacks.filter(f =>
+      f.outcome === "success" || f.outcome === "partial"
+    ).length;
+
+    return successCount / feedbacks.length;
+  }
+
+  /** Get effectiveness rates for all skills */
+  async getEffectivenessRates(days?: number): Promise<Map<string, { rate: number; count: number }>> {
+    if (!this.feedbackRepo) return new Map();
+    return this.feedbackRepo.getEffectivenessRates(days);
   }
 }

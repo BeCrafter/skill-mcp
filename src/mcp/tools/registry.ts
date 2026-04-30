@@ -1,16 +1,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SkillService } from "../../services/skill.service.js";
+import type { ContextBuilder } from "../../permission/context-builder.js";
 import { createSkillListTool } from "./skill-list.js";
 import { createSkillViewTool } from "./skill-view.js";
 import { createSkillFileTool } from "./skill-file.js";
+import { createSkillFeedbackTool } from "./skill-feedback.js";
 
-export function registerTools(server: McpServer, skillService: SkillService): void {
-  const skillList = createSkillListTool(skillService);
-  const skillView = createSkillViewTool(skillService);
-  const skillFile = createSkillFileTool(skillService);
+export function registerTools(server: McpServer, skillService: SkillService, contextBuilder?: ContextBuilder): void {
+  const skillList = createSkillListTool(skillService, contextBuilder);
+  const skillView = createSkillViewTool(skillService, contextBuilder);
+  const skillFile = createSkillFileTool(skillService, contextBuilder);
+  const skillFeedback = createSkillFeedbackTool(skillService, contextBuilder);
 
-  // McpServer.tool() accepts name, description, shape (plain object), and handler
   server.tool(skillList.name, skillList.description, skillList.inputSchema.shape, skillList.handler);
   server.tool(skillView.name, skillView.description, skillView.inputSchema.shape, skillView.handler);
   server.tool(skillFile.name, skillFile.description, skillFile.inputSchema.shape, skillFile.handler);
+  server.tool(skillFeedback.name, skillFeedback.description, skillFeedback.inputSchema.shape, skillFeedback.handler);
 }

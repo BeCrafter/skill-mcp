@@ -102,6 +102,8 @@ export interface AccessLogEntry {
   action: "list" | "view_entry" | "read_files";
   filePaths?: string[];
   latencyMs?: number;
+  userId?: string;
+  sessionId?: string;
   createdAt: number;
 }
 
@@ -113,3 +115,24 @@ export type DeploymentMode = "standalone" | "gateway";
 
 /** Storage type */
 export type StorageType = "local-fs" | "aliyun-oss";
+
+/** Request context for permission and session tracking */
+export interface RequestContext {
+  userId: string;
+  sessionId: string;
+  tags: Set<string>;
+  isAuthenticated: boolean;
+}
+
+/** Skill feedback entry */
+export interface SkillFeedbackEntry {
+  id: string;
+  skillId: string;
+  skillSlug: string;
+  userId: string | null;
+  sessionId: string | null;
+  outcome: "success" | "partial" | "failure" | "irrelevant";
+  context: string | null;
+  agentComment: string | null;
+  createdAt: number;
+}

@@ -2,26 +2,28 @@ import { z } from "zod";
 import { SKILL_FILE_DESC } from "../../prompt/descriptions.js";
 import type { SkillService } from "../../services/skill.service.js";
 import { toMcpError } from "../../utils/errors.js";
+import type { ContextBuilder, McpExtra } from "../../permission/context-builder.js";
 
-export function createSkillFileTool(skillService: SkillService) {
+export function createSkillFileTool(skillService: SkillService, contextBuilder?: ContextBuilder) {
   return {
     name: "skill_file" as const,
     description: SKILL_FILE_DESC,
     inputSchema: z.object({
-      skill_slug: z.string().optional().describe("技能 slug（来自 skill_list 的 slug 字段）"),
-      skill_id: z.string().optional().describe("技能唯一标识（来自 skill_list 的 [id:xxx] 字段）"),
+      skill_slug: z.string().optional().describe("Skill slug from skill_list"),
+      skill_id: z.string().optional().describe("Skill ID from skill_list [id:xxx]"),
       file_paths: z.array(z.string()).describe(
         "Array of file paths for batch concurrent reading. " +
         'E.g. ["references/api-docs.md", "templates/checklist.md"]',
       ),
     }),
-    handler: async (params: { skill_slug?: string; skill_id?: string; file_paths: string[] }) => {
+    handler: async (params: { skill_slug?: string; skill_id?: string; file_paths: string[] }, extra?: McpExtra) => {
       const identifier = params.skill_id || params.skill_slug;
       if (!identifier) {
-        return toMcpError(new Error("必须提供 skill_slug 或 skill_id 其中之一"));
+        return toMcpError(new Error("Must provide skill_slug or skill_id"));
       }
       try {
-        const results = await skillService.readSkillFiles(identifier, params.file_paths);
+        const context = contextBuilder && extra ? await contextBuilder(extra) : undefined;
+        const results = await skillService.readSkillFiles(identifier, params.file_paths, context);
         return {
           content: results.map(r => {
             if (r.encoding === "base64") {

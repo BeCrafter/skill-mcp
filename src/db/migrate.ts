@@ -42,6 +42,45 @@ CREATE TABLE IF NOT EXISTS access_logs (
   action          TEXT NOT NULL,
   file_paths      TEXT,
   latency_ms      INTEGER,
+  user_id         TEXT,
+  session_id      TEXT,
+  created_at      INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id              TEXT PRIMARY KEY,
+  name            TEXT,
+  token           TEXT NOT NULL UNIQUE,
+  status          TEXT DEFAULT 'active',
+  created_at      INTEGER,
+  updated_at      INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL UNIQUE,
+  description     TEXT,
+  tags            TEXT NOT NULL,
+  created_at      INTEGER,
+  updated_at      INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id         TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  created_at      INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS skill_feedbacks (
+  id              TEXT PRIMARY KEY,
+  skill_id        TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  skill_slug      TEXT NOT NULL,
+  user_id         TEXT,
+  session_id      TEXT,
+  outcome         TEXT NOT NULL,
+  context         TEXT,
+  agent_comment   TEXT,
   created_at      INTEGER NOT NULL
 );
 
@@ -51,6 +90,10 @@ CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status);
 CREATE INDEX IF NOT EXISTS idx_skills_visibility ON skills(visibility);
 CREATE INDEX IF NOT EXISTS idx_skill_files_skill_id ON skill_files(skill_id);
 CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_users_token ON users(token);
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles(user_id);
+CREATE INDEX IF NOT EXISTS idx_feedbacks_skill_slug ON skill_feedbacks(skill_slug);
+CREATE INDEX IF NOT EXISTS idx_feedbacks_created_at ON skill_feedbacks(created_at);
 `;
 
 export function runMigrations(dbPath: string): void {

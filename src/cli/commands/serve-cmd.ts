@@ -6,6 +6,7 @@ import { CompositeCacheProvider } from "../../cache/composite.provider.js";
 import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { RemoteSkillProvider } from "../../provider/remote.provider.js";
 import { NoopPermissionFilter } from "../../permission/noop-filter.js";
+import { createContextBuilder } from "../../permission/context-builder.js";
 import { SkillService } from "../../services/skill.service.js";
 import { AccessLogService } from "../../services/access-log.service.js";
 import { createMcpServer } from "../../mcp/server.js";
@@ -14,6 +15,10 @@ import { createApp } from "../../app.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { SkillFileRepository } from "../../db/repositories/skill-file.repository.js";
 import { AccessLogRepository } from "../../db/repositories/access-log.repository.js";
+import { UserRepository } from "../../db/repositories/user.repository.js";
+import { RoleRepository } from "../../db/repositories/role.repository.js";
+import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
+import { SkillFeedbackRepository } from "../../db/repositories/skill-feedback.repository.js";
 import { SkillImporter } from "../../import/importer.js";
 import { getLogger } from "../../utils/logger.js";
 
@@ -48,6 +53,10 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   const skillRepo = new SkillRepository(db);
   const skillFileRepo = new SkillFileRepository(db);
   const accessLogRepo = new AccessLogRepository(db);
+  const userRepo = new UserRepository(db);
+  const roleRepo = new RoleRepository(db);
+  const userRoleRepo = new UserRoleRepository(db);
+  const feedbackRepo = new SkillFeedbackRepository(db);
 
   // Initialize cache
   const cache = new CompositeCacheProvider({
@@ -78,7 +87,8 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // Initialize services
   const permissionFilter = new NoopPermissionFilter();
   const accessLogService = new AccessLogService(accessLogRepo, logger);
-  const skillService = new SkillService(skillProvider, cache, permissionFilter, logger, accessLogService);
+  const skillService = new SkillService(skillProvider, cache, permissionFilter, logger, accessLogService, feedbackRepo);
+  const contextBuilder = createContextBuilder(userRepo, userRoleRepo);
 
   // Initialize importer for admin routes
   const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger);
@@ -86,7 +96,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // Start based on transport
   if (options.transport === "stdio") {
     // stdio: single connection, single McpServer
-    const mcpServer = await createMcpServer(skillService, skillProvider, config.app.name, config.app.version);
+    const mcpServer = await createMcpServer(skillService, skillProvider, config.app.name, config.app.version, contextBuilder);
     const { transport } = createTransport({ type: "stdio", server: mcpServer });
     await mcpServer.connect(transport);
   } else {
@@ -103,6 +113,10 @@ export async function serveAction(options: ServeOptions): Promise<void> {
         storage,
         cache,
         importer,
+        userRepo,
+        roleRepo,
+        userRoleRepo,
+        feedbackRepo,
       },
       { type: options.transport as "sse" | "http" },
     );
