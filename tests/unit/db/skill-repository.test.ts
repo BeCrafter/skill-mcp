@@ -12,7 +12,7 @@ function createTestTables(db: ReturnType<typeof createDatabase>): void {
     `CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
       display_name TEXT, description TEXT NOT NULL DEFAULT '',
-      version TEXT NOT NULL DEFAULT '1.0.0', category TEXT DEFAULT NULL,
+      version TEXT NOT NULL DEFAULT '0.0.1', category TEXT DEFAULT NULL,
       tags TEXT, attributes TEXT, status TEXT NOT NULL DEFAULT 'draft',
       visibility TEXT NOT NULL DEFAULT 'public', entry_file TEXT DEFAULT 'SKILL.md',
       storage_path TEXT NOT NULL, content_hash TEXT, conditions TEXT,
@@ -52,7 +52,7 @@ describe("SkillRepository", () => {
     expect(skill.slug).toBe("test-skill");
     expect(skill.name).toBe("test-skill");
     expect(skill.description).toBe("A test skill");
-    expect(skill.version).toBe("1.0.0");
+    expect(skill.version).toBe("0.0.1");
 
     const found = await repo.findBySlug("test-skill");
     expect(found).not.toBeNull();
@@ -62,7 +62,7 @@ describe("SkillRepository", () => {
   it("should find skills by name (multiple results)", async () => {
     await repo.create({
       slug: "test-skill-v1", name: "test-skill",
-      version: "1.0.0", storagePath: "skills/test-skill-v1/",
+      version: "0.0.1", storagePath: "skills/test-skill-v1/",
     });
     await repo.create({
       slug: "test-skill-v2", name: "test-skill",
@@ -192,25 +192,25 @@ describe("SkillRepository", () => {
 
 describe("bumpVersion", () => {
   it("should bump patch version", () => {
-    expect(bumpVersion("1.0.0", "patch")).toBe("1.0.1");
+    expect(bumpVersion("0.0.1", "patch")).toBe("1.0.1");
     expect(bumpVersion("2.3.9", "patch")).toBe("2.3.10");
   });
 
   it("should bump minor version", () => {
-    expect(bumpVersion("1.0.0", "minor")).toBe("1.1.0");
+    expect(bumpVersion("0.0.1", "minor")).toBe("1.1.0");
     expect(bumpVersion("0.9.9", "minor")).toBe("0.10.0");
   });
 
   it("should bump major version", () => {
-    expect(bumpVersion("1.0.0", "major")).toBe("2.0.0");
+    expect(bumpVersion("0.0.1", "major")).toBe("2.0.0");
   });
 
   it("should default to patch", () => {
-    expect(bumpVersion("1.0.0")).toBe("1.0.1");
+    expect(bumpVersion("0.0.1")).toBe("1.0.1");
   });
 
-  it("should return 1.0.0 for invalid versions", () => {
-    expect(bumpVersion("invalid")).toBe("1.0.0");
-    expect(bumpVersion("1.0")).toBe("1.0.0");
+  it("should return 0.0.1 for invalid versions", () => {
+    expect(bumpVersion("invalid")).toBe("0.0.1");
+    expect(bumpVersion("1.0")).toBe("0.0.1");
   });
 });

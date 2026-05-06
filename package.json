@@ -1,6 +1,6 @@
 {
-  "name": "skill-mcp-server",
-  "version": "1.0.0",
+  "name": "skill-mcp",
+  "version": "0.0.1",
   "description": "Cloud Skill File System & MCP Permission Gateway",
   "type": "module",
   "main": "dist/index.js",
@@ -19,7 +19,16 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "db:migrate": "node dist/db/migrate.js"
+    "db:migrate": "node dist/db/migrate.js",
+    "docs:sync": "node scripts/sync-docs.js",
+    "release:patch": "npm version patch -m 'chore(release): v%s' && git push --follow-tags",
+    "release:minor": "npm version minor -m 'chore(release): v%s' && git push --follow-tags",
+    "release:major": "npm version major -m 'chore(release): v%s' && git push --follow-tags",
+    "release:alpha": "npm version prerelease --preid=alpha -m 'chore(release): v%s' && git push --follow-tags",
+    "release:beta": "npm version prerelease --preid=beta -m 'chore(release): v%s' && git push --follow-tags",
+    "release:rc": "npm version prerelease --preid=rc -m 'chore(release): v%s' && git push --follow-tags",
+    "release:dev": "npm version prerelease --preid=dev -m 'chore(release): v%s' && git push --follow-tags",
+    "prepublishOnly": "npm run build && npm run lint && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

@@ -34,7 +34,7 @@ describe.skip("Scenario B: Local MCP + Remote Storage", () => {
       join(skillDir, "manifest.json"),
       JSON.stringify({
         name: "test-skill-b",
-        version: "1.0.0",
+        version: "0.0.1",
         entry: "SKILL.md",
       }),
     );

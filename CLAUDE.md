@@ -57,6 +57,29 @@ For multi-step tasks, state a brief plan with verification steps. Strong success
 
 ---
 
+### 5. Documentation Sync
+
+**Keep README.md in sync with code changes.**
+
+When making changes that affect:
+- **CLI commands** — Add to README.md "CLI Commands Reference" section
+- **MCP tools** — Add to README.md "MCP Tools" section  
+- **Environment variables** — Add to README.md "Environment Variables" table
+- **New features** — Update relevant sections in README.md
+
+**Before committing**:
+- Run `npm run docs:sync` to check if README.md is up to date
+- Update README.zh.md (Chinese translation) when English version changes
+- The pre-commit hook will automatically check and prompt if docs need updating
+
+**Docs sync locations**:
+- CLI commands: `src/cli/commands/*.ts` → README.md "CLI Commands Reference"
+- MCP tools: `src/mcp/tools/*.ts` → README.md "MCP Tools"
+- Environment vars: `src/config/schema.ts` → README.md "Environment Variables"
+- Sync script: `scripts/sync-docs.js` validates all above
+
+---
+
 ## Build & Run Commands
 
 ```bash
@@ -328,3 +351,19 @@ A skill package directory must contain `manifest.json` (with `name`, optional `v
 - **Tests** — Vitest with globals enabled, `@` alias maps to `src/`. Tests live in `tests/unit/` mirroring `src/` structure.
 - **ESLint** — Uses `typescript-eslint` with recommended configs. Ignores `dist/`, `node_modules/`, `tests/`.
 - **Node.js >= 22** required.
+
+---
+
+## Git Hooks
+
+The project has intelligent pre-commit hooks configured to ensure documentation stays in sync:
+
+- **`.git/hooks/pre-commit`** — Automatically runs `npm run docs:sync --check-new-only` when committing
+- **Smart detection**: Only prompts for docs update when you add NEW files:
+  - New CLI command: `src/cli/commands/*-cmd.ts`
+  - New MCP tool: `src/mcp/tools/*.ts`
+  - Config changes: `src/config/schema.ts`
+- Refactors and bug fixes won't trigger the hook (no docs needed)
+- Run `npm run docs:sync` for full documentation sync check at any time
+
+---

@@ -278,7 +278,7 @@ erDiagram
     TEXT name "NOT NULL"
     TEXT display_name
     TEXT description "DEFAULT ''"
-    TEXT version "DEFAULT '1.0.0'"
+    TEXT version "DEFAULT '0.0.1'"
     TEXT category
     TEXT tags "JSON array"
     TEXT attributes "JSON object"

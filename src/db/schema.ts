@@ -6,7 +6,7 @@ export const skills = sqliteTable("skills", {
   name: text("name").notNull(),
   displayName: text("display_name"),
   description: text("description").notNull().default(""),
-  version: text("version").notNull().default("1.0.0"),
+  version: text("version").notNull().default("0.0.1"),
   category: text("category"),
   tags: text("tags"), // JSON array
   attributes: text("attributes"), // JSON object

@@ -39,7 +39,7 @@ describe("Compliance Metrics", () => {
       join(promptWriterDir, "manifest.json"),
       JSON.stringify({
         name: "prompt-writer",
-        version: "1.0.0",
+        version: "0.0.1",
         entry: "SKILL.md",
         files: [
           "SKILL.md",
@@ -146,7 +146,7 @@ Use this for creative writing, brainstorming, design tasks.`
       join(codeReviewDir, "manifest.json"),
       JSON.stringify({
         name: "code-review",
-        version: "1.0.0",
+        version: "0.0.1",
         entry: "SKILL.md",
       })
     );

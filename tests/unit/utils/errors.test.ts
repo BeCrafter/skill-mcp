@@ -19,7 +19,7 @@ describe("SkillNotFoundError", () => {
 describe("DuplicateSkillNameError", () => {
   it("should list existing skills", () => {
     const err = new DuplicateSkillNameError("prompt-writer", [
-      { slug: "prompt-writer", version: "1.0.0" },
+      { slug: "prompt-writer", version: "0.0.1" },
       { slug: "prompt-writer-v2", version: "2.0.0" },
     ]);
     expect(err.message).toContain("prompt-writer");

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS skills (
   name            TEXT NOT NULL,
   display_name    TEXT,
   description     TEXT NOT NULL DEFAULT '',
-  version         TEXT NOT NULL DEFAULT '1.0.0',
+  version         TEXT NOT NULL DEFAULT '0.0.1',
   category        TEXT DEFAULT NULL,
   tags            TEXT,
   attributes      TEXT,

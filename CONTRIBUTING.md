@@ -303,26 +303,26 @@ We follow [Semantic Versioning](https://semver.org/):
    ```bash
    git checkout dev
    git pull origin dev
-   git checkout -b release/v1.0.0
+   git checkout -b release/v0.0.1
    ```
 
 2. **Update version**
    - Update `package.json` version
    - Update `CHANGELOG.md`
-   - Commit: `chore: bump version to 1.0.0`
+   - Commit: `chore: bump version to 0.0.1`
 
 3. **Merge to main**
    ```bash
    git checkout main
-   git merge --no-ff release/v1.0.0
-   git tag -a v1.0.0 -m "Release v1.0.0"
+   git merge --no-ff release/v0.0.1
+   git tag -a v0.0.1 -m "Release v0.0.1"
    git push origin main --tags
    ```
 
 4. **Merge back to dev**
    ```bash
    git checkout dev
-   git merge --no-ff release/v1.0.0
+   git merge --no-ff release/v0.0.1
    git push origin dev
    ```
 

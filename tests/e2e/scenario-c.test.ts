@@ -38,7 +38,7 @@ describe.skip("Scenario C: Distributed HTTP Deployment", () => {
         join(skillDir, "manifest.json"),
         JSON.stringify({
           name: "c-test-skill",
-          version: "1.0.0",
+          version: "0.0.1",
           entry: "SKILL.md",
         }),
       );

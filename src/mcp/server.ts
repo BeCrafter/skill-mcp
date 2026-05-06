@@ -29,8 +29,8 @@ export async function createMcpServer(
 
   const server = new McpServer(
     {
-      name: serverName ?? "skill-mcp-server",
-      version: serverVersion ?? "1.0.0",
+      name: serverName ?? "skill-mcp",
+      version: serverVersion ?? "0.0.1",
     },
     { instructions },
   );

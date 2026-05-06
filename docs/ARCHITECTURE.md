@@ -360,7 +360,7 @@ A: 参考场景 C2 分离部署，使用 Docker Compose 或 Helm 作为参考。
 
 ## 更新日志
 
-### v1.0.0 (当前)
+### v0.0.1 (当前)
 - 支持三种部署场景
 - 实现 API Key 认证
 - RemoteProvider 重试和超时

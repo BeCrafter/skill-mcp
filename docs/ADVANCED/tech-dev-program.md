@@ -435,7 +435,7 @@ SKILL.md 是模型在 `skill_view` 时读取的文件，它的唯一职责是告
 ```json
 {
   "name": "prompt-writer",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "entry": "SKILL.md",
   "files": [
     "SKILL.md",
@@ -960,7 +960,7 @@ node dist/index.js --transport http --port 3000
 │  name: "prompt-writer"              │  ← 技能名称（可重复）
 │  display_name: "提示词编写专家"      │  ← 管理员自定义展示名（可选）
 │  description: "专业提示词编写..."    │  ← 管理员为索引优化的描述
-│  version: "1.0.0"                   │  ← 三位语义化版本号
+│  version: "0.0.1"                   │  ← 三位语义化版本号
 │  category: "writing"                │  ← 分类（可选属性，用于 API 筛选）
 │  tags: ["prompt", "creative"]       │  ← 标签（可选属性，用于 API 筛选）
 │  attributes: {"language": "zh-CN",  │  ← 自定义属性键值对（灵活扩展）
@@ -1000,7 +1000,7 @@ CREATE TABLE skills (
   name            TEXT NOT NULL,              -- 技能名称（可重复，匹配 manifest.name）
   display_name    TEXT,                       -- 管理员自定义展示名（可选）
   description     TEXT NOT NULL DEFAULT '',   -- 索引描述（可不同于 SKILL.md 内容）
-  version         TEXT NOT NULL DEFAULT '1.0.0',  -- 三位语义化版本号
+  version         TEXT NOT NULL DEFAULT '0.0.1',  -- 三位语义化版本号
   category        TEXT DEFAULT NULL,          -- 分类（可选，不再作为核心字段）
   tags            TEXT,                       -- JSON 数组：标签（可选）
   attributes      TEXT,                       -- JSON 对象：自定义属性键值对（灵活扩展）
@@ -1469,7 +1469,7 @@ skill_view  直接回复
 ## 9. 项目结构
 
 ```
-skill-mcp-server/
+skill-mcp/
 ├── src/
 │   ├── index.ts                          # 应用入口（解析 --transport 参数）
 │   ├── app.ts                            # Fastify 实例（SSE/HTTP 模式）
@@ -1789,7 +1789,7 @@ export class SkillImporter {
       description: options.description ?? ...,
       version: targetSkill
         ? this.bumpVersion(targetSkill.version, options.versionBump)
-        : (manifest.version ?? "1.0.0"),
+        : (manifest.version ?? "0.0.1"),
       storagePath,
       contentHash,
       // ... other fields
@@ -1934,7 +1934,7 @@ CREATE TABLE skills (
   name            TEXT NOT NULL,              -- 技能名称（可重复，匹配 manifest.name）
   display_name    TEXT,                       -- 管理员自定义展示名
   description     TEXT NOT NULL DEFAULT '',    -- 服务端索引描述
-  version         TEXT NOT NULL DEFAULT '1.0.0',  -- 三位语义化版本号
+  version         TEXT NOT NULL DEFAULT '0.0.1',  -- 三位语义化版本号
   category        TEXT DEFAULT NULL,          -- 分类（可选，不再作为核心字段）
   tags            TEXT,                       -- JSON 数组：标签（可选）
   attributes      TEXT,                       -- JSON 对象：自定义属性键值对（灵活扩展）
@@ -2123,7 +2123,7 @@ Response 200:
     {
       "slug": "prompt-writer",
       "name": "prompt-writer",
-      "version": "1.0.0",
+      "version": "0.0.1",
       "status": "published",
       "updated_at": "2026-04-24T10:00:00Z"
     },
@@ -2295,8 +2295,8 @@ program.parse();
 ```typescript
 export const configSchema = z.object({
   app: z.object({
-    name: z.string().default("skill-mcp-server"),
-    version: z.string().default("1.0.0"),
+    name: z.string().default("skill-mcp"),
+    version: z.string().default("0.0.1"),
     env: z.enum(["development", "production", "test"]).default("development"),
   }),
 

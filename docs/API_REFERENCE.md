@@ -278,7 +278,7 @@ curl http://localhost:3000/api/admin/skills?offset=0&limit=50
 {
   "success": true,
   "data": [
-    { "id": "...", "slug": "prompt-writer", "name": "prompt-writer", "version": "1.0.0" }
+    { "id": "...", "slug": "prompt-writer", "name": "prompt-writer", "version": "0.0.1" }
   ],
   "total": 1,
   "offset": 0,
@@ -439,7 +439,7 @@ curl -H "Authorization: Bearer api-key" \
     "slug": "prompt-writer",
     "name": "prompt-writer",
     "description": "Professional prompt writing...",
-    "version": "1.0.0",
+    "version": "0.0.1",
     "entry": "# Prompt Writer\n\n## Trigger Conditions..."
   }
 }

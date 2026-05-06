@@ -30,7 +30,7 @@ describe("Scenario A: Local Standalone Mode", () => {
       join(skillDir, "manifest.json"),
       JSON.stringify({
         name: "test-skill",
-        version: "1.0.0",
+        version: "0.0.1",
         entry: "SKILL.md",
       }),
     );

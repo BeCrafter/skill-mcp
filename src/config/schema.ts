@@ -33,8 +33,8 @@ export const cacheConfigSchema = z.object({
 
 export const configSchema = z.object({
   app: z.object({
-    name: z.string().default("skill-mcp-server"),
-    version: z.string().default("1.0.0"),
+    name: z.string().default("skill-mcp"),
+    version: z.string().default("0.0.1"),
     env: z.enum(["development", "production", "test"]).default("development"),
   }),
 

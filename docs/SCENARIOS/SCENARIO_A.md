@@ -133,7 +133,7 @@ EOF
 cat > ./data/skills/my-test-skill/manifest.json << 'EOF'
 {
   "name": "my-test-skill",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "entry": "SKILL.md",
   "description": "A test skill"
 }
@@ -161,7 +161,7 @@ npm run import -- --source ./data/skills/my-test-skill
       "slug": "my-test-skill",
       "name": "my-test-skill",
       "description": "A test skill",
-      "version": "1.0.0"
+      "version": "0.0.1"
     }
   ]
 }

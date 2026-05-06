@@ -77,7 +77,7 @@ export class SkillRepository {
       name: input.name,
       displayName: input.displayName ?? null,
       description: input.description ?? "",
-      version: input.version ?? "1.0.0",
+      version: input.version ?? "0.0.1",
       category: input.category ?? null,
       tags: toJson(input.tags ?? []),
       attributes: toJson(input.attributes ?? {}),
@@ -164,7 +164,7 @@ export class SkillRepository {
 
 export function bumpVersion(current: string, bump: VersionBump = "patch"): string {
   const parts = current.split(".").map(Number);
-  if (parts.length !== 3 || parts.some(isNaN)) return "1.0.0";
+  if (parts.length !== 3 || parts.some(isNaN)) return "0.0.1";
   switch (bump) {
     case "major": return `${parts[0] + 1}.0.0`;
     case "minor": return `${parts[0]}.${parts[1] + 1}.0`;

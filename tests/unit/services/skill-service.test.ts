@@ -9,7 +9,7 @@ import type { SkillMeta, SkillFileContent, FileInfo } from "../../../src/types/i
 const sampleSkill: SkillMeta = {
   id: "1", slug: "test-skill", name: "test-skill",
   displayName: null, description: "A test skill for testing",
-  version: "1.0.0", category: null, tags: [], attributes: {},
+  version: "0.0.1", category: null, tags: [], attributes: {},
   status: "published", visibility: "public", entryFile: "SKILL.md",
   storagePath: "skills/test/", contentHash: null,
   conditions: null, assignedGroups: [], createdAt: 1, updatedAt: 1,
@@ -69,7 +69,7 @@ describe("SkillService", () => {
       {
         id: "2", slug: "draft-skill", name: "draft-skill",
         displayName: null, description: "A draft",
-        version: "1.0.0", category: null, tags: [], attributes: {},
+        version: "0.0.1", category: null, tags: [], attributes: {},
         status: "draft", visibility: "public", entryFile: "SKILL.md",
         storagePath: "skills/draft/", contentHash: null,
         conditions: null, assignedGroups: [], createdAt: 1, updatedAt: 1,

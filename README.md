@@ -2,19 +2,21 @@
 
 **Cloud Skill File System & MCP Permission Gateway**
 
-A Model Context Protocol (MCP) server that provides a managed skill file system for AI assistants. Import, version, and serve reusable skill packages through standard MCP tools with built-in security scanning and permission controls.
+A Model Context Protocol (MCP) server that provides a managed skill file system for AI assistants. Import, version, and serve reusable skill packages through standard MCP tools with built-in security scanning, RBAC, and pipeline orchestration.
 
 ## Features
 
-- **MCP Protocol** — Expose skills as MCP tools (`skill_list`, `skill_view`, `skill_file`) compatible with any MCP client
+- **MCP Protocol** — Expose skills as MCP tools compatible with any MCP client
 - **Multi-Transport** — Supports stdio, SSE, and Streamable HTTP transports
+- **Pipeline Engine** — DAG-based skill orchestration with parallel execution
+- **RBAC** — Role-Based Access Control with tag-based permissions
+- **Skill Feedback** — Collect feedback on skill effectiveness for data-driven improvements
 - **Skill Import** — Import skill packages from local directories or Git repositories
 - **Security Scanning** — Built-in prompt injection detection on all imported skill content
-- **Versioning** — Automatic semantic versioning with content-hash tracking
+- **Versioning** — Automatic semantic versioning with content-hash tracking and rollback support
 - **Caching** — Layered memory (LRU) + file-based caching for fast skill retrieval
 - **SQLite Storage** — Persistent metadata storage via Drizzle ORM + better-sqlite3
 - **CLI Management** — Full command-line interface for importing, listing, searching, and managing skills
-- **Flexible Storage Backends** — Local filesystem or Aliyun OSS for skill file storage
 
 ## 📚 Documentation Navigation
 
@@ -33,9 +35,13 @@ A Model Context Protocol (MCP) server that provides a managed skill file system 
 - [Architecture Overview](./docs/ARCHITECTURE.md) — System design
 - [Organization Rules](./docs/ORGANIZATION.md) — Code structure
 - [API Reference](./docs/API_REFERENCE.md) — MCP tools & REST APIs
+- [Advanced Topics](./docs/ADVANCED/) — Pipeline engine, RBAC, tech specs
 
 **🧪 QA / Testing**
 - [Testing Guide](./docs/TESTING_GUIDE.md) — How to run tests
+
+**📦 Publishing & Release**
+- [Publishing Guide](./docs/PUBLISHING.md) — How to publish to npm
 
 **📖 Additional Resources**
 - [Code Organization Analysis](./docs.local/CODE_ORGANIZATION_ANALYSIS.md) — Codebase structure analysis
@@ -46,7 +52,27 @@ A Model Context Protocol (MCP) server that provides a managed skill file system 
 
 ## Installation
 
+### From npm (recommended)
+
 ```bash
+# 安装最新稳定版
+npm install -g skill-mcp
+
+# 安装特定版本
+npm install -g skill-mcp@0.0.1
+
+# 安装预发布版本
+npm install -g skill-mcp@next      # 最新预发布版
+npm install -g skill-mcp@alpha     # Alpha 测试版
+npm install -g skill-mcp@beta      # Beta 测试版
+npm install -g skill-mcp@rc        # 候选发布版
+```
+
+### From source
+
+```bash
+git clone https://github.com/BeCrafter/skill-mcp.git
+cd skill-mcp
 npm install
 npm run build
 ```
@@ -76,11 +102,11 @@ This project supports **three flexible deployment modes**:
 # Scenario A: Local stdio (recommended for development)
 npm start
 
-# Scenario B: Remote HTTP storage (coming soon)
-npm start -- --mode gateway --cloud-url http://storage:3000
-
 # Scenario C: HTTP server (production)
 TRANSPORT_TYPE=http npm start
+
+# Gateway mode: Proxy to remote cloud service
+DEPLOYMENT_MODE=gateway CLOUD_SERVICE_URL=http://cloud-service:3001 npm start
 ```
 
 ### 2. Import a Skill
@@ -111,8 +137,50 @@ npx skill-mcp search --name prompt
 # Update metadata
 npx skill-mcp update prompt-writer --category "productivity" --display-name "Prompt Writer Pro"
 
+# View version history
+npx skill-mcp versions prompt-writer
+
+# Rollback to previous version
+npx skill-mcp rollback prompt-writer --to 0.0.1
+
 # Remove a skill
 npx skill-mcp remove old-skill --force
+```
+
+### 4. Pipeline Orchestration
+
+```bash
+# Validate pipeline YAML
+npx skill-mcp pipeline validate ./pipeline.yaml
+
+# Visualize pipeline DAG
+npx skill-mcp pipeline graph ./pipeline.yaml
+
+# Execute pipeline (dry-run)
+npx skill-mcp pipeline run ./pipeline.yaml --input pr_url=https://... --dry-run
+```
+
+### 5. RBAC Management
+
+```bash
+# Create a role
+npx skill-mcp role create --name "data-team" --tags "data,analysis" --description "Data science team"
+
+# Create a user
+npx skill-mcp user create --name "Alice" --role-ids "role-uuid-1,role-uuid-2"
+
+# List users
+npx skill-mcp user list
+
+# Assign roles
+npx skill-mcp user assign-roles user-id-1 --role-ids "role-uuid-1"
+```
+
+### 6. Skill Linting
+
+```bash
+# Lint a skill package directory
+npx skill-mcp lint ./path/to/skill-package
 ```
 
 ## MCP Tools
@@ -122,6 +190,8 @@ npx skill-mcp remove old-skill --force
 | `skill_list` | List all published skills with optional filtering |
 | `skill_view` | View the full entry content of a specific skill |
 | `skill_file` | Read individual files from a skill package |
+| `skill_pipeline` | Execute a pipeline (DAG orchestration of skills) |
+| `skill_feedback` | Submit feedback on skill effectiveness |
 
 ## Configuration
 
@@ -130,14 +200,19 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
 ```jsonc
 {
   "app": {
-    "name": "skill-mcp-server",
-    "env": "production"           // "development" | "production" | "test"
+    "name": "skill-mcp",
+    "env": "production",           // "development" | "production" | "test"
+    "version": "0.0.1"
   },
   "deployment": {
-    "mode": "standalone"          // "standalone" | "gateway"
+    "mode": "standalone"          // "standalone" | "gateway" | "cloud-service-only"
+  },
+  "gateway": {                   // Only for gateway mode
+    "cloudServiceUrl": "http://cloud-service:3001",
+    "authToken": "your-token"
   },
   "storage": {
-    "type": "local-fs",           // "local-fs" | "aliyun-oss"
+    "type": "local-fs",         // Currently only "local-fs" supported
     "basePath": "./data/skills"
   },
   "database": {
@@ -150,13 +225,36 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
   "transport": {
     "type": "stdio",              // "stdio" | "sse" | "http"
     "port": 3000,
-    "host": "0.0.0.0"
+    "host": "0.0.0.0",
+    "mcpOnlyMode": false         // If true, disables /api/admin/* routes
   },
   "security": {
     "enableInjectionScan": true
+  },
+  "apiKey": {                    // Optional API key authentication
+    "enabled": false,
+    "keys": []
   }
 }
 ```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NODE_ENV` | Environment | `development` |
+| `DEPLOYMENT_MODE` | Deployment mode | `standalone` |
+| `STORAGE_TYPE` | Storage backend | `local-fs` |
+| `STORAGE_BASE_PATH` | Skills directory | `./data/skills` |
+| `DATABASE_PATH` | SQLite database path | `./data/skill-mcp.db` |
+| `TRANSPORT_TYPE` | Transport type | `stdio` |
+| `TRANSPORT_PORT` | HTTP port | `3000` |
+| `TRANSPORT_HOST` | HTTP host | `0.0.0.0` |
+| `CLOUD_SERVICE_URL` | Cloud service URL (gateway) | - |
+| `AUTH_TOKEN` | Auth token (gateway) | - |
+| `LOG_LEVEL` | Logging level | `info` |
+| `API_KEY_AUTH_ENABLED` | Enable API key auth | `false` |
+| `API_KEYS` | Valid API keys (comma-separated) | - |
 
 ## Skill Package Format
 
@@ -177,30 +275,110 @@ my-skill/
 ```json
 {
   "name": "my-skill",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "entry": "SKILL.md",
   "files": ["references/examples.md"]
 }
+```
+
+## Pipeline Format
+
+A pipeline is a YAML file defining a DAG (Directed Acyclic Graph) of skill stages:
+
+```yaml
+name: code-review-pipeline
+description: Automated code review with security and style checks
+
+inputs:
+  pr_url:
+    type: string
+    required: true
+
+stages:
+  read-pr:
+    skill: github-pr-reader
+    inputs:
+      url: ${{ inputs.pr_url }}
+    outputs: [diff, files]
+
+  security-scan:
+    skill: security-scanner
+    depends_on: [read-pr]
+    inputs:
+      code: ${{ stages.read-pr.outputs.diff }}
+    outputs: [vulnerabilities]
+
+  style-check:
+    skill: style-checker
+    depends_on: [read-pr]
+    inputs:
+      files: ${{ stages.read-pr.outputs.files }}
+    outputs: [violations]
+
+  generate-report:
+    skill: report-writer
+    depends_on: [security-scan, style-check]
+    inputs:
+      security: ${{ stages.security-scan.outputs }}
+      style: ${{ stages.style-check.outputs }}
+    outputs: [report]
+
+output:
+  report: ${{ stages.generate-report.outputs.report }}
 ```
 
 ## Project Structure
 
 ```
 src/
-├── cli/              # CLI commands (import, list, serve, etc.)
+├── cli/              # CLI commands (import, list, serve, pipeline, user, role, etc.)
 ├── config/           # Configuration schema and loader
 ├── mcp/              # MCP server, tools, and transport
+│   └── tools/        # MCP tool implementations
 ├── services/         # Business logic (skill service, access log)
-├── storage/          # Storage providers (local FS, OSS)
+├── provider/         # Data providers (local, remote)
+├── pipeline/         # Pipeline engine (DAG, executor, parser)
+├── permission/       # Permission filters and RBAC
+├── storage/          # Storage providers (local FS)
 ├── cache/            # Cache providers (memory LRU, file, composite)
 ├── db/               # Database schema, migrations, repositories
 ├── import/           # Skill import pipeline (validator, sources)
 ├── prompt/           # System prompt builder
-├── permission/       # Permission filter interface
 ├── admin/            # Admin API routes
+├── http/             # HTTP server and middleware
+├── events/           # Event system
+├── telemetry/        # Metrics and monitoring
+├── middleware/       # Request middleware
 ├── types/            # TypeScript type definitions
 └── utils/            # Shared utilities (security, errors, manifest)
 ```
+
+## CLI Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `serve` | Start MCP server |
+| `import <source>` | Import skill from local path or Git repo |
+| `list` | List all skills |
+| `info <slug>` | Show skill details |
+| `search --name <name>` | Search skills by name |
+| `update <slug>` | Update skill metadata |
+| `remove <slug>` | Remove a skill |
+| `versions <slug>` | Show version history |
+| `rollback <slug>` | Rollback to previous version |
+| `lint <path>` | Lint skill package |
+| `pipeline validate` | Validate pipeline YAML |
+| `pipeline graph` | Visualize pipeline DAG |
+| `pipeline run` | Execute pipeline |
+| `user list/create/get/delete/assign-roles` | Manage users |
+| `role list/create/get/update/delete` | Manage roles |
+| `release:patch` | Bump patch version and create tag |
+| `release:minor` | Bump minor version and create tag |
+| `release:major` | Bump major version and create tag |
+| `release:alpha` | Bump alpha prerelease and create tag |
+| `release:beta` | Bump beta prerelease and create tag |
+| `release:rc` | Bump RC prerelease and create tag |
+| `release:dev` | Bump dev prerelease and create tag |
 
 ## Scripts
 
@@ -214,6 +392,11 @@ src/
 | `npm run test:coverage` | Generate coverage report |
 | `npm run lint` | Lint source files |
 | `npm run lint:fix` | Lint and auto-fix |
+| `npm run db:migrate` | Run database migrations |
+| `npm run docs:sync` | Check README.md sync status |
+| `npm run release:patch` | Bump patch version and create tag |
+| `npm run release:minor` | Bump minor version and create tag |
+| `npm run release:major` | Bump major version and create tag |
 
 ## Testing
 
@@ -239,11 +422,25 @@ npm run test:coverage
 npm run test:watch
 ```
 
+## RBAC Overview
+
+The server implements a flexible RBAC system based on **tags**:
+
+- **Tags**: Capability tags assigned to skills (`skills.tags`)
+- **Roles**: Collections of tags that grant access
+- **Users**: Platform users assigned to roles
+
+**Permission Rules**:
+- `skill.tags = []` → Public skill, accessible to all
+- `skill.tags ∩ user.tags ≠ ∅` → Protected skill, accessible if user has matching tag
+- `skill.tags ∩ user.tags = ∅` → Restricted skill, not accessible
+
 ## Security
 
-- **Prompt Injection Scanning** — All imported skill content is scanned for known injection patterns (e.g., "ignore previous instructions", "forget everything", "you are now")
+- **Prompt Injection Scanning** — All imported skill content is scanned for known injection patterns
 - **Path Traversal Protection** — File path validation prevents directory traversal attacks
 - **File Type Safety** — Binary files are rejected; only text-based formats are allowed
+- **API Key Authentication** — Optional API key-based authentication for admin API routes
 
 ## License
 
