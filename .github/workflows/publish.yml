@@ -97,19 +97,27 @@ jobs:
           echo "🏷️  npm tag: $NPM_TAG"
           echo "🔖 Type: $PRERELEASE_TYPE"
 
-      - name: Verify package.json version matches tag
+      - name: Sync package.json version with tag
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${{ steps.extract_version.outputs.version }}"
+          TAG_VERSION="${TAG_VERSION#v}"  # 移除 v 前缀
 
           if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ Version mismatch!"
+            echo "⚠️  Version mismatch detected!"
             echo "package.json version: $PACKAGE_VERSION"
             echo "Git tag version: $TAG_VERSION"
-            exit 1
+            echo "📝 Syncing package.json version to match tag..."
+            npm version "$TAG_VERSION" --no-git-tag-version --allow-same-version
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add package.json package-lock.json
+            git commit -m "chore(release): sync version to v$TAG_VERSION [skip ci]"
+            git push origin HEAD:main
+            echo "✅ package.json updated and committed: v$TAG_VERSION"
+          else
+            echo "✅ Version already matches: $PACKAGE_VERSION"
           fi
-
-          echo "✅ Version matches: $PACKAGE_VERSION"
 
       - name: Publish to npm
         run: npm publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
