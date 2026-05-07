@@ -201,6 +201,7 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
         targetId: data.target_id,
         versionBump: data.version_bump ?? "patch",
         overwrite: data.overwrite ?? false,
+        allowDuplicate: data.allow_duplicate ?? false,
         branch: data.branch,
         subDir: data.sub_dir,
       });
