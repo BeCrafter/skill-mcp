@@ -65,6 +65,14 @@ export class ContentUnchangedError extends AppError {
   }
 }
 
+/** Slug already taken */
+export class SlugConflictError extends AppError {
+  constructor(slug: string) {
+    super(`Slug "${slug}" is already in use. Choose a different slug.`, "SLUG_CONFLICT", 409);
+    this.name = "SlugConflictError";
+  }
+}
+
 /** Invalid file path */
 export class InvalidPathError extends AppError {
   constructor(path: string) {

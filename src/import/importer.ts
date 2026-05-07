@@ -18,6 +18,7 @@ import {
   InvalidManifestError,
   ContentUnchangedError,
   SkillNotFoundError,
+  SlugConflictError,
 } from "../utils/errors.js";
 
 export class SkillImporter {
@@ -112,7 +113,14 @@ export class SkillImporter {
       action = "updated";
     } else if (existing.length > 0) {
       if (options.allowDuplicate) {
-        slug = await this.uniqueSlug(slugify(meta.name));
+        if (options.slug) {
+          if (await this.skillRepo.findBySlug(options.slug)) {
+            throw new SlugConflictError(options.slug);
+          }
+          slug = options.slug;
+        } else {
+          slug = await this.uniqueSlug(slugify(meta.name));
+        }
         storagePath = `${slug}/`;
       } else if (!options.overwrite) {
         throw new DuplicateSkillNameError(meta.name, existing.map(s => ({ slug: s.slug, version: s.version })));
@@ -141,7 +149,14 @@ export class SkillImporter {
         action = "updated";
       }
     } else {
-      slug = slugify(meta.name);
+      if (options.slug) {
+        if (await this.skillRepo.findBySlug(options.slug)) {
+          throw new SlugConflictError(options.slug);
+        }
+        slug = options.slug;
+      } else {
+        slug = slugify(meta.name);
+      }
       storagePath = `${slug}/`;
     }
 

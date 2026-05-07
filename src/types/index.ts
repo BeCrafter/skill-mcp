@@ -82,6 +82,7 @@ export interface ImportOptions {
   versionBump?: VersionBump;
   overwrite?: boolean;
   allowDuplicate?: boolean;
+  slug?: string;
   branch?: string;
   subDir?: string;
 }
