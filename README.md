@@ -77,6 +77,39 @@ npm install
 npm run build
 ```
 
+## 📂 Data Storage Location
+
+By default, all skill data, database, and cache files are stored in your user home directory:
+
+```
+~/.skill-mcp/
+├── data/
+│   └── skills/          # Skill packages
+├── skill-mcp.db         # SQLite database
+└── cache/               # File cache
+```
+
+This means **skill-mcp works from any directory** — you can run commands like `skill-mcp list` from any folder and access the same data.
+
+### Customize Storage Location
+
+Override the default paths using environment variables:
+
+```bash
+# Custom data directory
+export DATABASE_PATH=/custom/path/skill-mcp.db
+export STORAGE_BASE_PATH=/custom/path/skills
+export CACHE_FILE_DIR=/custom/path/cache
+
+npm start
+```
+
+Or set them per-command:
+
+```bash
+DATABASE_PATH=/data/prod.db skill-mcp list
+```
+
 ## 📋 Choose Your Deployment Scenario
 
 This project supports **three flexible deployment modes**:
@@ -245,8 +278,9 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
 | `NODE_ENV` | Environment | `development` |
 | `DEPLOYMENT_MODE` | Deployment mode | `standalone` |
 | `STORAGE_TYPE` | Storage backend | `local-fs` |
-| `STORAGE_BASE_PATH` | Skills directory | `./data/skills` |
-| `DATABASE_PATH` | SQLite database path | `./data/skill-mcp.db` |
+| `STORAGE_BASE_PATH` | Skills directory | `~/.skill-mcp/data/skills` |
+| `DATABASE_PATH` | SQLite database path | `~/.skill-mcp/skill-mcp.db` |
+| `CACHE_FILE_DIR` | Cache directory | `~/.skill-mcp/cache` |
 | `TRANSPORT_TYPE` | Transport type | `stdio` |
 | `TRANSPORT_PORT` | HTTP port | `3000` |
 | `TRANSPORT_HOST` | HTTP host | `0.0.0.0` |

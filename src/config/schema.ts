@@ -47,7 +47,7 @@ export const configSchema = z.object({
   storage: storageConfigSchema,
 
   database: z.object({
-    path: z.string().default("./data/skill-mcp.db"),
+    path: z.string(),
   }),
 
   cache: cacheConfigSchema,
