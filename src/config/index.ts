@@ -2,6 +2,9 @@ import { configSchema, type AppConfig } from "./schema.js";
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { createRequire } from "node:module";
+
+const APP_VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
 function getDefaultDataDir(): string {
   const userHome = homedir();
@@ -17,6 +20,7 @@ function loadConfig(): AppConfig {
   // Start with env-based defaults
   const envConfig = {
     app: {
+      version: APP_VERSION,
       env: process.env.NODE_ENV ?? "development",
     },
     deployment: {
