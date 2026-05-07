@@ -42,7 +42,12 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add package.json package-lock.json
             git commit -m "chore(release): sync version to v$TAG_VERSION"
-            git push origin main
+            git push origin main || {
+              echo "⚠️  Push failed, attempting to sync with remote..."
+              git fetch origin main
+              git rebase origin/main
+              git push origin main
+            }
           else
             echo "✅ package.json version already matches: $PACKAGE_VERSION"
           fi
@@ -67,7 +72,12 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add CHANGELOG.md
             git commit -m "chore(release): update CHANGELOG for v$VERSION"
-            git push origin main
+            git push origin main || {
+              echo "⚠️  CHANGELOG push failed, attempting to sync with remote..."
+              git fetch origin main
+              git rebase origin/main
+              git push origin main
+            }
 
             rm -f /tmp/changelog_new.txt
           fi

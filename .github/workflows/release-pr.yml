@@ -33,6 +33,8 @@ jobs:
         id: bump_version
         run: |
           CURRENT="${{ steps.get_version.outputs.version }}"
+          # 移除 v 前缀（如果存在）
+          CURRENT="${CURRENT#v}"
           # 解析版本号 (假设格式为 x.y.z)
           MAJOR=$(echo $CURRENT | cut -d. -f1)
           MINOR=$(echo $CURRENT | cut -d. -f2)

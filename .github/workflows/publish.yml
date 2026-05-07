@@ -26,6 +26,8 @@ jobs:
           node-version: 22.x
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Configure npm registry
         run: npm config set registry https://registry.npmjs.org
@@ -91,7 +93,7 @@ jobs:
 
           echo "npm_tag=$NPM_TAG" >> $GITHUB_OUTPUT
           echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
-          echo "prerelease_type=$PRELEASE_TYPE" >> $GITHUB_OUTPUT
+          echo "prerelease_type=$PRERELEASE_TYPE" >> $GITHUB_OUTPUT
 
           echo "📦 Publishing version: $VERSION"
           echo "🏷️  npm tag: $NPM_TAG"
@@ -113,7 +115,15 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add package.json package-lock.json
             git commit -m "chore(release): sync version to v$TAG_VERSION [skip ci]"
-            git push origin HEAD:main
+
+            # 使用 --force-with-lease 推送以处理 detached HEAD 状态
+            # 这比 --force 更安全，因为它会检查远程分支是否有新提交
+            git push origin HEAD:main --force-with-lease || {
+              # 如果推送失败，fetch 最新的 main 分支后重试
+              echo "⚠️  Push failed, attempting to sync with remote..."
+              git fetch origin main
+              git push origin HEAD:main --force-with-lease
+            }
             echo "✅ package.json updated and committed: v$TAG_VERSION"
           else
             echo "✅ Version already matches: $PACKAGE_VERSION"
@@ -121,8 +131,6 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         if: steps.determine_npm_tag.outputs.npm_tag == 'latest' || steps.determine_npm_tag.outputs.npm_tag == 'rc'
@@ -133,7 +141,7 @@ jobs:
 
             ### 安装
             ```bash
-            npm install -g skill-mcp-server@${{ steps.extract_version.outputs.version }}
+            npm install -g skill-mcp@${{ steps.extract_version.outputs.version }}
             ```
 
             ### 更新日志
@@ -152,7 +160,7 @@ jobs:
           echo "✅ Published successfully!"
           echo "Version: ${{ steps.extract_version.outputs.version }}"
           echo "npm tag: ${{ steps.determine_npm_tag.outputs.npm_tag }}"
-          echo "Package: https://www.npmjs.com/package/skill-mcp-server"
+          echo "Package: https://www.npmjs.com/package/skill-mcp"
 
       - name: Notify prerelease success (no GitHub Release)
         if: steps.determine_npm_tag.outputs.npm_tag != 'latest' && steps.determine_npm_tag.outputs.npm_tag != 'rc'
@@ -160,5 +168,5 @@ jobs:
           echo "✅ Prerelease published successfully!"
           echo "Version: ${{ steps.extract_version.outputs.version }}"
           echo "npm tag: ${{ steps.determine_npm_tag.outputs.npm_tag }}"
-          echo "Install: npm install -g skill-mcp-server@${{ steps.determine_npm_tag.outputs.npm_tag }}"
-          echo "Package: https://www.npmjs.com/package/skill-mcp-server"
+          echo "Install: npm install -g skill-mcp@${{ steps.determine_npm_tag.outputs.npm_tag }}"
+          echo "Package: https://www.npmjs.com/package/skill-mcp"

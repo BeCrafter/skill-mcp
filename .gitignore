@@ -35,6 +35,7 @@ out
 .cache/
 .parcel-cache/
 .vite/
+*.tar.gz
 
 # CLI Compiled Scripts (generated from npm run build)
 # These are created during build and should not be in version control
