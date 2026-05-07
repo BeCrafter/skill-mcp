@@ -192,21 +192,21 @@ describe("SkillRepository", () => {
 
 describe("bumpVersion", () => {
   it("should bump patch version", () => {
-    expect(bumpVersion("0.0.1", "patch")).toBe("1.0.1");
+    expect(bumpVersion("0.0.1", "patch")).toBe("0.0.2");
     expect(bumpVersion("2.3.9", "patch")).toBe("2.3.10");
   });
 
   it("should bump minor version", () => {
-    expect(bumpVersion("0.0.1", "minor")).toBe("1.1.0");
+    expect(bumpVersion("0.0.1", "minor")).toBe("0.1.0");
     expect(bumpVersion("0.9.9", "minor")).toBe("0.10.0");
   });
 
   it("should bump major version", () => {
-    expect(bumpVersion("0.0.1", "major")).toBe("2.0.0");
+    expect(bumpVersion("0.0.1", "major")).toBe("1.0.0");
   });
 
   it("should default to patch", () => {
-    expect(bumpVersion("0.0.1")).toBe("1.0.1");
+    expect(bumpVersion("0.0.1")).toBe("0.0.2");
   });
 
   it("should return 0.0.1 for invalid versions", () => {
