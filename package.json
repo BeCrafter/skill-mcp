@@ -1,6 +1,6 @@
 {
   "name": "skill-mcp",
-  "version": "0.0.4-dev.3",
+  "version": "0.1.0",
   "description": "Cloud Skill File System & MCP Permission Gateway",
   "type": "module",
   "files": [
