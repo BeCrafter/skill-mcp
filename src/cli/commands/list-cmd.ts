@@ -12,7 +12,7 @@ function printSkillRow(s: SkillRow, slugWidth: number): void {
   if (s.description) console.log(`  ${c.dim(truncate(s.description))}`);
   const extras: string[] = [];
   if (s.category) extras.push(`category: ${s.category}`);
-  if (s.tags.length) extras.push(`tags: ${s.tags.join(", ")}`);
+  if (Array.isArray(s.tags) && s.tags.length) extras.push(`tags: ${s.tags.join(", ")}`);
   if (extras.length) console.log(`  ${c.dim(extras.join("  ·  "))}`);
 }
 

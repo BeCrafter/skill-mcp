@@ -27,7 +27,7 @@ export async function infoAction(slug: string): Promise<void> {
   console.log(kv("status",     badge(skill.status)));
   console.log(kv("visibility", skill.visibility));
   if (skill.category) console.log(kv("category",   skill.category));
-  if (skill.tags.length) console.log(kv("tags", skill.tags.join(", ")));
+  if (Array.isArray(skill.tags) && skill.tags.length) console.log(kv("tags", skill.tags.join(", ")));
   console.log(kv("entry",      skill.entryFile));
   console.log(kv("storage",    skill.storagePath));
   console.log(kv("hash",       skill.contentHash ? skill.contentHash.slice(0, 16) + "…" : c.dim("N/A")));

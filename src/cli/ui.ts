@@ -57,3 +57,15 @@ export function fmtDate(ts: number): string {
 export function detail(key: string, value: string, keyWidth = 10): string {
   return `     ${c.dim(key.padEnd(keyWidth))}  ${value}`;
 }
+
+export function list(items: string[]): string {
+  return items.map((item, i) => `     ${c.dim("•")}  ${item}`).join("\n");
+}
+
+export function infoBox(title: string, items: Array<{ key: string; value: string }>): void {
+  const keyWidth = Math.max(...items.map(i => i.key.length), 0);
+  console.error(`  ${c.cyan("ℹ")}  ${c.bold(title)}`);
+  items.forEach(item => {
+    console.error(`     ${c.dim(item.key.padEnd(keyWidth))}  ${item.value}`);
+  });
+}

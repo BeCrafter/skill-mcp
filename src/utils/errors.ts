@@ -29,11 +29,11 @@ export class PermissionDeniedError extends AppError {
 /** Duplicate skill name */
 export class DuplicateSkillNameError extends AppError {
   constructor(
-    public readonly name: string,
+    public readonly skillName: string,
     public readonly existing: Array<{ slug: string; version: string }>,
   ) {
     super(
-      `Duplicate skill name "${name}". Use --id to specify which one to overwrite.\nExisting: ${existing.map(s => `${s.slug} (${s.version})`).join(", ")}`,
+      `Duplicate skill name "${skillName}". Use --id to specify which one to overwrite.\nExisting: ${existing.map(s => `${s.slug} (${s.version})`).join(", ")}`,
       "DUPLICATE_SKILL_NAME",
       409,
     );

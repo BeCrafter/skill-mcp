@@ -10,7 +10,8 @@ import { SkillVersionRepository } from "../../db/repositories/skill-version.repo
 import { DomainEventBus } from "../../events/event-bus.js";
 import { setupCacheSubscribers } from "../../events/cache-subscriber.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
-import { c, badge, detail, ok, fail } from "../ui.js";
+import { c, badge, detail, ok, fail, infoBox, list } from "../ui.js";
+import { DuplicateSkillNameError } from "../../utils/errors.js";
 import type { ImportOptions } from "../../types/index.js";
 
 export async function importAction(
@@ -42,11 +43,22 @@ export async function importAction(
     console.log(detail("id",     r.id));
     if (r.action === "created") console.log(detail("slug",   r.slug));
     if (r.category)             console.log(detail("category", r.category));
-    if (r.tags?.length)         console.log(detail("tags",   r.tags.join(", ")));
+    if (Array.isArray(r.tags) && r.tags.length)  console.log(detail("tags", r.tags.join(", ")));
     console.log(detail("status", badge("published")));
     console.log();
   } catch (error: unknown) {
-    if (error instanceof Error) {
+    if (error instanceof DuplicateSkillNameError) {
+      console.error(`\n  ${c.boldRed("✗")}  ${c.bold("Duplicate skill found")}\n`);
+      infoBox(
+        `Skill "${c.bold(error.skillName)}" already exists`,
+        error.existing.map(s => ({ key: s.slug, value: `v${s.version}` }))
+      );
+      console.error(`\n     ${c.dim("Options:")}\n`);
+      console.error(`     ${c.cyan("--overwrite")}      Replace the first existing version`);
+      console.error(`     ${c.cyan("--id <id>")}       Update a specific version by ID`);
+      console.error(`     ${c.cyan("--allow-duplicate")}  Create as new variant with auto-generated slug\n`);
+      process.exit(1);
+    } else if (error instanceof Error) {
       fail(error.message);
       process.exit(1);
     }
