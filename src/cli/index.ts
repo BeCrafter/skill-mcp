@@ -47,6 +47,8 @@ export async function createCli(): Promise<Command> {
     .option("--id <id>", "Target skill ID for overwrite update")
     .option("--version-bump <type>", "Version bump: major|minor|patch", "patch")
     .option("--overwrite", "Overwrite if skill exists with same name")
+    .option("--allow-duplicate", "Allow importing as a new entry even if a skill with the same name exists")
+    .option("--slug <slug>", "Custom slug for the imported skill (used with --allow-duplicate or new skills)")
     .option("--branch <branch>", "Git branch (for git sources)")
     .option("--sub-dir <path>", "Sub-directory within git repo")
     .action(async (source, opts) => {
@@ -57,6 +59,8 @@ export async function createCli(): Promise<Command> {
         targetId: opts.id as string | undefined,
         versionBump: opts.versionBump as "major" | "minor" | "patch",
         overwrite: opts.overwrite as boolean | undefined,
+        allowDuplicate: opts.allowDuplicate as boolean | undefined,
+        slug: opts.slug as string | undefined,
         branch: opts.branch as string | undefined,
         subDir: opts.subDir as string | undefined,
       });

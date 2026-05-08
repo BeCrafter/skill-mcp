@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const MIGRATION_SQL = `
 CREATE TABLE IF NOT EXISTS skills (
@@ -123,11 +124,10 @@ export function runMigrations(dbPath: string): void {
   db.pragma("foreign_keys = ON");
   db.exec(MIGRATION_SQL);
   db.close();
-  console.log(`Database migrated: ${dbPath}`);
 }
 
-// Allow running as script
-const dbPath = process.argv[2];
-if (dbPath) {
-  runMigrations(dbPath);
+// Allow running as script: node migrate.js <dbPath>
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const dbPath = process.argv[2];
+  if (dbPath) runMigrations(dbPath);
 }

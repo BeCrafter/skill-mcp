@@ -29,11 +29,11 @@ export class PermissionDeniedError extends AppError {
 /** Duplicate skill name */
 export class DuplicateSkillNameError extends AppError {
   constructor(
-    public readonly name: string,
+    public readonly skillName: string,
     public readonly existing: Array<{ slug: string; version: string }>,
   ) {
     super(
-      `Duplicate skill name "${name}". Use --id to specify which one to overwrite.\nExisting: ${existing.map(s => `${s.slug} (${s.version})`).join(", ")}`,
+      `Duplicate skill name "${skillName}". Use --id to specify which one to overwrite.\nExisting: ${existing.map(s => `${s.slug} (${s.version})`).join(", ")}`,
       "DUPLICATE_SKILL_NAME",
       409,
     );
@@ -62,6 +62,14 @@ export class ContentUnchangedError extends AppError {
   constructor(name: string) {
     super(`Skill "${name}" content unchanged, no update needed`, "CONTENT_UNCHANGED", 400);
     this.name = "ContentUnchangedError";
+  }
+}
+
+/** Slug already taken */
+export class SlugConflictError extends AppError {
+  constructor(slug: string) {
+    super(`Slug "${slug}" is already in use. Choose a different slug.`, "SLUG_CONFLICT", 409);
+    this.name = "SlugConflictError";
   }
 }
 

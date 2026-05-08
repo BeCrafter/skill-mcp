@@ -1,11 +1,26 @@
 import { configSchema, type AppConfig } from "./schema.js";
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { createRequire } from "node:module";
+
+const APP_VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
+
+function getDefaultDataDir(): string {
+  const userHome = homedir();
+  return join(userHome, ".skill-mcp");
+}
 
 function loadConfig(): AppConfig {
+  const defaultDataDir = getDefaultDataDir();
+  const defaultDbPath = join(defaultDataDir, "skill-mcp.db");
+  const defaultStoragePath = join(defaultDataDir, "data", "skills");
+  const defaultCachePath = join(defaultDataDir, "cache");
+
   // Start with env-based defaults
   const envConfig = {
     app: {
+      version: APP_VERSION,
       env: process.env.NODE_ENV ?? "development",
     },
     deployment: {
@@ -19,11 +34,11 @@ function loadConfig(): AppConfig {
         }
       : undefined,
     database: {
-      path: process.env.DATABASE_PATH ?? "./data/skill-mcp.db",
+      path: process.env.DATABASE_PATH ?? defaultDbPath,
     },
     storage: {
       type: (process.env.STORAGE_TYPE as "local-fs") ?? "local-fs",
-      basePath: process.env.STORAGE_BASE_PATH ?? "./data/skills",
+      basePath: process.env.STORAGE_BASE_PATH ?? defaultStoragePath,
     } as const,
     cache: {
       memory: {
@@ -32,7 +47,7 @@ function loadConfig(): AppConfig {
       },
       file: {
         enabled: process.env.CACHE_FILE_ENABLED !== "false",
-        cacheDir: process.env.CACHE_FILE_DIR ?? "./data/cache",
+        cacheDir: process.env.CACHE_FILE_DIR ?? defaultCachePath,
       },
     },
     transport: {
@@ -120,4 +135,4 @@ export function resetConfig(): void {
 }
 
 export type { AppConfig };
-export { configSchema };
+export { configSchema, getDefaultDataDir };

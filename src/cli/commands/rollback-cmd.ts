@@ -9,12 +9,15 @@ import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { SkillFileRepository } from "../../db/repositories/skill-file.repository.js";
 import { NoopPermissionFilter } from "../../permission/noop-filter.js";
 import { SkillService } from "../../services/skill.service.js";
-import { getLogger } from "../../utils/logger.js";
+import { createLogger, setLogger } from "../../utils/logger.js";
+import { c, detail, ok, fail } from "../ui.js";
 
 export async function rollbackAction(
   slug: string,
   options: { to: string; bump?: "major" | "minor" | "patch" },
 ): Promise<void> {
+  setLogger(createLogger("silent"));
+
   const config = getConfig();
   runMigrations(config.database.path);
 
@@ -25,44 +28,39 @@ export async function rollbackAction(
   const cache = new CompositeCacheProvider({ memory: config.cache.memory, file: config.cache.file });
   const basePath = config.storage.type === "local-fs" ? config.storage.basePath : "./data/skills";
   const storage = new LocalFileSystemProvider(basePath);
-  const logger = getLogger();
+  const logger = createLogger("silent");
   const skillProvider = new LocalSkillProvider(storage, skillRepo, skillFileRepo, cache);
   const permissionFilter = new NoopPermissionFilter();
   const skillService = new SkillService(
-    skillProvider,
-    cache,
-    permissionFilter,
-    logger,
-    undefined,
-    undefined,
-    versionRepo,
-    skillRepo,
-    storage,
+    skillProvider, cache, permissionFilter, logger,
+    undefined, undefined, versionRepo, skillRepo, storage,
   );
 
   try {
     const skill = await skillRepo.findBySlug(slug);
     if (!skill) {
-      console.error(`✗ Skill not found: ${slug}`);
+      fail(`Skill not found: ${slug}`);
       process.exit(1);
     }
 
     const version = versionRepo.findByVersion(skill.id, options.to);
     if (!version) {
-      console.error(`✗ Version ${options.to} not found`);
+      fail(`Version ${options.to} not found`);
       process.exit(1);
     }
 
-    console.log(`Rolling back "${slug}" from ${skill.version} to ${options.to}...`);
+    console.log(`\n  ${c.dim("Rolling back")}  ${c.boldCyan(slug)}  ${c.dim(skill.version + " → " + options.to + " …")}`);
     await skillService.rollbackToVersion(slug, options.to, options.bump ?? "patch");
 
     const updated = await skillRepo.findBySlug(slug);
-    console.log(`\n✓ Rolled back "${slug}" to version ${options.to}`);
-    console.log(`  New version: ${updated!.version} (${options.bump ?? "patch"} bump)`);
-    console.log(`  Files restored: ${version.fileCount}`);
+    const bump = options.bump ?? "patch";
+    ok(`${c.bold("Rolled back")}  ${c.boldCyan(slug)}  ${c.dim("to v" + options.to)}`);
+    console.log(detail("new version",   `${c.dim("v" + updated!.version)}  ${c.dim("(" + bump + " bump)")}`));
+    console.log(detail("files restored", String(version.fileCount)));
+    console.log();
   } catch (error: unknown) {
     if (error instanceof Error) {
-      console.error(`✗ ${error.message}`);
+      fail(error.message);
       process.exit(1);
     }
     throw error;

@@ -18,6 +18,7 @@ import {
   InvalidManifestError,
   ContentUnchangedError,
   SkillNotFoundError,
+  SlugConflictError,
 } from "../utils/errors.js";
 
 export class SkillImporter {
@@ -110,34 +111,52 @@ export class SkillImporter {
       slug = targetSkill.slug;
       storagePath = targetSkill.storagePath;
       action = "updated";
-    } else if (existing.length >0) {
-      if (!options.overwrite) {
-        throw new DuplicateSkillNameError(meta.name, existing.map(s => ({ slug: s.slug, version: s.version })));
-      }
-      // Overwrite first match
-      targetSkill = existing[0];
-      if (targetSkill.contentHash === contentHash) {
-        if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
-          await this.updateMetadata(targetSkill, options, tags, existing[0].slug);
-          this.logger.info({ slug: existing[0].slug, name: meta.name }, "Skill metadata updated (content unchanged)");
-          return {
-            id: existing[0].id,
-            slug: existing[0].slug,
-            name: meta.name,
-            version: targetSkill.version,
-            fileCount: skillFiles.length,
-            category: options.category ?? targetSkill.category ?? undefined,
-            tags: options.tags ?? (targetSkill.tags as string[] ?? []),
-            action: "updated",
-          };
+    } else if (existing.length > 0) {
+      if (options.allowDuplicate) {
+        if (options.slug) {
+          if (await this.skillRepo.findBySlug(options.slug)) {
+            throw new SlugConflictError(options.slug);
+          }
+          slug = options.slug;
+        } else {
+          slug = await this.uniqueSlug(slugify(meta.name));
         }
-        throw new ContentUnchangedError(meta.name);
+        storagePath = `${slug}/`;
+      } else if (!options.overwrite) {
+        throw new DuplicateSkillNameError(meta.name, existing.map(s => ({ slug: s.slug, version: s.version })));
+      } else {
+        // Overwrite first match
+        targetSkill = existing[0];
+        if (targetSkill.contentHash === contentHash) {
+          if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
+            await this.updateMetadata(targetSkill, options, tags, existing[0].slug);
+            this.logger.info({ slug: existing[0].slug, name: meta.name }, "Skill metadata updated (content unchanged)");
+            return {
+              id: existing[0].id,
+              slug: existing[0].slug,
+              name: meta.name,
+              version: targetSkill.version,
+              fileCount: skillFiles.length,
+              category: options.category ?? targetSkill.category ?? undefined,
+              tags: options.tags ?? (targetSkill.tags as string[] ?? []),
+              action: "updated",
+            };
+          }
+          throw new ContentUnchangedError(meta.name);
+        }
+        slug = targetSkill.slug;
+        storagePath = targetSkill.storagePath;
+        action = "updated";
       }
-      slug = targetSkill.slug;
-      storagePath = targetSkill.storagePath;
-      action = "updated";
     } else {
-      slug = slugify(meta.name);
+      if (options.slug) {
+        if (await this.skillRepo.findBySlug(options.slug)) {
+          throw new SlugConflictError(options.slug);
+        }
+        slug = options.slug;
+      } else {
+        slug = slugify(meta.name);
+      }
       storagePath = `${slug}/`;
     }
 
@@ -267,6 +286,15 @@ export class SkillImporter {
     if (options.description !== undefined) updates.description = options.description ?? null;
     await this.skillRepo.update(targetSkill.id, updates);
     this.eventBus?.publish({ type: "skill:updated", slug });
+  }
+
+  private async uniqueSlug(base: string): Promise<string> {
+    if (!await this.skillRepo.findBySlug(base)) return base;
+    let counter = 2;
+    while (await this.skillRepo.findBySlug(`${base}-${counter}`)) {
+      counter++;
+    }
+    return `${base}-${counter}`;
   }
 
   private async snapshotCurrentVersion(skill: SkillMeta): Promise<void> {
