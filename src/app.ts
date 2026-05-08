@@ -72,32 +72,115 @@ export async function createApp(
   if (isCloudServiceOnlyMode) {
     logger.info("Cloud Service only mode: MCP transport disabled");
   } else if (transportConfig.type === "http") {
-    const mcpServer = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder);
     const { StreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => crypto.randomUUID() });
-    await mcpServer.connect(transport);
-    mcpHandler = async (req, res) => { await transport.handleRequest(req, res); };
+
+    // Map to track active sessions, similar to SSE but for StreamableHttp
+    const httpSessions = new Map<string, { transport: InstanceType<typeof StreamableHTTPServerTransport>; server: Awaited<ReturnType<typeof createMcpServer>> }>();
+
+    mcpHandler = async (req, res) => {
+      // Read body first - required because getRequestListener from @hono/node-server
+      // sets wrapBodyStream AFTER newRequest is called, so passing req directly
+      // results in a Request with no body and req.json() hangs indefinitely.
+      let parsedBody: unknown;
+      if (req.method === "POST") {
+        const rawBody = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          req.on("data", chunk => { data += chunk; });
+          req.on("end", () => resolve(data));
+          req.on("error", reject);
+        });
+        try { parsedBody = JSON.parse(rawBody); } catch { /* will be rejected by transport */ }
+      }
+
+      // Use mcp-session-id from request header (MCP spec), or generate new UUID for new sessions
+      const sessionId = (req.headers["mcp-session-id"] as string) || crypto.randomUUID();
+
+      try {
+        if (!httpSessions.has(sessionId)) {
+          const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId, enableJsonResponse: true });
+          const server = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder);
+          await server.connect(transport);
+          httpSessions.set(sessionId, { transport, server });
+          req.on("close", () => {
+            const session = httpSessions.get(sessionId);
+            httpSessions.delete(sessionId);
+            session?.server.close().catch(() => {});
+          });
+        }
+
+        const session = httpSessions.get(sessionId)!;
+        await session.transport.handleRequest(req, res, parsedBody);
+      } catch (err) {
+        logger.error({ err, sessionId }, "Error handling Streamable HTTP request");
+        if (!res.headersSent) {
+          json(res, 500, { error: "Failed to handle HTTP request" });
+        }
+      }
+    };
     logger.info("Streamable HTTP transport configured at /mcp");
   } else if (transportConfig.type === "sse") {
     const { SSEServerTransport } = await import("@modelcontextprotocol/sdk/server/sse.js");
-    const sseTransports = new Map<string, InstanceType<typeof SSEServerTransport>>();
+    const sseConnections = new Map<string, { transport: InstanceType<typeof SSEServerTransport>; server: Awaited<ReturnType<typeof createMcpServer>> }>();
+
     mcpHandler = async (req, res) => {
       const url = req.url?.split("?")[0] ?? "";
+
       if (req.method === "GET" && url === "/mcp/sse") {
-        const sessionId = crypto.randomUUID();
-        const server = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder);
-        const transport = new SSEServerTransport("/mcp/messages", res);
-        sseTransports.set(sessionId, transport);
-        await server.connect(transport);
-        req.on("close", () => { sseTransports.delete(sessionId); server.close().catch(() => {}); });
+        try {
+          const server = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder);
+          const transport = new SSEServerTransport("/mcp/messages", res);
+          // Use transport's own sessionId — it embeds this in the endpoint event sent to the client,
+          // so POST requests will arrive with this exact ID.
+          const sessionId = transport.sessionId;
+          sseConnections.set(sessionId, { transport, server });
+
+          await server.connect(transport);
+
+          // Cleanup when connection closes
+          const cleanup = () => {
+            sseConnections.delete(sessionId);
+            server.close().catch((err) => logger.debug({ err }, "Error closing SSE server"));
+          };
+          req.on("close", cleanup);
+          res.on("close", cleanup);
+          res.on("finish", cleanup);
+        } catch (err) {
+          logger.error({ err }, "Failed to create SSE connection");
+          json(res, 500, { error: "Failed to create SSE connection" });
+        }
         return;
       }
+
       if (req.method === "POST" && url === "/mcp/messages") {
         const { URL: URLParser } = await import("node:url");
         const urlObj = new URLParser(req.url ?? "/", `http://${req.headers.host}`);
         const sessionId = urlObj.searchParams.get("sessionId");
-        if (sessionId && sseTransports.has(sessionId)) { await sseTransports.get(sessionId)!.handlePostMessage(req, res); return; }
-        if (sseTransports.size === 1) { await sseTransports.values().next().value!.handlePostMessage(req, res); return; }
+
+        if (sessionId && sseConnections.has(sessionId)) {
+          try {
+            await sseConnections.get(sessionId)!.transport.handlePostMessage(req, res);
+            return;
+          } catch (err) {
+            logger.error({ err, sessionId }, "Error handling SSE message");
+            sseConnections.delete(sessionId);
+            json(res, 500, { error: "Failed to handle SSE message" });
+            return;
+          }
+        }
+
+        // Fallback: use first available session if sessionId not provided
+        if (!sessionId && sseConnections.size === 1) {
+          try {
+            const conn = sseConnections.values().next().value;
+            if (conn) {
+              await conn.transport.handlePostMessage(req, res);
+              return;
+            }
+          } catch (err) {
+            logger.error({ err }, "Error handling SSE message (fallback)");
+          }
+        }
+
         json(res, 400, { error: "No active SSE session" });
         return;
       }

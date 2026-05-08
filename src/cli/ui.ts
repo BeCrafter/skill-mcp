@@ -59,7 +59,7 @@ export function detail(key: string, value: string, keyWidth = 10): string {
 }
 
 export function list(items: string[]): string {
-  return items.map((item, i) => `     ${c.dim("•")}  ${item}`).join("\n");
+  return items.map((item) => `     ${c.dim("•")}  ${item}`).join("\n");
 }
 
 export function infoBox(title: string, items: Array<{ key: string; value: string }>): void {

@@ -10,7 +10,7 @@ import { SkillVersionRepository } from "../../db/repositories/skill-version.repo
 import { DomainEventBus } from "../../events/event-bus.js";
 import { setupCacheSubscribers } from "../../events/cache-subscriber.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
-import { c, badge, detail, ok, fail, infoBox, list } from "../ui.js";
+import { c, badge, detail, ok, fail, infoBox } from "../ui.js";
 import { DuplicateSkillNameError } from "../../utils/errors.js";
 import type { ImportOptions } from "../../types/index.js";
 
