@@ -182,7 +182,7 @@ npx skill-mcp lint ./path/to/skill-package
     "version": "0.0.1"
   },
   "deployment": {
-    "mode": "standalone"          // "standalone" | "gateway" | "cloud-service-only"
+    "mode": "standalone"          // "standalone" | "gateway" | "cloud"
   },
   "gateway": {                   // 仅用于网关模式
     "cloudServiceUrl": "http://cloud-service:3001",

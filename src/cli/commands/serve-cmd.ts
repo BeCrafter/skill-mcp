@@ -2,6 +2,7 @@ import { getConfig } from "../../config/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import { getDatabase, closeDatabase } from "../../db/connection.js";
 import { LocalFileSystemProvider } from "../../storage/local-fs.provider.js";
+import type { IStorageProvider } from "../../storage/provider.interface.js";
 import { CompositeCacheProvider } from "../../cache/composite.provider.js";
 import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { RemoteSkillProvider } from "../../provider/remote.provider.js";
@@ -30,15 +31,15 @@ export interface ServeOptions {
   transport: "stdio" | "sse" | "http";
   port: number;
   host: string;
-  mode: "standalone" | "gateway" | "cloud-service-only";
+  mode: "standalone" | "gateway" | "cloud";
 }
 
 export async function serveAction(options: ServeOptions): Promise<void> {
   const config = getConfig();
 
   // Validate deployment mode with transport
-  if (options.mode === "cloud-service-only" && options.transport === "stdio") {
-    logger.error("cloud-service-only mode cannot use stdio transport (MCP not available). Use --transport sse or --transport http");
+  if (options.mode === "cloud" && options.transport === "stdio") {
+    logger.error("cloud mode cannot use stdio transport (MCP not available). Use --transport sse or --transport http");
     process.exit(1);
   }
 
@@ -68,11 +69,20 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   });
 
   // Initialize storage
-  let storage: LocalFileSystemProvider;
-  if (config.storage.type === "local-fs") {
+  let storage: IStorageProvider;
+  const storageType = config.storage.type;
+  if (storageType === "local-fs") {
     storage = new LocalFileSystemProvider(config.storage.basePath);
+  } else if (storageType === "aliyun-oss") {
+    const { AliyunOssProvider } = await import("../../storage/aliyun-oss.provider.js");
+    storage = new AliyunOssProvider({
+      bucket: config.storage.bucket,
+      region: config.storage.region,
+      accessKeyId: config.storage.accessKeyId,
+      accessKeySecret: config.storage.accessKeySecret,
+    });
   } else {
-    throw new Error(`Storage type "${config.storage.type}" not implemented in MVP`);
+    throw new Error(`Storage type "${storageType}" not supported`);
   }
 
   // Initialize provider

@@ -39,7 +39,7 @@ export const configSchema = z.object({
   }),
 
   deployment: z.object({
-    mode: z.enum(["standalone", "gateway", "cloud-service-only"]).default("standalone"),
+    mode: z.enum(["standalone", "gateway", "cloud"]).default("standalone"),
   }),
 
   gateway: gatewayConfigSchema,

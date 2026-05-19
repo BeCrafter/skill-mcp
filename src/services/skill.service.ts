@@ -68,9 +68,21 @@ export class SkillService {
       });
     }
 
-    const sorted = skills
-      .filter(s => s.status === "published")
-      .sort((a, b) => a.slug.localeCompare(b.slug));
+    const published = skills.filter(s => s.status === "published");
+
+    // Fetch effectiveness rates in bulk (one DB query)
+    const rates = this.feedbackRepo
+      ? await this.feedbackRepo.getEffectivenessRates()
+      : new Map<string, { rate: number; count: number }>();
+
+    const sorted = published.sort((a, b) => {
+      const rateA = rates.get(a.slug)?.rate ?? 0.5;
+      const rateB = rates.get(b.slug)?.rate ?? 0.5;
+      // Primary: effectiveness rate descending
+      if (rateA !== rateB) return rateB - rateA;
+      // Secondary: slug ascending (stable tiebreaker)
+      return a.slug.localeCompare(b.slug);
+    });
 
     const lines = sorted.map(s => {
       const desc = (s.description ?? "").length > 80

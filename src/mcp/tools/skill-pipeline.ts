@@ -4,6 +4,10 @@ import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder, McpExtra } from "../../permission/context-builder.js";
 import { parsePipeline } from "../../pipeline/parser.js";
 import { PipelineExecutor } from "../../pipeline/executor.js";
+import { PipelineRunStore } from "../../pipeline/run-store.js";
+
+// Singleton run store for two-phase execution
+const pipelineRunStore = new PipelineRunStore();
 
 const SKILL_PIPELINE_DESC = [
   "【Skill Pipeline】Execute a DAG (Directed Acyclic Graph) of skills in orchestrated order.",
@@ -48,23 +52,46 @@ export function createSkillPipelineTool(skillService: SkillService, _contextBuil
     name: "skill_pipeline" as const,
     description: SKILL_PIPELINE_DESC,
     inputSchema: z.object({
-      pipeline: z.string().describe("Pipeline definition in YAML format"),
-      inputs: z.record(z.unknown()).describe("Pipeline input values"),
+      pipeline: z.string().optional().describe("Pipeline definition in YAML format (required for new runs)"),
+      inputs: z.record(z.unknown()).optional().describe("Pipeline input values (required for new runs)"),
+      resume: z.object({
+        run_id: z.string(),
+        stage_outputs: z.record(z.record(z.unknown())),
+      }).optional().describe("Resume a paused pipeline with stage execution results"),
     }),
-    handler: async (params: { pipeline: string; inputs: Record<string, unknown> }, _extra?: McpExtra) => {
+    handler: async (
+      params: { pipeline?: string; inputs?: Record<string, unknown>; resume?: { run_id: string; stage_outputs: Record<string, Record<string, unknown>> } },
+      _extra?: McpExtra,
+    ) => {
       try {
-        const pipelineDef = parsePipeline(params.pipeline);
-        const executor = new PipelineExecutor(skillService);
-        const result = await executor.execute(pipelineDef, params.inputs);
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
+        if (params.resume) {
+          // Resume path: Agent provides execution results for stages
+          const executor = new PipelineExecutor(skillService, pipelineRunStore);
+          const result = await executor.resume(params.resume.run_id, params.resume.stage_outputs);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        } else if (params.pipeline) {
+          // New run path: Start a new pipeline execution
+          const pipelineDef = parsePipeline(params.pipeline);
+          const executor = new PipelineExecutor(skillService, pipelineRunStore);
+          const result = await executor.start(pipelineDef, params.inputs ?? {});
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        } else {
+          return toMcpError("Either pipeline or resume parameter is required");
+        }
       } catch (error) {
         return toMcpError(error);
       }

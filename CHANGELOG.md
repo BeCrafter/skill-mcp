@@ -33,5 +33,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two-layer caching (memory LRU + file-based)
 - SQLite storage with Drizzle ORM
 - CLI management interface
-- Multiple deployment modes (standalone, gateway, cloud-service-only)
+- Multiple deployment modes (standalone, gateway, cloud)
 - Admin REST API endpoints

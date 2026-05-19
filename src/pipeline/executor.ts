@@ -1,12 +1,14 @@
 import type { SkillService } from "../services/skill.service.js";
 import type { DomainEventBus } from "../events/event-bus.js";
-import type { PipelineDefinition, StageDefinition, StageResult, PipelineResult } from "./types.js";
+import type { PipelineDefinition, StageDefinition, StageResult, PipelineResult, PipelineResponse, PipelineAwaitingResult, PipelineStageRequest } from "./types.js";
 import { DAGScheduler } from "./dag.js";
 import { ExecutionContext } from "./context.js";
+import type { PipelineRunStore, PipelineRun } from "./run-store.js";
 
 export class PipelineExecutor {
   constructor(
     private skillService: SkillService,
+    private runStore?: PipelineRunStore,
     private eventBus?: DomainEventBus,
   ) {}
 
@@ -109,6 +111,159 @@ export class PipelineExecutor {
         duration_ms: Date.now() - start,
         error: error instanceof Error ? error.message : "Unknown error",
       };
+    }
+  }
+
+  // Two-phase execution methods
+
+  async start(
+    pipeline: PipelineDefinition,
+    inputs: Record<string, unknown>,
+  ): Promise<PipelineResponse> {
+    if (!this.runStore) {
+      throw new Error("PipelineRunStore required for two-phase execution");
+    }
+    this.validateInputs(pipeline, inputs);
+    const runId = this.runStore.createRun(pipeline, inputs);
+    return this.executeBatch(runId);
+  }
+
+  async resume(
+    runId: string,
+    stageOutputs: Record<string, Record<string, unknown>>,
+  ): Promise<PipelineResponse> {
+    const run = this.runStore?.getRun(runId);
+    if (!run) {
+      throw new Error(`Pipeline run "${runId}" not found or expired`);
+    }
+
+    // Store outputs in context
+    for (const [stageName, outputs] of Object.entries(stageOutputs)) {
+      this.runStore?.completeStage(runId, stageName, outputs);
+      run.context.setStageOutputs(stageName, outputs);
+    }
+
+    // Check if all stages in current batch are completed
+    const currentBatch = run.batches[run.currentBatchIndex];
+    const allCompleted = currentBatch.every(s => run.completedStages.has(s));
+
+    if (!allCompleted) {
+      // Return current batch (some stages still need outputs)
+      return await this.buildAwaitingResult(run);
+    }
+
+    // Advance to next batch
+    const nextBatch = this.runStore?.advanceBatch(runId);
+    if (!nextBatch) {
+      // Pipeline complete
+      const output = run.context.resolveExpressions(run.pipeline.output ?? {});
+      return {
+        name: run.pipeline.name,
+        status: "success" as const,
+        stages: this.buildStageResults(run),
+        output: output as Record<string, unknown>,
+        total_duration_ms: Date.now() - run.createdAt,
+      };
+    }
+
+    return this.executeBatch(runId);
+  }
+
+  private async executeBatch(runId: string): Promise<PipelineResponse> {
+    const run = this.runStore?.getRun(runId);
+    if (!run) throw new Error(`Pipeline run "${runId}" not found`);
+
+    const batch = run.batches[run.currentBatchIndex];
+    const stageRequests: PipelineStageRequest[] = [];
+
+    for (const stageName of batch) {
+      const stage = run.pipeline.stages[stageName];
+      if (!stage) continue;
+
+      const resolved_inputs = run.context.resolveExpressions(stage.inputs) as Record<string, unknown>;
+      const skillEntry = await this.skillService.viewSkillEntry(stage.skill);
+
+      stageRequests.push({
+        stage: stageName,
+        skill: stage.skill,
+        skill_entry: skillEntry,
+        resolved_inputs,
+        depends_on: stage.depends_on ?? [],
+        status: "awaiting_execution",
+      });
+    }
+
+    return {
+      run_id: runId,
+      pipeline_name: run.pipeline.name,
+      status: "awaiting_execution" as const,
+      current_batch: stageRequests,
+      completed_stages: Array.from(run.completedStages.entries()).map(([stage, outputs]) => ({
+        stage,
+        outputs,
+      })),
+      remaining_batches: run.batches.length - run.currentBatchIndex - 1,
+    };
+  }
+
+  private async buildAwaitingResult(run: PipelineRun): Promise<PipelineAwaitingResult> {
+    const batch = run.batches[run.currentBatchIndex];
+    const stageRequests: PipelineStageRequest[] = [];
+
+    for (const stageName of batch) {
+      const stage = run.pipeline.stages[stageName];
+      if (!stage) continue;
+
+      const resolved_inputs = run.context.resolveExpressions(stage.inputs) as Record<string, unknown>;
+      const skillEntry = await this.skillService.viewSkillEntry(stage.skill);
+
+      stageRequests.push({
+        stage: stageName,
+        skill: stage.skill,
+        skill_entry: skillEntry,
+        resolved_inputs,
+        depends_on: stage.depends_on ?? [],
+        status: "awaiting_execution",
+      });
+    }
+
+    return {
+      run_id: run.runId,
+      pipeline_name: run.pipeline.name,
+      status: "awaiting_execution",
+      current_batch: stageRequests,
+      completed_stages: Array.from(run.completedStages.entries()).map(([stage, outputs]) => ({
+        stage,
+        outputs,
+      })),
+      remaining_batches: run.batches.length - run.currentBatchIndex - 1,
+    };
+  }
+
+  private buildStageResults(run: PipelineRun): StageResult[] {
+    // Build StageResult array from completed stages for final result
+    // Since we don't track duration per stage in the two-phase model,
+    // we estimate it as a fraction of total time
+    const totalStages = Object.keys(run.pipeline.stages).length;
+    const avgDuration = (Date.now() - run.createdAt) / totalStages;
+
+    return Array.from(run.completedStages.entries()).map(([stage, outputs]) => ({
+      stage,
+      status: "success" as const,
+      outputs,
+      duration_ms: Math.round(avgDuration),
+    }));
+  }
+
+  private validateInputs(pipeline: PipelineDefinition, inputs: Record<string, unknown>): void {
+    for (const [key, inputDef] of Object.entries(pipeline.inputs)) {
+      if (inputDef.required && !(key in inputs)) {
+        if (inputDef.default !== undefined) {
+          inputs[key] = inputDef.default;
+        } else {
+          throw new Error(`Required input "${key}" is missing`);
+        }
+      }
     }
   }
 }

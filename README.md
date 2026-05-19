@@ -238,7 +238,7 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
     "version": "0.0.1"
   },
   "deployment": {
-    "mode": "standalone"          // "standalone" | "gateway" | "cloud-service-only"
+    "mode": "standalone"          // "standalone" | "gateway" | "cloud"
   },
   "gateway": {                   // Only for gateway mode
     "cloudServiceUrl": "http://cloud-service:3001",

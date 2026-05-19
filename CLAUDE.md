@@ -160,7 +160,7 @@ DEPLOYMENT_MODE=standalone npm start
 DEPLOYMENT_MODE=gateway CLOUD_SERVICE_URL=http://... npm start
 
 # Cloud Service Only: Pure data service (no MCP), HTTP only
-DEPLOYMENT_MODE=cloud-service-only npm start --transport http
+DEPLOYMENT_MODE=cloud npm start --transport http
 
 # MCP-only: Disables admin API (for security in production)
 MCP_ONLY_MODE=true npm start
@@ -172,7 +172,7 @@ MCP_ONLY_MODE=true npm start
 |------|---------|-----------|-----------|---|----------|
 | **standalone** | All-in-one | stdio/http | Admin + Gateway | ✅ | Local dev, small deployments |
 | **gateway** | Router layer | stdio/http | Gateway only | ✅ | Proxies to remote cloud service |
-| **cloud-service-only** | Data service | http only | Admin + Gateway | ❌ | Backend in distributed setup |
+| **cloud** | Data service | http only | Admin + Gateway | ❌ | Backend in distributed setup |
 | **MCP-only** | Client-facing | stdio/http | None | ✅ | Production MCP endpoint |
 
 **Three Scenarios at a Glance**:
@@ -224,7 +224,7 @@ MCP_ONLY_MODE=true npm start
 
 **Application Configuration**:
 - `NODE_ENV` — `"development"` | `"production"` (default: `"development"`)
-- `DEPLOYMENT_MODE` — `"standalone"` | `"gateway"` | `"cloud-service-only"` (default: `"standalone"`)
+- `DEPLOYMENT_MODE` — `"standalone"` | `"gateway"` | `"cloud"` (default: `"standalone"`)
 - `MCP_ONLY_MODE` — `"true"` | `"false"` (disables `/api/admin/*` routes, default: `"false"`)
 - `LOG_LEVEL` — `"trace"` | `"debug"` | `"info"` | `"warn"` | `"error"` (default: `"info"`)
 
@@ -330,7 +330,7 @@ CLOUD_SERVICE_URL=http://cloud-service:3002
 LOG_LEVEL=info
 
 # .env.scenario-c2-cloud (data service backend)
-DEPLOYMENT_MODE=cloud-service-only
+DEPLOYMENT_MODE=cloud
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=3002
 STORAGE_TYPE=aliyun-oss

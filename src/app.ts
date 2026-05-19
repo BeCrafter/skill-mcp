@@ -64,7 +64,7 @@ export async function createApp(
 
   // MCP Transport setup
   let mcpHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | null = null;
-  const isCloudServiceOnlyMode = appConfig.deployment.mode === "cloud-service-only";
+  const isCloudServiceOnlyMode = appConfig.deployment.mode === "cloud";
   const contextBuilder = deps.userRepo && deps.userRoleRepo
     ? createContextBuilder(deps.userRepo, deps.userRoleRepo)
     : undefined;
@@ -208,7 +208,7 @@ export async function createApp(
 
       if (url === "/mcp" || url === "/mcp/sse" || url === "/mcp/messages") {
         if (mcpHandler) { await mcpHandler(req, res); return; }
-        if (isCloudServiceOnlyMode) { json(res, 403, { error: "MCP not available in cloud-service-only mode" }); return; }
+        if (isCloudServiceOnlyMode) { json(res, 403, { error: "MCP not available in cloud mode" }); return; }
       }
 
       if (appConfig.transport.mcpOnlyMode) { json(res, 404, { error: "Not found (MCP-only mode)" }); return; }

@@ -116,7 +116,7 @@ export interface AccessLogEntry {
 export type TransportType = "stdio" | "sse" | "http";
 
 /** Deployment mode */
-export type DeploymentMode = "standalone" | "gateway";
+export type DeploymentMode = "standalone" | "gateway" | "cloud";
 
 /** Storage type */
 export type StorageType = "local-fs" | "aliyun-oss";
