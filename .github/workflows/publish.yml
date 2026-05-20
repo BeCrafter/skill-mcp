@@ -25,12 +25,9 @@ jobs:
         with:
           node-version: 22.x
           cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Configure npm registry
-        run: npm config set registry https://registry.npmjs.org
+      - name: Auth to npm
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 
       - name: Install dependencies
         run: npm install --force
@@ -130,7 +127,7 @@ jobs:
           fi
 
       - name: Publish to npm
-        run: npm publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }}
+        run: npm publish --access public --tag ${{ steps.determine_npm_tag.outputs.npm_tag }} --ignore-scripts
 
       - name: Create GitHub Release
         if: steps.determine_npm_tag.outputs.npm_tag == 'latest' || steps.determine_npm_tag.outputs.npm_tag == 'rc'
