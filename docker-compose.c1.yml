@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  skill-mcp:
+    image: skill-mcp:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 3000
+      DEPLOYMENT_MODE: standalone
+      MCP_ONLY_MODE: "false"
+      STORAGE_TYPE: local-fs
+      LOG_LEVEL: debug
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  data:

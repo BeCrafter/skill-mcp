@@ -1,0 +1,154 @@
+version: '3.8'
+
+services:
+  # Storage Service
+  storage:
+    image: skill-mcp:latest
+    restart: always
+    environment:
+      NODE_ENV: production
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 3000
+      DEPLOYMENT_MODE: standalone
+      MCP_ONLY_MODE: "true"
+      ENABLE_API_KEY_AUTH: "true"
+      API_KEYS: ${STORAGE_API_KEY}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
+      STORAGE_BUCKET: ${OSS_BUCKET:-skill-mcp}
+      STORAGE_REGION: ${OSS_REGION:-oss-cn-hangzhou}
+      STORAGE_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
+      STORAGE_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
+      DATABASE_PATH: /data/skill-mcp.db
+      CACHE_FILE_DIR: /data/cache
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - storage-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${STORAGE_API_KEY}", "http://localhost:3000/api/gateway/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # MCP Service 1
+  mcp-1:
+    image: skill-mcp:latest
+    restart: always
+    environment:
+      NODE_ENV: production
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 4000
+      DEPLOYMENT_MODE: gateway
+      CLOUD_SERVICE_URL: http://storage:3000
+      AUTH_TOKEN: ${STORAGE_API_KEY}
+      MCP_ONLY_MODE: "true"
+      DATABASE_PATH: /data/skill-mcp.db
+      CACHE_FILE_DIR: /data/cache
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - mcp-1-cache:/data
+    networks:
+      - internal
+      - external
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # MCP Service 2
+  mcp-2:
+    image: skill-mcp:latest
+    restart: always
+    environment:
+      NODE_ENV: production
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 4000
+      DEPLOYMENT_MODE: gateway
+      CLOUD_SERVICE_URL: http://storage:3000
+      AUTH_TOKEN: ${STORAGE_API_KEY}
+      MCP_ONLY_MODE: "true"
+      DATABASE_PATH: /data/skill-mcp.db
+      CACHE_FILE_DIR: /data/cache
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - mcp-2-cache:/data
+    networks:
+      - internal
+      - external
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    networks:
+      - external
+    depends_on:
+      - mcp-1
+      - mcp-2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  storage-data:
+  mcp-1-cache:
+  mcp-2-cache:
+
+networks:
+  internal:
+    internal: true
+  external:

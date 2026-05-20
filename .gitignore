@@ -63,7 +63,7 @@ data/
 *.db
 *.db-shm
 *.db-wal
-pipeline
+/pipeline  # Only ignore root-level pipeline directory
 
 # Environment Variables
 .env

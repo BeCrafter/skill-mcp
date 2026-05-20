@@ -24,8 +24,9 @@ export class AliyunOssProvider implements IStorageProvider {
     try {
       const result = await this.client.get(path);
       return Buffer.from(result.content);
-    } catch (e: any) {
-      if (e.code === "NoSuchKey" || e.name === "NoSuchKeyError") return null;
+    } catch (e: unknown) {
+      const error = e as { code?: string; name?: string };
+      if (error.code === "NoSuchKey" || error.name === "NoSuchKeyError") return null;
       throw e;
     }
   }
@@ -46,8 +47,9 @@ export class AliyunOssProvider implements IStorageProvider {
   async delete(path: string): Promise<void> {
     try {
       await this.client.delete(path);
-    } catch (e: any) {
-      if (e.code !== "NoSuchKey" && e.name !== "NoSuchKeyError") throw e;
+    } catch (e: unknown) {
+      const error = e as { code?: string; name?: string };
+      if (error.code !== "NoSuchKey" && error.name !== "NoSuchKeyError") throw e;
     }
   }
 
