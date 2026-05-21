@@ -246,6 +246,29 @@ stdio 传输没有 HTTP header，权限隔离通过启动时注入 bearer token 
 
 若数据库已存在 active 用户或带 tag 的 skill，但未配置 token，服务启动时会强制报错退出，避免静默匿名访问。空库或未启用权限的部署仍可匿名启动。
 
+### Gateway HTTP 鉴权
+
+`/api/gateway/*` 由鉴权中间件强制保护：每个请求必须携带 `Authorization: Bearer <token>`，缺失或无效 token 在 handler 之前直接返回 `401`。唯一的匿名端点是 `GET /api/gateway/health`（为 LB / k8s 探针保留）。
+
+```http
+401 Unauthorized
+Content-Type: application/json
+
+{ "success": false, "error": "Authentication required" }
+```
+
+签发 token 的方式 —— 在服务端创建 role + user：
+
+```bash
+skill-mcp role create --name dev --tags "frontend"
+skill-mcp user create --name alice --role-ids <role-id>
+# → 打印 sk-live-xxxx；客户端发送 `Authorization: Bearer sk-live-xxxx`
+```
+
+对于 Gateway → Cloud Service 内部调用，建议在 cloud 侧创建一个专用 `svc-gateway` 用户，把 token 配到 gateway 侧的 `AUTH_TOKEN` 环境变量。
+
+`/mcp/*`（SSE / Streamable HTTP）及 stdio 传输不受影响 —— stdio 使用上文 `SKILL_MCP_AUTH_TOKEN` 启动期注入路径。
+
 ## 技能包格式
 
 技能包是一个包含以下内容的目录：

@@ -303,6 +303,29 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
 
 If the database has any active user or tag-protected skill but no token is configured, the server refuses to start to avoid silent anonymous access. Empty databases continue to start anonymously.
 
+### Gateway HTTP Authentication
+
+`/api/gateway/*` is gated by an authentication middleware: every request must include `Authorization: Bearer <token>`. Missing or invalid tokens return `401` before the handler runs. The only anonymous endpoint is `GET /api/gateway/health` (kept open for LB and k8s liveness probes).
+
+```http
+401 Unauthorized
+Content-Type: application/json
+
+{ "success": false, "error": "Authentication required" }
+```
+
+Issue a token by creating a role + user on the server:
+
+```bash
+skill-mcp role create --name dev --tags "frontend"
+skill-mcp user create --name alice --role-ids <role-id>
+# → prints sk-live-xxxx; client sends `Authorization: Bearer sk-live-xxxx`
+```
+
+For Gateway → Cloud Service internal calls, create a dedicated `svc-gateway` user on the cloud side and configure its token as `AUTH_TOKEN` on the gateway.
+
+`/mcp/*` (SSE / Streamable HTTP) and stdio transports are unaffected — stdio uses the `SKILL_MCP_AUTH_TOKEN` startup-injection path described above.
+
 ## Skill Package Format
 
 A skill package is a directory containing:

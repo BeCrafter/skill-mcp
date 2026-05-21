@@ -263,13 +263,15 @@ MCP_ONLY_MODE=true npm start
 
 **Access Control (RBAC)**:
 - API Key authentication has been removed. All HTTP/SSE callers authenticate with per-user bearer tokens issued by `skill-mcp user create`.
+- `/api/gateway/*` is gated by `enforceGatewayAuth` middleware (`src/http/middleware/gateway-auth.ts`). Missing or invalid `Authorization: Bearer <token>` returns `401` *before* the handler runs. Only `GET /api/gateway/health` is exempt for LB / k8s liveness probes.
 - Roles carry tag lists (`skill-mcp role create --tags ...`); user→role joins produce the request-context tag set.
-- `TagPermissionFilter` enforces visibility:
-  - `visibility="public"` — visible to anyone, including anonymous callers.
+- `TagPermissionFilter` then enforces visibility *after* the caller is authenticated:
+  - `visibility="public"` — visible to any authenticated caller (anonymous still 401's at the gateway).
   - `visibility="internal"` — visible to any authenticated user.
   - `visibility="private"` (default) — empty `tags` means visible to any authenticated user; non-empty `tags` requires intersection with the caller's role tags.
-- Skills default to `visibility="private"` at all three layers (Drizzle schema, SQL migration, repository fallback). Mark a skill `public` (Admin API or DB) to expose it to anonymous traffic.
-- Service accounts: reuse the user table; convention is to name them `svc-<role>` so admins can spot machine identities at a glance.
+- Skills default to `visibility="private"` at all three layers (Drizzle schema, SQL migration, repository fallback). Mark a skill `public` (Admin API or DB) to expose it broadly within the platform.
+- Service accounts: reuse the user table; convention is to name them `svc-<role>` so admins can spot machine identities at a glance. Gateway → Cloud Service internal calls should use a dedicated `svc-gateway` user whose token is configured in the gateway's `AUTH_TOKEN` env var.
+- stdio transport bypasses the HTTP middleware; it instead resolves a token at process startup from `--auth-token` / `SKILL_MCP_AUTH_TOKEN` and injects it via `withFallbackToken`.
 
 ### Scenario-Specific Configurations
 

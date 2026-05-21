@@ -11,6 +11,7 @@ import { registerAdminSkillRoutes } from "./http/handlers/admin/skills.handler.j
 import { registerAdminUserRoutes } from "./http/handlers/admin/users.handler.js";
 import { registerAdminRoleRoutes } from "./http/handlers/admin/roles.handler.js";
 import { registerGatewaySkillRoutes } from "./http/handlers/gateway/skills.handler.js";
+import { enforceGatewayAuth } from "./http/middleware/gateway-auth.js";
 import type { SkillService } from "./services/skill.service.js";
 import type { ISkillProvider } from "./provider/interface.js";
 import type { SkillRepository } from "./db/repositories/skill.repository.js";
@@ -221,12 +222,20 @@ export async function createApp(
       // Legacy health
       if (url === "/api/health") { json(res, 200, { status: "ok", timestamp: new Date().toISOString() }); return; }
 
-      // Gateway routes (per-user RBAC enforced inside handlers via TagPermissionFilter +
-      // skill.visibility — anonymous requests can only see public skills)
+      // Gateway routes — token enforced by enforceGatewayAuth middleware before dispatch.
+      // /api/gateway/health is the only anonymous-accessible endpoint (LB / k8s probes).
       if (url.startsWith("/api/gateway/")) {
         const match = gatewayRouter.match(req.method!, url);
         if (match) {
           const ctx: HttpContext = { req, res, url, method: req.method!, params: match.params, query: parseQuery(req.url ?? "/", req.headers.host), logger };
+          if (url !== "/api/gateway/health") {
+            const requestContext = await enforceGatewayAuth(ctx, deps);
+            if (!requestContext) {
+              recordMetrics(url, req.method!, res.statusCode, startTime);
+              return;
+            }
+            ctx.requestContext = requestContext;
+          }
           await match.handler(ctx);
           recordMetrics(url, req.method!, res.statusCode, startTime);
           return;
