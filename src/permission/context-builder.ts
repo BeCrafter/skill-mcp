@@ -67,3 +67,23 @@ export function createContextBuilder(
 ): ContextBuilder {
   return (extra: McpExtra) => buildRequestContext(extra, userRepo, userRoleRepo);
 }
+
+/**
+ * Wraps a base context builder so that, when the caller does not supply
+ * `extra.authInfo.token`, a fallback token (e.g. injected at stdio startup
+ * from SKILL_MCP_AUTH_TOKEN / --auth-token) is used instead. Per-request the
+ * underlying builder still does the sha256 + DB lookup, so role/tag changes
+ * apply without restart.
+ */
+export function withFallbackToken(
+  base: ContextBuilder,
+  fallbackToken: string | undefined,
+): ContextBuilder {
+  if (!fallbackToken) return base;
+  return (extra: McpExtra) => {
+    if (!extra.authInfo?.token) {
+      return base({ ...extra, authInfo: { token: fallbackToken } });
+    }
+    return base(extra);
+  };
+}

@@ -2,7 +2,6 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { createMcpServer } from "./mcp/server.js";
 import { getLogger } from "./utils/logger.js";
 import { getConfig } from "./config/index.js";
-import { createApiKeyAuthMiddleware } from "./middleware/apikey-auth.js";
 import { createContextBuilder } from "./permission/context-builder.js";
 import { Router } from "./http/router.js";
 import { json, parseQuery } from "./http/helpers.js";
@@ -196,8 +195,6 @@ export async function createApp(
   registerAdminRoleRoutes(adminRouter, deps);
   registerGatewaySkillRoutes(gatewayRouter, deps);
 
-  const apiKeyAuth = createApiKeyAuthMiddleware(appConfig.apiKey ?? { enabled: false, keys: [] });
-
   // Request handler
   httpServer.on("request", async (req, res) => {
     const startTime = Date.now();
@@ -224,13 +221,9 @@ export async function createApp(
       // Legacy health
       if (url === "/api/health") { json(res, 200, { status: "ok", timestamp: new Date().toISOString() }); return; }
 
-      // Gateway routes (auth required)
+      // Gateway routes (per-user RBAC enforced inside handlers via TagPermissionFilter +
+      // skill.visibility — anonymous requests can only see public skills)
       if (url.startsWith("/api/gateway/")) {
-        const authed = await apiKeyAuth(req, res);
-        if (!authed) {
-          recordMetrics(url, req.method!, res.statusCode, startTime);
-          return;
-        }
         const match = gatewayRouter.match(req.method!, url);
         if (match) {
           const ctx: HttpContext = { req, res, url, method: req.method!, params: match.params, query: parseQuery(req.url ?? "/", req.headers.host), logger };

@@ -207,10 +207,6 @@ npx skill-mcp lint ./path/to/skill-package
   },
   "security": {
     "enableInjectionScan": true
-  },
-  "apiKey": {                    // 可选的 API 密钥认证
-    "enabled": false,
-    "keys": []
   }
 }
 ```
@@ -228,10 +224,27 @@ npx skill-mcp lint ./path/to/skill-package
 | `TRANSPORT_PORT` | HTTP 端口 | `3000` |
 | `TRANSPORT_HOST` | HTTP 主机 | `0.0.0.0` |
 | `CLOUD_SERVICE_URL` | 云服务 URL（网关） | - |
-| `AUTH_TOKEN` | 认证令牌（网关） | - |
+| `AUTH_TOKEN` | 网关出向令牌 | - |
+| `SKILL_MCP_AUTH_TOKEN` | stdio 模式权限隔离 bearer token | - |
 | `LOG_LEVEL` | 日志级别 | `info` |
-| `API_KEY_AUTH_ENABLED` | 启用 API 密钥认证 | `false` |
-| `API_KEYS` | 有效的 API 密钥（逗号分隔） | - |
+
+### Stdio 模式权限隔离
+
+stdio 传输没有 HTTP header，权限隔离通过启动时注入 bearer token 实现。CLI flag `--auth-token` 优先于环境变量。
+
+```json
+{
+  "mcpServers": {
+    "skill-mcp": {
+      "command": "skill-mcp",
+      "args": ["serve"],
+      "env": { "SKILL_MCP_AUTH_TOKEN": "sk-live-xxxx" }
+    }
+  }
+}
+```
+
+若数据库已存在 active 用户或带 tag 的 skill，但未配置 token，服务启动时会强制报错退出，避免静默匿名访问。空库或未启用权限的部署仍可匿名启动。
 
 ## 技能包格式
 
@@ -406,7 +419,7 @@ npm run test:watch
 - **提示词注入扫描** — 所有导入的技能内容都会扫描已知的注入模式
 - **路径遍历保护** — 文件路径验证防止目录遍历攻击
 - **文件类型安全** — 拒绝二进制文件；仅允许基于文本的格式
-- **API 密钥认证** — 管理 API 路由的可选 API 密钥认证
+- **按用户的 RBAC** — HTTP/SSE 调用方使用 `skill-mcp user create` 颁发的 bearer token 鉴权；角色携带 tag 列表，`TagPermissionFilter` 基于 `visibility` + tag 交集执行授权（默认 `visibility="private"`）。Service account 复用 user 表，命名约定为 `svc-*`。
 
 ## 许可证
 

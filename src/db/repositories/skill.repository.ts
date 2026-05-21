@@ -82,7 +82,7 @@ export class SkillRepository {
       tags: toJson(input.tags ?? []),
       attributes: toJson(input.attributes ?? {}),
       status: input.status ?? "draft",
-      visibility: input.visibility ?? "public",
+      visibility: input.visibility ?? "private",
       entryFile: input.entryFile ?? "SKILL.md",
       storagePath: input.storagePath ?? `${input.slug}/`,
       contentHash: input.contentHash ?? null,

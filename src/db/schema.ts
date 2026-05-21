@@ -11,7 +11,7 @@ export const skills = sqliteTable("skills", {
   tags: text("tags"), // JSON array
   attributes: text("attributes"), // JSON object
   status: text("status").notNull().default("draft"),
-  visibility: text("visibility").notNull().default("public"),
+  visibility: text("visibility").notNull().default("private"),
   entryFile: text("entry_file").default("SKILL.md"),
   storagePath: text("storage_path").notNull(),
   contentHash: text("content_hash"),

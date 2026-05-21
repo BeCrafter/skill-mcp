@@ -59,12 +59,8 @@ function loadConfig(): AppConfig {
     security: {
       enableInjectionScan: process.env.SECURITY_INJECTION_SCAN !== "false",
     },
-    apiKey: process.env.ENABLE_API_KEY_AUTH === "true" ? {
-      enabled: true,
-      keys: (process.env.API_KEYS ?? "").split(",").filter(Boolean),
-    } : {
-      enabled: false,
-      keys: [],
+    auth: {
+      stdioToken: process.env.SKILL_MCP_AUTH_TOKEN,
     },
   };
 

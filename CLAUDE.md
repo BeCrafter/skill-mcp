@@ -259,8 +259,17 @@ MCP_ONLY_MODE=true npm start
 
 **Security Configuration**:
 - `SECURITY_INJECTION_SCAN` — `"true"` | `"false"` (enable prompt injection detection, default: `"true"`)
-- `API_KEY_AUTH_ENABLED` — `"true"` | `"false"` (enable API key authentication, default: `"false"`)
-- `API_KEYS` — Comma-separated list of valid API keys (e.g., `"key1,key2,key3"`)
+- `SKILL_MCP_AUTH_TOKEN` — Stdio mode bearer token used for permission isolation. Resolved per-request via `buildRequestContext` (sha256 → user lookup → tag aggregation). CLI flag `--auth-token` overrides. When unset and the DB has active users or non-public skills, `serve --transport stdio` exits with an error.
+
+**Access Control (RBAC)**:
+- API Key authentication has been removed. All HTTP/SSE callers authenticate with per-user bearer tokens issued by `skill-mcp user create`.
+- Roles carry tag lists (`skill-mcp role create --tags ...`); user→role joins produce the request-context tag set.
+- `TagPermissionFilter` enforces visibility:
+  - `visibility="public"` — visible to anyone, including anonymous callers.
+  - `visibility="internal"` — visible to any authenticated user.
+  - `visibility="private"` (default) — empty `tags` means visible to any authenticated user; non-empty `tags` requires intersection with the caller's role tags.
+- Skills default to `visibility="private"` at all three layers (Drizzle schema, SQL migration, repository fallback). Mark a skill `public` (Admin API or DB) to expose it to anonymous traffic.
+- Service accounts: reuse the user table; convention is to name them `svc-<role>` so admins can spot machine identities at a glance.
 
 ### Scenario-Specific Configurations
 

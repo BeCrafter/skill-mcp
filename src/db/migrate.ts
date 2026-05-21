@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS skills (
   tags            TEXT,
   attributes      TEXT,
   status          TEXT NOT NULL DEFAULT 'draft',
-  visibility      TEXT NOT NULL DEFAULT 'public',
+  visibility      TEXT NOT NULL DEFAULT 'private',
   entry_file      TEXT DEFAULT 'SKILL.md',
   storage_path    TEXT NOT NULL,
   content_hash    TEXT,

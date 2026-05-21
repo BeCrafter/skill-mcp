@@ -7,7 +7,8 @@ import { CompositeCacheProvider } from "../../cache/composite.provider.js";
 import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { RemoteSkillProvider } from "../../provider/remote.provider.js";
 import { NoopPermissionFilter } from "../../permission/noop-filter.js";
-import { createContextBuilder } from "../../permission/context-builder.js";
+import { createContextBuilder, withFallbackToken } from "../../permission/context-builder.js";
+import { assertStdioTokenOrExit } from "./serve-stdio-auth.js";
 import { SkillService } from "../../services/skill.service.js";
 import { AccessLogService } from "../../services/access-log.service.js";
 import { createMcpServer } from "../../mcp/server.js";
@@ -32,6 +33,7 @@ export interface ServeOptions {
   port: number;
   host: string;
   mode: "standalone" | "gateway" | "cloud";
+  authToken?: string;
 }
 
 export async function serveAction(options: ServeOptions): Promise<void> {
@@ -119,8 +121,13 @@ export async function serveAction(options: ServeOptions): Promise<void> {
 
   // Start based on transport
   if (options.transport === "stdio") {
-    // stdio: single connection, single McpServer
-    const mcpServer = await createMcpServer(skillService, skillProvider, config.app.name, config.app.version, contextBuilder);
+    // stdio: single connection, single McpServer.
+    // stdio has no per-request auth header, so we resolve a token at startup
+    // (CLI flag overrides env) and inject it into every contextBuilder call.
+    const stdioToken = options.authToken ?? config.auth?.stdioToken;
+    await assertStdioTokenOrExit(stdioToken, { userRepo, skillRepo, logger });
+    const stdioContextBuilder = withFallbackToken(contextBuilder, stdioToken);
+    const mcpServer = await createMcpServer(skillService, skillProvider, config.app.name, config.app.version, stdioContextBuilder);
     const { transport } = createTransport({ type: "stdio", server: mcpServer });
     await mcpServer.connect(transport);
   } else {

@@ -29,12 +29,14 @@ export async function createCli(): Promise<Command> {
     .option("--port <number>", "HTTP port (for sse/http)", String(config.transport.port))
     .option("--host <host>", "HTTP host", config.transport.host)
     .option("--mode <mode>", "Deployment mode: standalone|gateway|cloud", config.deployment.mode)
+    .option("--auth-token <token>", "Stdio mode: bearer token used for permission isolation (overrides SKILL_MCP_AUTH_TOKEN)")
     .action(async (opts) => {
       await serveAction({
         transport: opts.transport as "stdio" | "sse" | "http",
         port: parseInt(opts.port, 10),
         host: opts.host,
         mode: opts.mode as "standalone" | "gateway" | "cloud",
+        authToken: opts.authToken as string | undefined,
       });
     });
 

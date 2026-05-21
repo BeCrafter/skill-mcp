@@ -70,10 +70,9 @@ export const configSchema = z.object({
     enableInjectionScan: true,
   }),
 
-  apiKey: z.object({
-    enabled: z.boolean().default(false),
-    keys: z.array(z.string()).default([]),
-  }).optional(),
+  auth: z.object({
+    stdioToken: z.string().optional(),
+  }).default({}),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

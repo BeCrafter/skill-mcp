@@ -134,7 +134,10 @@ function scanCliCommands() {
   try {
     const files = readdirSync(commandsDir);
     for (const file of files) {
-      if (file.endsWith('.ts') && !file.startsWith('_')) {
+      // Only files matching `<name>-cmd.ts` are CLI command entrypoints.
+      // Helper modules (e.g. serve-stdio-auth.ts) live in the same directory
+      // but are not standalone commands.
+      if (file.endsWith('-cmd.ts') && !file.startsWith('_')) {
         const cmdName = file.replace(/-cmd\.ts$/, '').replace(/_/g, '-');
         commands.add(cmdName);
       }

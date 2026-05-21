@@ -263,10 +263,6 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
   },
   "security": {
     "enableInjectionScan": true
-  },
-  "apiKey": {                    // Optional API key authentication
-    "enabled": false,
-    "keys": []
   }
 }
 ```
@@ -285,10 +281,27 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
 | `TRANSPORT_PORT` | HTTP port | `3000` |
 | `TRANSPORT_HOST` | HTTP host | `0.0.0.0` |
 | `CLOUD_SERVICE_URL` | Cloud service URL (gateway) | - |
-| `AUTH_TOKEN` | Auth token (gateway) | - |
+| `AUTH_TOKEN` | Auth token (gateway outbound) | - |
+| `SKILL_MCP_AUTH_TOKEN` | Stdio mode bearer token for permission isolation | - |
 | `LOG_LEVEL` | Logging level | `info` |
-| `API_KEY_AUTH_ENABLED` | Enable API key auth | `false` |
-| `API_KEYS` | Valid API keys (comma-separated) | - |
+
+### Stdio Permission Isolation
+
+`stdio` transport has no HTTP headers, so permission isolation is configured by injecting a bearer token at process startup. CLI flag `--auth-token` overrides the env var.
+
+```json
+{
+  "mcpServers": {
+    "skill-mcp": {
+      "command": "skill-mcp",
+      "args": ["serve"],
+      "env": { "SKILL_MCP_AUTH_TOKEN": "sk-live-xxxx" }
+    }
+  }
+}
+```
+
+If the database has any active user or tag-protected skill but no token is configured, the server refuses to start to avoid silent anonymous access. Empty databases continue to start anonymously.
 
 ## Skill Package Format
 
@@ -474,7 +487,7 @@ The server implements a flexible RBAC system based on **tags**:
 - **Prompt Injection Scanning** — All imported skill content is scanned for known injection patterns
 - **Path Traversal Protection** — File path validation prevents directory traversal attacks
 - **File Type Safety** — Binary files are rejected; only text-based formats are allowed
-- **API Key Authentication** — Optional API key-based authentication for admin API routes
+- **Per-user RBAC** — HTTP/SSE callers authenticate with bearer tokens issued by `skill-mcp user create`; roles carry tag lists, and `TagPermissionFilter` enforces `visibility` + tag intersection (default `visibility="private"`). For service accounts, reuse the user table with a `svc-*` naming convention.
 
 ## License
 

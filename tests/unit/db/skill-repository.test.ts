@@ -14,7 +14,7 @@ function createTestTables(db: ReturnType<typeof createDatabase>): void {
       display_name TEXT, description TEXT NOT NULL DEFAULT '',
       version TEXT NOT NULL DEFAULT '0.0.1', category TEXT DEFAULT NULL,
       tags TEXT, attributes TEXT, status TEXT NOT NULL DEFAULT 'draft',
-      visibility TEXT NOT NULL DEFAULT 'public', entry_file TEXT DEFAULT 'SKILL.md',
+      visibility TEXT NOT NULL DEFAULT 'private', entry_file TEXT DEFAULT 'SKILL.md',
       storage_path TEXT NOT NULL, content_hash TEXT, conditions TEXT,
       assigned_groups TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )`,
