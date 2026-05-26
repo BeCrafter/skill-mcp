@@ -7,6 +7,7 @@ import { getLogger } from "../../utils/logger.js";
 import type { ISkillProvider } from "../../provider/interface.js";
 import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder } from "../../permission/context-builder.js";
+import { attachMcpAuthFromHeaders } from "../../permission/context-builder.js";
 import type { PipelineRunStore } from "../../pipeline/run-store.js";
 
 export interface HttpMcpHandlerDeps {
@@ -106,6 +107,9 @@ export async function createHttpMcpHandler(
 
       const session = httpSessions.get(sessionId)!;
       session.lastActivity = Date.now();
+      // T-738 — bridge Authorization header onto req.auth so the SDK passes
+      // it through to extra.authInfo, which our context builder reads.
+      attachMcpAuthFromHeaders(req as unknown as { headers: { authorization?: string | string[] }; auth?: { token?: string } });
       await session.transport.handleRequest(req, res, parsedBody);
 
       // T-718 — explicit teardown via DELETE /mcp (per MCP spec): the client

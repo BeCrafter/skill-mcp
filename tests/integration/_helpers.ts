@@ -119,20 +119,22 @@ export interface SpawnedServer {
 export interface SpawnHttpOpts {
   port: number;
   env: NodeJS.ProcessEnv;
+  /** Transport mode passed to `serve --transport`. Defaults to "http". */
+  transport?: "http" | "sse";
   /** ms to wait for "MCP Server started" before failing. Default 20000. */
   readyTimeoutMs?: number;
 }
 
 /**
- * Spawn `node dist/index.js serve --transport http --port <port>` with the
- * given env, wait for the "MCP Server started" log line, return a handle
+ * Spawn `node dist/index.js serve --transport <transport> --port <port>` with
+ * the given env, wait for the "MCP Server started" log line, return a handle
  * with a stop() that kills + waits for exit.
  */
 export async function spawnHttpServer(opts: SpawnHttpOpts): Promise<SpawnedServer> {
-  const { port, env, readyTimeoutMs = 20_000 } = opts;
+  const { port, env, transport = "http", readyTimeoutMs = 20_000 } = opts;
   const proc = spawn(
     "node",
-    [DIST_ENTRY, "serve", "--transport", "http", "--port", String(port), "--host", "127.0.0.1"],
+    [DIST_ENTRY, "serve", "--transport", transport, "--port", String(port), "--host", "127.0.0.1"],
     { cwd: REPO_ROOT, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] },
   );
 

@@ -1,66 +1,27 @@
 import { describe, it, expect } from "vitest";
 import { buildSkillSystemPrompt } from "../../../src/prompt/system-prompt.js";
-import type { SkillMeta } from "../../../src/types/index.js";
 
 describe("buildSkillSystemPrompt", () => {
-  it("should build prompt with skills", () => {
-    const skills: SkillMeta[] = [
-      {
-        id: "1",
-        slug: "prompt-writer",
-        name: "prompt-writer",
-        displayName: null,
-        description: "Professional prompt writing",
-        version: "0.0.1",
-        category: null,
-        tags: [],
-        attributes: {},
-        status: "published",
-        visibility: "public",
-        entryFile: "SKILL.md",
-        storagePath: "skills/prompt-writer/",
-        contentHash: null,
-        createdAt: 1,
-        updatedAt: 1,
-      },
-    ];
-
-    const prompt = buildSkillSystemPrompt(skills);
+  it("returns a static template that guides the caller to skill_list", () => {
+    const prompt = buildSkillSystemPrompt();
     expect(prompt).toContain("扩展技能（Extension Skills，必检）");
-    expect(prompt).toContain("prompt-writer");
-    expect(prompt).toContain("Professional prompt writing");
-    expect(prompt).toContain("<available_skills>");
-    expect(prompt).toContain("</available_skills>");
+    expect(prompt).toContain("skill_list");
+    expect(prompt).toContain("skill_view");
+    expect(prompt).toContain("skill_file");
   });
 
-  it("should filter to published only", () => {
-    const skills: SkillMeta[] = [
-      {
-        id: "1",
-        slug: "draft-skill",
-        name: "draft-skill",
-        displayName: null,
-        description: "A draft skill",
-        version: "0.0.1",
-        category: null,
-        tags: [],
-        attributes: {},
-        status: "draft",
-        visibility: "public",
-        entryFile: "SKILL.md",
-        storagePath: "skills/draft/",
-        contentHash: null,
-        createdAt: 1,
-        updatedAt: 1,
-      },
-    ];
-
-    const prompt = buildSkillSystemPrompt(skills);
-    expect(prompt).not.toContain("draft-skill");
+  it("does not embed any specific skill slug, name, or description", () => {
+    // Regression: previously the prompt enumerated every published skill via
+    // an unfiltered listSkills() call, leaking private metadata to anonymous
+    // MCP callers. The catalog now lives in skill_list (RBAC-filtered), so
+    // the static instructions must not contain a per-skill block at all.
+    const prompt = buildSkillSystemPrompt();
+    expect(prompt).not.toContain("<available_skills>");
+    expect(prompt).not.toContain("</available_skills>");
+    expect(prompt).not.toContain("[Available tags:");
   });
 
-  it("should handle empty skills list", () => {
-    const prompt = buildSkillSystemPrompt([]);
-    expect(prompt).toContain("当前没有可用的扩展技能");
+  it("is deterministic — repeated calls produce identical output", () => {
+    expect(buildSkillSystemPrompt()).toBe(buildSkillSystemPrompt());
   });
 });

@@ -1402,6 +1402,23 @@
 
 ## 阶段 14：审计后加固第 11 轮（2026-05-26 新增）
 
+### T-739 MCP `initialize.instructions` 绕过 RBAC 泄露私有技能元数据 → 匿名调用方可枚举所有已发布 skill
+
+- **状态**：✅ 已完成 (2026-05-26)：`src/mcp/server.ts` 不再调 `skillProvider.listSkills()`，改为常量构造 `instructions`；`src/prompt/system-prompt.ts:buildSkillSystemPrompt` 改成无参纯静态模板，目录功能完全交给 `skill_list` 工具（已带 `RequestContext` 与 `TagPermissionFilter`）；`tests/unit/prompt/system-prompt.test.ts` 重写为 3 用例（含"不含任何 slug / `<available_skills>` / `[Available tags:`"显式断言）；`tests/integration/mcp-transport-auth.test.ts` 在 Streamable HTTP 组下加 2 条 `initialize.result.instructions` 黑盒断言（匿名 + 持有 token 两种入口都不得包含私有 slug 或 `<available_skills>`）。回归 450 → 452 passed。
+- **优先级**：🔴 高危（信息泄露：未鉴权调用方可枚举所有 published skill 的 slug + description）
+- **位置**：`src/mcp/server.ts:9-43` + `src/prompt/system-prompt.ts`
+- **问题**：`createMcpServer` 在每个 MCP session 首次创建 `McpServer` 时同步执行 `skillProvider.listSkills()`，把所有 `published` 状态的 skill（含 `private`）拼成 `<available_skills>` 块写进 `instructions`。MCP SDK 把 `instructions` 视为构造时常量，每次 `initialize` 响应都原样下发——而 `/mcp` 端点（与 `/api/gateway/*` 不同）允许匿名 `initialize`，导致：① 匿名调用方仅做一次 `initialize` 就能拿到全部 published skill 的 slug 与裁剪过的 description；② 拿了 token 但 tag 集合不交集的调用方（如本案例的 `bob`）也能看到他实际无权 `skill_view` 的 skill 标题。这与 `tests/integration/mcp-transport-auth.test.ts` 中"匿名 MCP 不得看到私有 skill"的设计意图相违背——既有测试只覆盖 `tools/call skill_list` 的返回值，没有断言 `instructions` 字段。
+- **影响**：高 — 信息泄露面恒等于已发布 skill 全集；多租户场景下泄露其他租户的能力清单与简介，违反 RBAC 最小可见原则。
+- **修复方案**：方案 A — 把 instructions 退化为静态指引模板，引导 LLM 始终先调 `skill_list`（已是 RBAC-aware 的事实来源）。理由：① instructions 是 server-construction-time 常量，无法 per-call 重写，方案 B（按 sessionId+userId 缓存带过滤的 instructions）会引入 session 缓存语义复杂度（同一 sessionId 复用、token 轮换/角色变更不会即时反映）；② 当 skill 数量增长时，instructions 块膨胀污染 LLM 上下文，方案 A 顺带解决；③ `skill_list` 已带 `tags` 过滤，模型行为变化可控（原 instructions 文案就在引导调用 `skill_list`）。
+- **验收标准**：
+  1. 单测：`buildSkillSystemPrompt()` 不再接受参数；输出不含 `<available_skills>` / `</available_skills>` / `[Available tags:`；多次调用结果相同（确定性）。
+  2. 集成测：匿名 MCP `initialize` 的 `result.instructions` 不含任何 seed skill 的 slug / 共享 tag；持有 token 的 `initialize` 同样不含具体 skill 目录。
+  3. `tools/call skill_list` 行为不变（仍按 `RequestContext` 过滤）。
+  4. 全量回归 +2。
+- **预估工作量**：0.1 天。
+
+---
+
 ### T-729 RemoteSkillProvider getSkillFiles 缓存键 join(",") 冲突 → 文件名含逗号导致跨请求串数据
 
 - **状态**：✅ 已完成 (2026-05-26, 第 16 批)：`src/provider/remote.provider.ts:295` 把 `safePaths.join(",")` 换成 `JSON.stringify(safePaths)`，作为不会在合法文件名字符上发生冲突的稳定序列化；新增 `tests/unit/provider/remote-cache-key.test.ts` 用 `["a,b.md"]` vs `["a","b.md"]` 双调，断言两次都打到 upstream 且 cache 中存在两个不同 key。
@@ -1644,6 +1661,17 @@
 | #7 idempotent 短路日志 | `src/import/importer.ts` | `recoveredWinner` 短路时原日志只打 `slug`（已被改写为 winner.slug）+ `name` + `importId`，调用方看不出"我请求的 slug/version 是什么、winner 的 slug/version 是什么"。改为同时打 `requestedSlug` (= 重试前的 `baseSlug`) / `requestedVersion` / `winnerSlug` / `winnerVersion` / `winnerId`，把幂等命中后两侧身份对称暴露。无新增用例（log payload 改动，由现有 idempotency 集成测试间接覆盖）。|
 
 回归：`npm run lint` ✓；`npm test` 441 passed / 0 skipped（440 → 441，新增 1 用例 [HSTS gating]）。
+
+---
+
+### 2026-05-26 第 19 批 — MCP HTTP/SSE 传输鉴权直通修复（T-738）
+
+| ID | 范围 | 关键改动 |
+|---|---|---|
+| T-738 | `src/permission/context-builder.ts` + `src/mcp/transport/http-transport.ts` + `src/mcp/transport/sse-transport.ts` + `tests/unit/permission/context-builder.test.ts` | E2E 黑盒发现：HTTP MCP / SSE 传输从未把 `Authorization: Bearer …` 头转换成 `req.auth.token`。MCP SDK `StreamableHTTPServerTransport.handleRequest` 与 `SSEServerTransport.handlePostMessage` 内部读取 `req.auth` 注入 `extra.authInfo`，集成方不挂上去就永远拿到空 authInfo → context builder 落 anonymous 分支 → `TagPermissionFilter` 把所有 private+tagged skill 滤掉，多租户隔离失效（同一 token 走 `/api/gateway/skills` 能看到 skill，走 `/mcp` 看不到）。本批新增 `attachMcpAuthFromHeaders(req)` helper：读 `Authorization` 头 → `extractBearerToken` → 设 `req.auth = { token }`；在两个传输的 `handleRequest` / `handlePostMessage` 调用前调用一次。Idempotent（已有 `req.auth` 时跳过，便于上层中间件预填或测试注入）。新增 5 用例（成功 / 缺头 / Basic 头 / 已预设 / 数组头取首项）。回归：黑盒 E2E `bob` token 现在通过 `/mcp` 也能看到自己的 skill，匿名仍然空表。|
+| T-738r | `tests/integration/mcp-transport-auth.test.ts` + `tests/integration/_helpers.ts` | 补 T-738 的端到端回归守卫：spawn 真实 `node dist/index.js serve`（`http` + `sse` 两进程，共享 DB / storage），seed 一个 `private` skill 并打上用户的 role tag，断言 ① Streamable HTTP `/mcp` 走 JSON-RPC `initialize` + `tools/call skill_list`：带 bearer 看得见 slug，匿名看不见；② SSE `/mcp/sse` + `/mcp/messages` 同样断言（GET 拿 sessionId，POST 提交 JSON-RPC，从同一 SSE 流读 server-pushed reply 按 id 配对）。修 helper：`spawnHttpServer` 增加 `transport: "http" \| "sse"` 形参（原本硬编码 http）。这是 T-738 真正的"未来再回归"守卫——单测覆盖 helper 行为，本批覆盖 SDK 集成路径，缺一不可。|
+
+回归：`npm run lint` ✓；`npm test` 449 passed / 1 flaky（`executor-batch-parallel.test.ts` 在并发跑测时单独跑通过，是 T-703 既有的时序敏感断言、与本批无关）。新增 4 集成用例（446 → 450）。
 
 ---
 

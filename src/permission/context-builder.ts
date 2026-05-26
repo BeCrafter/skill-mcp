@@ -78,6 +78,31 @@ export function extractBearerToken(authHeader: string | undefined): string | nul
   return token;
 }
 
+/**
+ * T-738 — bridge `Authorization: Bearer <token>` from a Node IncomingMessage
+ * onto `req.auth.token`, which is the contract the MCP SDK transports
+ * (`StreamableHTTPServerTransport.handleRequest`, `SSEServerTransport.
+ * handlePostMessage`) read to populate `extra.authInfo` on tool calls.
+ *
+ * Without this step the HTTP / SSE MCP transports always saw an empty
+ * `authInfo`, collapsing every authenticated caller to anonymous on the
+ * MCP surface (gateway REST surface was unaffected because it builds the
+ * RequestContext directly via `enforceGatewayAuth`). Idempotent: skips when
+ * `req.auth` is already set so future middleware / tests can pre-populate.
+ */
+export function attachMcpAuthFromHeaders(
+  req: { headers: { authorization?: string | string[] }; auth?: { token?: string } },
+): void {
+  if (req.auth) return;
+  const header = Array.isArray(req.headers.authorization)
+    ? req.headers.authorization[0]
+    : req.headers.authorization;
+  const token = extractBearerToken(header);
+  if (token) {
+    req.auth = { token };
+  }
+}
+
 export type ContextBuilder = (extra: McpExtra) => Promise<RequestContext>;
 
 export function createContextBuilder(

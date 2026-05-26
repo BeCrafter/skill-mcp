@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   withFallbackToken,
   extractBearerToken,
+  attachMcpAuthFromHeaders,
   type ContextBuilder,
   type McpExtra,
 } from "../../../src/permission/context-builder.js";
@@ -121,5 +122,40 @@ describe("extractBearerToken", () => {
   it("accepts a token of exactly 1024 bytes", () => {
     const tok = "a".repeat(1024);
     expect(extractBearerToken(`Bearer ${tok}`)).toBe(tok);
+  });
+});
+
+describe("attachMcpAuthFromHeaders (T-738)", () => {
+  it("populates req.auth.token from Authorization: Bearer header", () => {
+    const req = { headers: { authorization: "Bearer sk-live-abc" } } as Parameters<typeof attachMcpAuthFromHeaders>[0];
+    attachMcpAuthFromHeaders(req);
+    expect(req.auth).toEqual({ token: "sk-live-abc" });
+  });
+
+  it("leaves req.auth unset when header is missing", () => {
+    const req = { headers: {} } as Parameters<typeof attachMcpAuthFromHeaders>[0];
+    attachMcpAuthFromHeaders(req);
+    expect(req.auth).toBeUndefined();
+  });
+
+  it("leaves req.auth unset when header is malformed", () => {
+    const req = { headers: { authorization: "Basic abc" } } as Parameters<typeof attachMcpAuthFromHeaders>[0];
+    attachMcpAuthFromHeaders(req);
+    expect(req.auth).toBeUndefined();
+  });
+
+  it("is idempotent — does not overwrite a pre-set req.auth", () => {
+    const req = {
+      headers: { authorization: "Bearer different-token" },
+      auth: { token: "preset-token" },
+    } as Parameters<typeof attachMcpAuthFromHeaders>[0];
+    attachMcpAuthFromHeaders(req);
+    expect(req.auth).toEqual({ token: "preset-token" });
+  });
+
+  it("uses the first value when Authorization arrives as an array", () => {
+    const req = { headers: { authorization: ["Bearer first", "Bearer second"] } } as Parameters<typeof attachMcpAuthFromHeaders>[0];
+    attachMcpAuthFromHeaders(req);
+    expect(req.auth).toEqual({ token: "first" });
   });
 });

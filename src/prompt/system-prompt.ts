@@ -1,47 +1,29 @@
-import type { SkillMeta } from "../types/index.js";
-
-export function buildSkillSystemPrompt(skills: SkillMeta[]): string {
-  const indexLines = skills
-    .filter(s => s.status === "published")
-    .map(s => {
-      const desc = (s.description ?? "").length > 80
-        ? s.description.slice(0, 77) + "..."
-        : s.description;
-      return `    - ${s.slug}: ${desc}`;
-    });
-
-  if (indexLines.length === 0) {
-    return [
-      `## 扩展技能（Extension Skills）`,
-      ``,
-      `当前没有可用的扩展技能。`,
-    ].join("\n");
-  }
-
+/**
+ * Static system prompt returned via MCP `initialize.result.instructions`.
+ *
+ * Why static: instructions is a server-construction-time constant in the MCP
+ * SDK, while the visible skill set is per-caller (RBAC tag filtering). Putting
+ * a skill catalog here would either leak private slugs to anonymous callers
+ * or freeze a stale list for a session's lifetime. Authoritative discovery
+ * lives in `skill_list`, which always runs under the caller's RequestContext.
+ */
+export function buildSkillSystemPrompt(): string {
   return [
     `## 扩展技能（Extension Skills，必检）`,
     ``,
-    `这些是通过 MCP 提供的扩展技能，应与系统内置技能一起使用。`,
+    `本 MCP 服务器提供一组按需加载的扩展技能。在回答任何问题前：`,
     ``,
-    `在回答任何问题前，先扫描此列表。如果有技能与用户请求相关`,
-    `（哪怕只是部分相关），你必须先调用 skill_view(skill_slug) 或 skill_view(skill_id) 加载该技能的`,
-    `完整指令，并严格按其指令执行任务。`,
+    `1. 先调用 skill_list({}) 获取当前调用方可见的技能目录；`,
+    `   - 如果已知领域标签，可用 skill_list({tags: ["tag"]}) 缩小范围。`,
+    `2. 扫描列表中的 slug 与描述。如果有技能与用户请求相关`,
+    `   （哪怕只是部分相关），调用 skill_view(skill_slug) 加载完整指令，`,
+    `   并严格按其指令执行任务。`,
+    `3. 当技能指令引用其他文件（references/、templates/、scripts/ 等）时，`,
+    `   调用 skill_file(skill_slug, file_paths) 批量加载（数组并发读取）。`,
     ``,
     `宁可加载一个不需要的技能，也不要遗漏可能需要的技能。`,
     `技能包含专业的工作流、API 用法和已知陷阱，能显著优于通用方案。`,
-    ``,
-    `如果加载的技能指令不完整或有误，继续执行并记录问题。`,
     `在特定领域内，始终优先使用技能中的方案，而非你自己的知识。`,
-    ``,
-    `<available_skills>`,
-    ...indexLines,
-    `</available_skills>`,
-    ``,
-    `### 技能使用规则：`,
-    `1. 先调用 skill_view(skill_slug) 或 skill_view(skill_id) 加载完整指令`,
-    `   其中 skill_slug 为列表中的 slug，skill_id 为列表中的 [id:xxx]`,
-    `2. 当技能引用其他文件时，调用 skill_file(skill_slug, file_paths) 或 skill_file(skill_id, file_paths) 批量加载`,
-    `   （传入文件路径数组以并发读取多个文件）`,
-    `3. 加载技能后，严格按照其指令执行——不要用自己的方案替代`,
+    `如果加载的技能指令不完整或有误，继续执行并记录问题。`,
   ].join("\n");
 }

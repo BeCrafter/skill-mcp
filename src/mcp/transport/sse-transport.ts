@@ -6,6 +6,7 @@ import { getLogger } from "../../utils/logger.js";
 import type { ISkillProvider } from "../../provider/interface.js";
 import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder } from "../../permission/context-builder.js";
+import { attachMcpAuthFromHeaders } from "../../permission/context-builder.js";
 import type { PipelineRunStore } from "../../pipeline/run-store.js";
 
 export interface SseMcpHandlerDeps {
@@ -92,6 +93,9 @@ export async function createSseMcpHandler(
         try {
           const session = sseConnections.get(sessionId)!;
           session.lastActivity = Date.now();
+          // T-738 — bridge Authorization header onto req.auth so the SDK
+          // passes it through to extra.authInfo on each posted message.
+          attachMcpAuthFromHeaders(req as unknown as { headers: { authorization?: string | string[] }; auth?: { token?: string } });
           await session.transport.handlePostMessage(req, res);
           return;
         } catch (err) {
