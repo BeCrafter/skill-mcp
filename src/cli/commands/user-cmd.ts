@@ -31,11 +31,8 @@ export async function userListAction(): Promise<void> {
   }
   for (const user of users) {
     const roleIds = await userRoleRepo.findRoleIdsByUserId(user.id);
-    const roleNames: string[] = [];
-    for (const rid of roleIds) {
-      const r = await roleRepo.findById(rid);
-      if (r) roleNames.push(r.name);
-    }
+    const roleRows = await roleRepo.findByIds(roleIds);
+    const roleNames = roleRows.map(r => r.name);
     console.log(`  ${user.id}  ${user.name ?? "(unnamed)"}  status=${user.status}  roles=[${roleNames.join(", ")}]`);
   }
   closeDatabase();
@@ -69,11 +66,8 @@ export async function userGetAction(userId: string): Promise<void> {
   }
   const tags = await userRoleRepo.getAggregatedTagsByUserId(userId);
   const roleIds = await userRoleRepo.findRoleIdsByUserId(userId);
-  const roles: Array<{ id: string; name: string; tags: string[] }> = [];
-  for (const rid of roleIds) {
-    const r = await roleRepo.findById(rid);
-    if (r) roles.push({ id: r.id, name: r.name, tags: r.tags });
-  }
+  const roleRows = await roleRepo.findByIds(roleIds);
+  const roles = roleRows.map(r => ({ id: r.id, name: r.name, tags: r.tags }));
   console.log(`User: ${user.id}`);
   console.log(`  Name:   ${user.name ?? "(unnamed)"}`);
   console.log(`  Status: ${user.status}`);

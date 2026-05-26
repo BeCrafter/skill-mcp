@@ -1,4 +1,4 @@
-import { eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDB } from "../connection.js";
 import { skillFeedbacks } from "../schema.js";
@@ -34,14 +34,22 @@ export class SkillFeedbackRepository {
     return id;
   }
 
-  async findBySlug(slug: string, days?: number): Promise<SkillFeedbackEntry[]> {
+  // T-713 — `feedbacks` is user-insertable and can grow without bound, so
+  // returning the entire row set per slug ballooned memory under heavy
+  // feedback volume. Default cap = 1000; callers can opt-in to larger
+  // pages but the unbounded path is gone. Most-recent-first so the rate
+  // computed by callers reflects current user experience, not the dawn
+  // of the skill's life.
+  async findBySlug(slug: string, days?: number, limit = 1000): Promise<SkillFeedbackEntry[]> {
     const conditions = [eq(skillFeedbacks.skillSlug, slug)];
     if (days) {
       const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
       conditions.push(gte(skillFeedbacks.createdAt, cutoff));
     }
     const rows = this.db.select().from(skillFeedbacks)
-      .where(sql`${skillFeedbacks.skillSlug} = ${slug}${days ? sql` AND ${skillFeedbacks.createdAt} >= ${Date.now() - days * 24 * 60 * 60 * 1000}` : sql``}`)
+      .where(and(...conditions))
+      .orderBy(sql`${skillFeedbacks.createdAt} desc`)
+      .limit(limit)
       .all();
     return rows.map(r => ({
       id: r.id,

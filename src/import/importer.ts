@@ -1,17 +1,46 @@
 import type { Logger } from "pino";
+import { randomUUID } from "node:crypto";
 import type { IStorageProvider } from "../storage/provider.interface.js";
 import type { ICacheProvider } from "../cache/provider.interface.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { SkillFileRepository } from "../db/repositories/skill-file.repository.js";
 import type { SkillVersionRepository } from "../db/repositories/skill-version.repository.js";
 import type { ImportOptions, ImportResult, SkillFileInput, SkillFrontmatter, SkillMeta } from "../types/index.js";
+
+/**
+ * better-sqlite3 throws errors with shape `{ code: "SQLITE_CONSTRAINT_UNIQUE", ... }`
+ * for UNIQUE-index violations. drizzle wraps and rethrows them, but the
+ * underlying cause keeps the same code. We treat any of these shapes as a
+ * UNIQUE conflict so the caller can pick a recovery path.
+ */
+function classifyImportError(err: unknown): "validation" | "storage" | "db" | "unknown" {
+  if (err instanceof InvalidManifestError || err instanceof SecurityError) return "validation";
+  if (err instanceof DuplicateSkillNameError || err instanceof SlugConflictError || err instanceof ContentUnchangedError) return "validation";
+  if (isUniqueConstraintError(err)) return "db";
+  const msg = err && typeof err === "object" && "message" in err ? String((err as { message?: unknown }).message ?? "") : "";
+  if (/storage|put|moveDir|fs\.|ENOENT|EACCES/i.test(msg)) return "storage";
+  return "unknown";
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; cause?: { code?: string }; message?: string };
+  if (e.code === "SQLITE_CONSTRAINT_UNIQUE" || e.code === "SQLITE_CONSTRAINT") return true;
+  if (e.cause?.code === "SQLITE_CONSTRAINT_UNIQUE" || e.cause?.code === "SQLITE_CONSTRAINT") return true;
+  return typeof e.message === "string" && /UNIQUE constraint failed/i.test(e.message);
+}
 import type { DomainEventBus } from "../events/event-bus.js";
 import { LocalSourceResolver } from "./local-source.js";
 import { GitSourceResolver } from "./git-source.js";
 import { validateSkillPackage } from "./validator.js";
-import { computeContentHash, slugify, extractFrontmatter, extractDescription } from "../utils/manifest.js";
+import { computeContentHash, slugify, extractFrontmatter, extractDescription, validateSkillMetaFields } from "../utils/manifest.js";
 import { bumpVersion } from "../db/repositories/skill.repository.js";
 import { isTextFile, getMimeType } from "../utils/security.js";
+import { pMap } from "../utils/concurrency.js";
+import { metrics } from "../telemetry/metrics.js";
+
+const STORAGE_CONCURRENCY = 8;
+const STAGING_ROOT = "__staging__";
 import {
   DuplicateSkillNameError,
   SecurityError,
@@ -36,6 +65,20 @@ export class SkillImporter {
   ) {}
 
   async import(source: string, options: ImportOptions): Promise<ImportResult> {
+    const sourceLabel = source.startsWith("http") || source.startsWith("git@") ? "git" : "local";
+    const end = metrics.importDuration.startTimer({ source: sourceLabel });
+    try {
+      const result = await this.importInner(source, options);
+      end({ status: "ok" });
+      return result;
+    } catch (err) {
+      end({ status: "error" });
+      metrics.importFailures.inc({ source: sourceLabel, reason: classifyImportError(err) });
+      throw err;
+    }
+  }
+
+  private async importInner(source: string, options: ImportOptions): Promise<ImportResult> {
     this.logger.info({ source, options }, "Importing skill package");
 
     // 1. Resolve source
@@ -47,6 +90,12 @@ export class SkillImporter {
     try {
       if (source.startsWith("http") || source.startsWith("git@")) {
         meta = this.parseFrontmatterFromFiles(skillFiles);
+        // T-722 — git/http path doesn't have a local dirPath for the
+        // entry-existence check (handled later via skillFiles lookup), but
+        // it must still enforce T-705 field caps and tag-array shape;
+        // otherwise a malicious git repo bypasses every cap and pushes
+        // multi-MB strings / non-string tags into SQLite and listing APIs.
+        validateSkillMetaFields(meta);
       } else {
         meta = this.localSource.parseSkillMeta(source);
       }
@@ -160,57 +209,210 @@ export class SkillImporter {
       storagePath = `${slug}/`;
     }
 
-    for (const file of skillFiles) {
-      await this.storage.put(`${storagePath}${file.path}`, file.buffer);
-    }
-
     const version = targetSkill
       ? bumpVersion(targetSkill.version, options.versionBump)
       : (meta.version ?? "1.0.0");
 
+    const importId = randomUUID();
+    const stagingPath = `${STAGING_ROOT}/${importId}/`;
+    const baseSlug = slug;
+
     let skillId: string;
+    let createdSkillId: string | null = null;
+    let storageCommitted = false;
+    let recoveredWinner: SkillMeta | null = null;
+    // Snapshot of the skill row prior to the update DB-write. If the storage
+    // commit (or any subsequent step) throws, the catch block uses this to
+    // restore the row to its pre-update state — without this, the live skill
+    // row advertises a new contentHash/version while storage still holds the
+    // old bytes, leaving every gateway read serving stale or mixed content.
+    let preUpdateSnapshot: SkillMeta | null = null;
 
-    if (action === "updated" && targetSkill) {
-      // Snapshot current version before update
-      await this.snapshotCurrentVersion(targetSkill);
+    try {
+      // 1. Stage all files into a per-import scratch directory. Any failure
+      //    here leaves only staging files behind, which the finally block
+      //    cleans up — final storage path remains untouched.
+      await pMap(skillFiles, STORAGE_CONCURRENCY, (file) =>
+        this.storage.put(`${stagingPath}${file.path}`, file.buffer),
+      );
 
-      await this.skillRepo.update(targetSkill.id, {
-        description: description ?? targetSkill.description,
-        version,
-        category: options.category ?? targetSkill.category,
-        tags,
-        contentHash,
-        storagePath,
-        status: "published",
+      // 2. Snapshot the current version *before* we overwrite final storage.
+      //    Reading from the still-pristine `targetSkill.storagePath` is what
+      //    gives the rollback feature historical content to restore.
+      if (action === "updated" && targetSkill) {
+        await this.snapshotCurrentVersion(targetSkill);
+      }
+
+      // 3. Persist skill row first (T-202 idempotency). DB-write-before-
+      //    storage-commit lets us catch UNIQUE conflicts (slug clash on
+      //    concurrent allowDuplicate, or (name, content_hash) clash on
+      //    concurrent identical imports) and recover *before* moving files.
+      if (action === "updated" && targetSkill) {
+        // Capture pre-update state for compensating restore on failure.
+        preUpdateSnapshot = targetSkill;
+        await this.skillRepo.update(targetSkill.id, {
+          description: description ?? targetSkill.description,
+          version,
+          category: options.category ?? targetSkill.category,
+          tags,
+          contentHash,
+          storagePath,
+          status: "published",
+        });
+        skillId = targetSkill.id;
+      } else {
+        let attempt = 0;
+        const MAX_RETRIES = 5;
+        // The retry loop: on a slug UNIQUE conflict in the allowDuplicate
+        // branch we bump the slug suffix and try again (concurrent imports
+        // racing on the same slug). On a (name, content_hash) UNIQUE
+        // conflict we recover the winner via findByNameAndHash and short-
+        // circuit the rest of the import.
+        while (true) {
+          try {
+            const created = await this.skillRepo.create({
+              slug,
+              name: meta.name,
+              description: description ?? "",
+              version,
+              category: options.category,
+              tags,
+              contentHash,
+              storagePath,
+              status: "published",
+              entryFile: meta.entry ?? "SKILL.md",
+            });
+            skillId = created.id;
+            createdSkillId = created.id;
+            break;
+          } catch (createErr) {
+            if (!isUniqueConstraintError(createErr)) throw createErr;
+            // Recover from (name, content_hash) clash: same payload already
+            // landed via a parallel importer — return that winner.
+            const winner = await this.skillRepo.findByNameAndHash(meta.name, contentHash);
+            if (winner) {
+              recoveredWinner = winner;
+              skillId = winner.id;
+              slug = winner.slug;
+              storagePath = winner.storagePath;
+              break;
+            }
+            // Otherwise it's a pure slug clash. allowDuplicate callers can
+            // recover by bumping; everyone else surfaces the original error.
+            if (!options.allowDuplicate || attempt >= MAX_RETRIES) {
+              throw createErr;
+            }
+            attempt++;
+            slug = await this.uniqueSlug(baseSlug);
+            storagePath = `${slug}/`;
+          }
+        }
+      }
+
+      // 4. Commit storage: stage → final.
+      //    Skipped when we recovered from a (name, content_hash) race —
+      //    the winner already owns the final path.
+      if (!recoveredWinner) {
+        if (action === "created") {
+          await this.storage.moveDir(stagingPath, storagePath);
+        } else {
+          await pMap(skillFiles, STORAGE_CONCURRENCY, (file) =>
+            this.storage.put(`${storagePath}${file.path}`, file.buffer),
+          );
+        }
+        storageCommitted = true;
+
+        // 5. Persist file rows atomically (single DB tx).
+        await this.skillFileRepo.replaceAll(skillId, skillFiles.map(file => ({
+          filePath: file.path,
+          fileType: isTextFile(file.path) ? "text" : "binary",
+          fileSize: file.buffer.length,
+          mimeType: getMimeType(file.path),
+        })));
+      }
+    } catch (error) {
+      // Compensating cleanup. Order matters: roll DB before storage so the
+      // skill row never points at a missing directory.
+      if (createdSkillId) {
+        try {
+          await this.skillRepo.delete(slug);
+        } catch (cleanupErr) {
+          this.logger.warn({ err: cleanupErr, slug }, "Failed to roll back skill row after import error");
+        }
+      } else if (action === "updated" && preUpdateSnapshot) {
+        // Update path: restore the row to its pre-update state so callers
+        // don't see a row whose contentHash/version no longer match the
+        // bytes on disk. The historical snapshot taken at step 2 still lives
+        // under .versions/, untouched.
+        try {
+          await this.skillRepo.update(preUpdateSnapshot.id, {
+            description: preUpdateSnapshot.description,
+            version: preUpdateSnapshot.version,
+            category: preUpdateSnapshot.category,
+            tags: preUpdateSnapshot.tags,
+            contentHash: preUpdateSnapshot.contentHash,
+            storagePath: preUpdateSnapshot.storagePath,
+            status: preUpdateSnapshot.status,
+          });
+        } catch (restoreErr) {
+          this.logger.error(
+            { err: restoreErr, skillId: preUpdateSnapshot.id, slug },
+            "Failed to restore pre-update skill row after import error — manual repair may be required",
+          );
+        }
+      }
+      if (storageCommitted && action === "created") {
+        // We just created and moved into finalPath — roll it back.
+        await this.storage.deleteDir(storagePath).catch((cleanupErr) => {
+          this.logger.warn({ err: cleanupErr, storagePath }, "Failed to roll back final storage after import error");
+        });
+      }
+      throw error;
+    } finally {
+      // Always remove staging — moveDir consumed it on the create happy path
+      // (deleteDir is then a no-op), but every other branch leaves it behind.
+      await this.storage.deleteDir(stagingPath).catch((cleanupErr) => {
+        this.logger.warn({ err: cleanupErr, stagingPath }, "Failed to clean up import staging directory");
       });
-      skillId = targetSkill.id;
-    } else {
-      const created = await this.skillRepo.create({
-        slug,
-        name: meta.name,
-        description: description ?? "",
-        version,
-        category: options.category,
-        tags,
-        contentHash,
-        storagePath,
-        status: "published",
-        entryFile: meta.entry ?? "SKILL.md",
-      });
-      skillId = created.id;
     }
 
-    await this.skillFileRepo.deleteBySkillId(skillId);
-    for (const file of skillFiles) {
-      await this.skillFileRepo.create(skillId, {
-        filePath: file.path,
-        fileType: isTextFile(file.path) ? "text" : "binary",
-        fileSize: file.buffer.length,
-        mimeType: getMimeType(file.path),
-      });
+    if (recoveredWinner) {
+      // Surface both sides of the swap so callers debugging "I imported X but
+      // got back skill Y" can see the requested vs. recovered identity at a
+      // glance. requestedSlug = baseSlug (captured before the retry loop
+      // reassigned slug), requestedVersion = the version we computed from
+      // the incoming manifest.
+      this.logger.info(
+        {
+          importId,
+          name: meta.name,
+          requestedSlug: baseSlug,
+          requestedVersion: version,
+          winnerSlug: recoveredWinner.slug,
+          winnerVersion: recoveredWinner.version,
+          winnerId: recoveredWinner.id,
+        },
+        "Idempotent import: returning concurrent winner",
+      );
+      return {
+        id: recoveredWinner.id,
+        slug: recoveredWinner.slug,
+        name: recoveredWinner.name,
+        version: recoveredWinner.version,
+        fileCount: skillFiles.length,
+        category: recoveredWinner.category ?? undefined,
+        tags: (recoveredWinner.tags as string[]) ?? [],
+        action: "updated",
+      };
     }
 
-    this.eventBus?.publish({ type: "skill:imported", slug });
+    const finalSkill = await this.skillRepo.findBySlug(slug);
+    this.eventBus?.publish({
+      type: "skill:imported",
+      slug,
+      visibility: finalSkill?.visibility,
+      tags: finalSkill?.tags ?? tags,
+    });
 
     this.logger.info({ slug, name: meta.name, version, action, fileCount: skillFiles.length }, "Skill imported");
 
@@ -239,13 +441,13 @@ export class SkillImporter {
   private parseFrontmatterFromFiles(files: SkillFileInput[]): SkillFrontmatter {
     const skillFile = files.find(f => f.path === "SKILL.md" || f.path.endsWith("/SKILL.md"));
     if (!skillFile) {
-      throw new Error("SKILL.md not found in skill files");
+      throw new InvalidManifestError("SKILL.md not found in skill files");
     }
 
     const { frontmatter } = extractFrontmatter(skillFile.buffer.toString("utf-8"));
     const name = frontmatter["name"];
     if (!name || typeof name !== "string") {
-      throw new Error("name is required in SKILL.md frontmatter");
+      throw new InvalidManifestError("name is required in SKILL.md frontmatter");
     }
 
     return {
@@ -285,7 +487,13 @@ export class SkillImporter {
     if (options.tags !== undefined) updates.tags = tags;
     if (options.description !== undefined) updates.description = options.description ?? null;
     await this.skillRepo.update(targetSkill.id, updates);
-    this.eventBus?.publish({ type: "skill:updated", slug });
+    const finalSkill = await this.skillRepo.findBySlug(slug);
+    this.eventBus?.publish({
+      type: "skill:updated",
+      slug,
+      visibility: finalSkill?.visibility,
+      tags: finalSkill?.tags ?? tags,
+    });
   }
 
   private async uniqueSlug(base: string): Promise<string> {
@@ -305,17 +513,14 @@ export class SkillImporter {
     try {
       // List files in current skill directory (excluding .versions subdir)
       const files = await this.storage.listRecursive(skill.storagePath);
-      let fileCount = 0;
-
-      for (const filePath of files) {
-        if (!filePath.startsWith(".versions/")) {
-          const content = await this.storage.get(`${skill.storagePath}${filePath}`);
-          if (content) {
-            await this.storage.put(`${versionPath}${filePath}`, content);
-            fileCount++;
-          }
-        }
-      }
+      const targets = files.filter(p => !p.startsWith(".versions/"));
+      const copied = await pMap(targets, STORAGE_CONCURRENCY, async (filePath) => {
+        const content = await this.storage.get(`${skill.storagePath}${filePath}`);
+        if (!content) return false;
+        await this.storage.put(`${versionPath}${filePath}`, content);
+        return true;
+      });
+      const fileCount = copied.filter(Boolean).length;
 
       // Record version in database
       this.versionRepo.create({

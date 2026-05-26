@@ -1,281 +1,179 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  ensureDistBuilt,
+  getFreePort,
+  seedPublicSkill,
+  seedRbac,
+  spawnHttpServer,
+  writeSkillPackage,
+  type SpawnedServer,
+} from "../integration/_helpers.js";
 
-describe.skip("Scenario C: Distributed HTTP Deployment", () => {
+/**
+ * Scenario C — distributed HTTP deployments. Two sub-scenarios:
+ *
+ *   C1 (standalone HTTP):  client ──Bearer──> single server (admin + gateway routes)
+ *   C2 (gateway + cloud):  client ──Bearer──> Gateway ──Bearer(svc)──> Cloud
+ *
+ * The C2 gateway runs in MCP_ONLY_MODE so /api/admin/* is disabled while
+ * /api/gateway/* still proxies to the cloud, mirroring a production split
+ * where the client-facing process is hardened against admin operations.
+ */
+describe("Scenario C: Distributed HTTP Deployment", () => {
   let testDir: string;
-  let c1Process: ChildProcess | null = null;
-  let c2StorageProcess: ChildProcess | null = null;
-  let c2McpProcess: ChildProcess | null = null;
 
-  beforeAll(() => {
-    testDir = join("/tmp", `scenario-c-${randomUUID()}`);
-    mkdirSync(testDir, { recursive: true });
+  let c1Server: SpawnedServer | null = null;
+  let c1Token: string;
 
-    // Create C1 directory
+  let c2Cloud: SpawnedServer | null = null;
+  let c2Gateway: SpawnedServer | null = null;
+  let c2ClientToken: string;
+  let c2ServiceToken: string;
+
+  beforeAll(async () => {
+    ensureDistBuilt();
+    testDir = mkdtempSync(join(tmpdir(), "scenario-c-"));
+
+    // ── C1: standalone ──────────────────────────────────────────────
     const c1Dir = join(testDir, "c1");
-    mkdirSync(c1Dir, { recursive: true });
+    const c1Db = join(c1Dir, "skill-mcp.db");
+    const c1Storage = join(c1Dir, "data/skills");
+    c1Token = seedRbac(c1Db, { tags: ["c1-client"], tokenLabel: "c1-tok" }).token;
+    writeSkillPackage(c1Storage, "c-test-skill-1", "# C1 Test");
+    seedPublicSkill(c1Db, "c-test-skill-1");
 
-    // Create C2 directories
-    const c2StorageDir = join(testDir, "c2-storage");
-    const c2McpDir = join(testDir, "c2-mcp");
-    mkdirSync(c2StorageDir, { recursive: true });
-    mkdirSync(c2McpDir, { recursive: true });
-
-    // Create test skills
-    for (const dir of [c1Dir, c2StorageDir]) {
-      const skillDir = join(dir, "data/skills/c-test-skill");
-      mkdirSync(skillDir, { recursive: true });
-
-      writeFileSync(
-        join(skillDir, "SKILL.md"),
-        "# C Test Skill\n\nTest skill for scenario C.",
-      );
-
-      writeFileSync(
-        join(skillDir, "manifest.json"),
-        JSON.stringify({
-          name: "c-test-skill",
-          version: "0.0.1",
-          entry: "SKILL.md",
-        }),
-      );
-    }
-  });
-
-  afterAll(() => {
-    if (c1Process) c1Process.kill();
-    if (c2StorageProcess) c2StorageProcess.kill();
-    if (c2McpProcess) c2McpProcess.kill();
-
-    if (testDir && existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-  });
-
-  describe("C1: Single Server", () => {
-    it("should start HTTP server with unified service", (done) => {
-      const c1Dir = join(testDir, "c1");
-      const env = {
-        ...process.env,
+    const c1Port = await getFreePort();
+    c1Server = await spawnHttpServer({
+      port: c1Port,
+      env: {
         NODE_ENV: "test",
-        TRANSPORT_TYPE: "http",
-        TRANSPORT_PORT: "3000",
         DEPLOYMENT_MODE: "standalone",
-        DATABASE_PATH: join(c1Dir, "skill-mcp.db"),
-        STORAGE_BASE_PATH: join(c1Dir, "data/skills"),
-        MCP_ONLY_MODE: "false",
-      };
-
-      c1Process = spawn("npm", ["start"], {
-        cwd: process.cwd(),
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 15000,
-      });
-
-      if (!c1Process.stdout) {
-        done(new Error("Failed to create C1 process"));
-        return;
-      }
-
-      let output = "";
-      c1Process.stdout.on("data", (data) => {
-        output += data.toString();
-        if (output.includes("HTTP transport configured")) {
-          setTimeout(() => done(), 500);
-        }
-      });
-
-      setTimeout(() => {
-        if (!output.includes("HTTP transport configured")) {
-          done(new Error("C1 server did not start"));
-        }
-      }, 15000);
+        DATABASE_PATH: c1Db,
+        STORAGE_BASE_PATH: c1Storage,
+        CACHE_FILE_DIR: join(c1Dir, "cache"),
+      },
     });
 
-    it("should respond to health check on port 3000", async () => {
-      const response = await fetch("http://localhost:3000/api/health");
-      expect(response.status).toBe(200);
-    });
+    // ── C2: cloud + gateway (MCP-only) ──────────────────────────────
+    const cloudDir = join(testDir, "c2-cloud");
+    const gwDir = join(testDir, "c2-gateway");
+    const cloudDb = join(cloudDir, "skill-mcp.db");
+    const gwDb = join(gwDir, "skill-mcp.db");
+    const cloudStorage = join(cloudDir, "data/skills");
+    const gwStorage = join(gwDir, "data/skills");
 
-    it("should provide both /mcp and /api endpoints", async () => {
-      // Check admin API
-      const adminResp = await fetch("http://localhost:3000/api/health");
-      expect(adminResp.status).toBe(200);
+    const cloudSvc = seedRbac(cloudDb, { tags: ["svc-gateway"], tokenLabel: "c2-svc-tok" });
+    const cloudClient = seedRbac(cloudDb, { tags: ["c2-client"], tokenLabel: "c2-client-tok" });
+    seedRbac(gwDb, { tags: ["c2-client"], tokenLabel: cloudClient.token });
+    c2ServiceToken = cloudSvc.token;
+    c2ClientToken = cloudClient.token;
 
-      // Check gateway API (C1 provides both)
-      const gatewayResp = await fetch("http://localhost:3000/api/gateway/health");
-      expect(gatewayResp.status).toBe(200);
-    });
-  });
+    writeSkillPackage(cloudStorage, "c-test-skill-2", "# C2 Test");
+    seedPublicSkill(cloudDb, "c-test-skill-2");
+    writeSkillPackage(gwStorage, "c-test-skill-2", "# C2 Test");
 
-  describe("C2: Distributed (Storage + MCP)", () => {
-    it("should start C2 storage service on port 3001", (done) => {
-      const storageDir = join(testDir, "c2-storage");
-      const env = {
-        ...process.env,
+    const cloudPort = await getFreePort();
+    c2Cloud = await spawnHttpServer({
+      port: cloudPort,
+      env: {
         NODE_ENV: "test",
-        TRANSPORT_TYPE: "http",
-        TRANSPORT_PORT: "3001",
         DEPLOYMENT_MODE: "standalone",
-        DATABASE_PATH: join(storageDir, "skill-mcp.db"),
-        STORAGE_BASE_PATH: join(storageDir, "data/skills"),
-        MCP_ONLY_MODE: "true",
-        ENABLE_API_KEY_AUTH: "true",
-        API_KEYS: "c2-storage-key",
-      };
-
-      c2StorageProcess = spawn("npm", ["start"], {
-        cwd: process.cwd(),
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 15000,
-      });
-
-      if (!c2StorageProcess.stdout) {
-        done(new Error("Failed to create C2 storage process"));
-        return;
-      }
-
-      let output = "";
-      c2StorageProcess.stdout.on("data", (data) => {
-        output += data.toString();
-        if (output.includes("HTTP transport configured")) {
-          setTimeout(() => done(), 500);
-        }
-      });
-
-      setTimeout(() => {
-        if (!output.includes("HTTP transport configured")) {
-          done(new Error("C2 storage did not start"));
-        }
-      }, 15000);
+        DATABASE_PATH: cloudDb,
+        STORAGE_BASE_PATH: cloudStorage,
+        CACHE_FILE_DIR: join(cloudDir, "cache"),
+      },
     });
 
-    it("should only provide /api/gateway endpoints in C2 storage", async () => {
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Gateway API should work with auth
-      const gatewayResp = await fetch("http://localhost:3001/api/gateway/health", {
-        headers: {
-          Authorization: "Bearer c2-storage-key",
-        },
-      });
-      expect(gatewayResp.status).toBe(200);
-
-      // Admin API should fail or not exist
-      const adminResp = await fetch("http://localhost:3001/api/health");
-      expect([404, 401]).toContain(adminResp.status);
-    });
-
-    it("should start C2 MCP service on port 3002", (done) => {
-      const mcpDir = join(testDir, "c2-mcp");
-      const env = {
-        ...process.env,
+    const gwPort = await getFreePort();
+    c2Gateway = await spawnHttpServer({
+      port: gwPort,
+      env: {
         NODE_ENV: "test",
-        TRANSPORT_TYPE: "http",
-        TRANSPORT_PORT: "3002",
         DEPLOYMENT_MODE: "gateway",
-        CLOUD_SERVICE_URL: "http://localhost:3001",
-        AUTH_TOKEN: "c2-storage-key",
-        DATABASE_PATH: join(mcpDir, "skill-mcp.db"),
-        MCP_ONLY_MODE: "true",
-      };
+        CLOUD_SERVICE_URL: c2Cloud.url,
+        AUTH_TOKEN: c2ServiceToken,
+        DATABASE_PATH: gwDb,
+        STORAGE_BASE_PATH: gwStorage,
+        CACHE_FILE_DIR: join(gwDir, "cache"),
+      },
+    });
+  }, 90_000);
 
-      c2McpProcess = spawn("npm", ["start"], {
-        cwd: process.cwd(),
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 15000,
-      });
+  afterAll(async () => {
+    await c1Server?.stop();
+    await c2Gateway?.stop();
+    await c2Cloud?.stop();
+    if (testDir) rmSync(testDir, { recursive: true, force: true });
+  });
 
-      if (!c2McpProcess.stdout) {
-        done(new Error("Failed to create C2 MCP process"));
-        return;
-      }
-
-      let output = "";
-      c2McpProcess.stdout.on("data", (data) => {
-        output += data.toString();
-        if (output.includes("HTTP transport configured")) {
-          setTimeout(() => done(), 500);
-        }
-      });
-
-      setTimeout(() => {
-        if (!output.includes("HTTP transport configured")) {
-          done(new Error("C2 MCP did not start"));
-        }
-      }, 15000);
+  describe("C1: Single Server (standalone HTTP)", () => {
+    it("exposes /api/gateway/health unauthenticated", async () => {
+      const r = await fetch(`${c1Server!.url}/api/gateway/health`);
+      expect(r.status).toBe(200);
     });
 
-    it("should verify C2 MCP connects to storage", async () => {
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // C2 MCP should provide /mcp endpoints but not /api
-      // (would need to implement MCP protocol test)
-      // For now, just verify both processes are running
-      expect(c2McpProcess?.pid).toBeDefined();
-      expect(c2StorageProcess?.pid).toBeDefined();
+    it("rejects /api/gateway/skills without bearer", async () => {
+      const r = await fetch(`${c1Server!.url}/api/gateway/skills`);
+      expect(r.status).toBe(401);
     });
 
-    it("should handle concurrent requests to C1", async () => {
-      // Make multiple concurrent requests to C1
-      const promises = [];
-      for (let i = 0; i < 5; i++) {
-        promises.push(
-          fetch("http://localhost:3000/api/health")
-        );
-      }
+    it("returns the seeded skill on /api/gateway/skills with valid bearer", async () => {
+      const r = await fetch(`${c1Server!.url}/api/gateway/skills`, {
+        headers: { Authorization: `Bearer ${c1Token}` },
+      });
+      expect(r.status).toBe(200);
+      const body = await r.json() as { data: Array<{ slug: string }> };
+      expect(body.data.find(s => s.slug === "c-test-skill-1")).toBeTruthy();
+    });
 
+    it("exposes admin routes in standalone mode (MCP_ONLY_MODE off)", async () => {
+      // Admin routes require authentication too — but a missing-bearer 401
+      // (vs. 404) is enough to confirm the route is registered.
+      const r = await fetch(`${c1Server!.url}/api/admin/skills`);
+      expect(r.status).not.toBe(404);
+    });
+
+    it("handles 5 concurrent gateway list requests", async () => {
+      const headers = { Authorization: `Bearer ${c1Token}` };
+      const promises = Array.from({ length: 5 }, () =>
+        fetch(`${c1Server!.url}/api/gateway/skills`, { headers }),
+      );
       const responses = await Promise.all(promises);
-      for (const resp of responses) {
-        expect(resp.status).toBe(200);
-      }
-    });
-
-    it("should isolate sessions in C2", async () => {
-      // Both C1 and C2 running
-      // C1 provides unified service
-      const c1Health = await fetch("http://localhost:3000/api/health");
-
-      // C2 provides separated services
-      const c2StorageHealth = await fetch("http://localhost:3001/api/gateway/health", {
-        headers: {
-          Authorization: "Bearer c2-storage-key",
-        },
-      });
-
-      // Both should respond
-      expect(c1Health.status).toBe(200);
-      expect(c2StorageHealth.status).toBe(200);
+      for (const r of responses) expect(r.status).toBe(200);
     });
   });
 
-  describe("Performance Comparison", () => {
-    it("C1 should respond quickly (shared cache)", async () => {
-      const start = Date.now();
-      const response = await fetch("http://localhost:3000/api/health");
-      const duration = Date.now() - start;
-
-      expect(response.status).toBe(200);
-      expect(duration).toBeLessThan(100); // Should be < 100ms
+  describe("C2: Distributed (Cloud + MCP-only Gateway)", () => {
+    it("cloud service is reachable on /api/gateway/health", async () => {
+      const r = await fetch(`${c2Cloud!.url}/api/gateway/health`);
+      expect(r.status).toBe(200);
     });
 
-    it("C2 storage should respond to authenticated requests", async () => {
-      const start = Date.now();
-      const response = await fetch("http://localhost:3001/api/gateway/health", {
-        headers: {
-          Authorization: "Bearer c2-storage-key",
-        },
-      });
-      const duration = Date.now() - start;
+    it("gateway exposes /api/gateway/health unauthenticated", async () => {
+      const r = await fetch(`${c2Gateway!.url}/api/gateway/health`);
+      expect(r.status).toBe(200);
+    });
 
-      expect(response.status).toBe(200);
-      expect(duration).toBeLessThan(100);
+    it("gateway proxies authenticated list requests to cloud", async () => {
+      const r = await fetch(`${c2Gateway!.url}/api/gateway/skills`, {
+        headers: { Authorization: `Bearer ${c2ClientToken}` },
+      });
+      expect(r.status).toBe(200);
+      const body = await r.json() as { data: Array<{ slug: string }> };
+      expect(body.data.find(s => s.slug === "c-test-skill-2")).toBeTruthy();
+    });
+
+    it("gateway rejects unauthenticated requests (no anonymous passthrough)", async () => {
+      const r = await fetch(`${c2Gateway!.url}/api/gateway/skills`);
+      expect(r.status).toBe(401);
+    });
+
+    it("both C2 servers stay alive after the suite", () => {
+      expect(c2Cloud!.process.exitCode).toBeNull();
+      expect(c2Gateway!.process.exitCode).toBeNull();
     });
   });
 });

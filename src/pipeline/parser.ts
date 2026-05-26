@@ -36,13 +36,18 @@ export function parsePipeline(yamlContent: string): PipelineDefinition {
         throw new Error(`Stage "${stageName}" must have inputs object`);
       }
 
+      if (stage.condition !== undefined || stage.retry !== undefined) {
+        // Surface silent ignore: previous schema accepted these fields but
+        // executor never honored them. Warn loudly so authors don't believe
+        // they took effect. (See T-203.)
+        console.warn(`Stage "${stageName}": "condition" / "retry" are not supported and will be ignored.`);
+      }
+
       stages[stageName] = {
         skill: stage.skill,
         depends_on: stage.depends_on as string[] | undefined,
         inputs: stage.inputs as Record<string, unknown>,
         outputs: stage.outputs as string[],
-        condition: stage.condition as string | undefined,
-        retry: stage.retry as { max: number; delay_ms: number } | undefined,
       };
     }
 

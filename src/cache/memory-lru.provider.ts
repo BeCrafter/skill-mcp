@@ -1,4 +1,4 @@
-import type { ICacheProvider } from "./provider.interface.js";
+import type { CacheEntryMeta, ICacheProvider } from "./provider.interface.js";
 
 export class MemoryLRUCacheProvider implements ICacheProvider {
   private cache = new Map<string, { value: unknown; expires: number | null }>();
@@ -9,6 +9,11 @@ export class MemoryLRUCacheProvider implements ICacheProvider {
   }
 
   async get<T>(key: string): Promise<T | null> {
+    const meta = await this.getWithMeta<T>(key);
+    return meta ? meta.value : null;
+  }
+
+  async getWithMeta<T>(key: string): Promise<CacheEntryMeta<T> | null> {
     const entry = this.cache.get(key);
     if (!entry) return null;
     if (entry.expires !== null && Date.now() > entry.expires) {
@@ -18,7 +23,7 @@ export class MemoryLRUCacheProvider implements ICacheProvider {
     // Move to end (most recently used)
     this.cache.delete(key);
     this.cache.set(key, entry);
-    return entry.value as T;
+    return { value: entry.value as T, expiresAt: entry.expires };
   }
 
   async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {

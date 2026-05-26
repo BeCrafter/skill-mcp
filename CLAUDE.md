@@ -57,7 +57,29 @@ For multi-step tasks, state a brief plan with verification steps. Strong success
 
 ---
 
-### 5. Documentation Sync
+### 5. Architecture Documentation Sync (强制)
+
+**`docs/ARCHITECTURE.md` 是本项目唯一、完整的技术架构文档（Single Source of Truth）。每次会话执行编码任务时都必须遵守以下规则：**
+
+1. **进入任何非平凡任务前**：先读 `docs/ARCHITECTURE.md`，确认当前模块的预期分层、依赖方向、横切契约。本文档优先级高于其它 `docs/` 子文件。
+2. **下列变更必须在同一 PR 中同步更新 `docs/ARCHITECTURE.md`**：
+   - 新增 / 删除 / 重命名 `src/` 一级目录或公共接口
+   - 模块拆分、分层调整、依赖方向变化
+   - 数据模型（drizzle schema、迁移）变化
+   - 部署形态、模式开关（`DEPLOYMENT_MODE` / `MCP_ONLY_MODE` 等）语义变化
+   - 横切关注点变化：认证 / 缓存键约定 / 事件类型 / 权限规则 / 配置 schema
+   - 新增运行时 npm 依赖
+3. **修复 `docs/ARCHITECTURE.md` 第 9 节"已知问题清单"中的任何条目时**，必须在同一 PR 中将该条目从清单移除或标注为 `已修复 (commit <sha>)`。完成第 10 节路线图中的某项时同样要更新。
+   - **执行优化任务时，先读 [`docs/REFACTORING_BACKLOG.md`](docs/REFACTORING_BACKLOG.md)**，按其中的 T-XXX 条目逐项推进。每条目完成后：①把该条目状态改为 `✅ 已完成 (<commit-sha>, <date>)` 并移到"完成历史"章节（保留完整内容，不删）；②同步更新 `ARCHITECTURE.md` 第 9 / 10 节。
+   - 接到优化类需求时，禁止凭印象动手，必须先在 BACKLOG 中找到对应条目；若无对应条目，先按 BACKLOG 末尾的"新增条目模板"补齐再开工。
+4. **禁止把架构相关说明拆分到其它新文档**。架构图、模块清单、关键流程、问题清单、优化路线图必须留在 `docs/ARCHITECTURE.md` 同一份文件。需要更深入的子主题（RFC / 设计权衡）时，可在 `docs/ADVANCED/` 下新增，但必须从 `docs/ARCHITECTURE.md` 链接过去。
+5. **职责边界**：README 面向使用者（怎么跑），`docs/ARCHITECTURE.md` 面向开发者与架构师（怎么实现、为何这样、还能怎样）。不要把架构内容写进 README，也不要把使用说明写进 ARCHITECTURE。
+6. **文档末尾"变更日志"必须追加一行**：日期、commit sha、变更摘要。
+7. **PR 自检清单**：提交前自问"我的改动是否触及第 2 条列出的任何范围？"，是 → 必须改 `docs/ARCHITECTURE.md`，否则视为未完成。
+
+---
+
+### 6. Documentation Sync
 
 **Keep README.md in sync with code changes.**
 

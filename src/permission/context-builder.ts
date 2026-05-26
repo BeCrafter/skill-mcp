@@ -12,30 +12,15 @@ function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-export async function buildRequestContext(
-  extra: McpExtra,
-  userRepo: UserRepository,
-  userRoleRepo: UserRoleRepository,
-): Promise<RequestContext> {
-  const sessionId = extra.sessionId ?? randomUUID();
-
-  const token = extra.authInfo?.token;
-  if (!token) {
-    return { userId: "anonymous", sessionId, tags: new Set(), isAuthenticated: false };
-  }
-
-  const hash = sha256(token);
-  const user = await userRepo.findByToken(hash);
-  if (!user || user.status !== "active") {
-    return { userId: "anonymous", sessionId, tags: new Set(), isAuthenticated: false };
-  }
-
-  const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
-  return { userId: user.id, sessionId, tags: new Set(tags), isAuthenticated: true };
-}
-
-export async function buildRequestContextFromHttp(
-  token: string | null,
+/**
+ * T-504 — single resolution path. Both MCP-tool callers and HTTP middleware
+ * arrive here once they've extracted (token, sessionId). Anonymous fall-through
+ * is consistent: missing token, unknown token, or disabled user all collapse
+ * to the same anonymous context. Keeping this in one place prevents the two
+ * code paths from drifting (e.g. one validating user.status, the other not).
+ */
+async function resolveContextForToken(
+  token: string | null | undefined,
   sessionId: string,
   userRepo: UserRepository,
   userRoleRepo: UserRoleRepository,
@@ -54,9 +39,43 @@ export async function buildRequestContextFromHttp(
   return { userId: user.id, sessionId, tags: new Set(tags), isAuthenticated: true };
 }
 
+export function buildRequestContext(
+  extra: McpExtra,
+  userRepo: UserRepository,
+  userRoleRepo: UserRoleRepository,
+): Promise<RequestContext> {
+  const sessionId = extra.sessionId ?? randomUUID();
+  return resolveContextForToken(extra.authInfo?.token, sessionId, userRepo, userRoleRepo);
+}
+
+export function buildRequestContextFromHttp(
+  token: string | null,
+  sessionId: string,
+  userRepo: UserRepository,
+  userRoleRepo: UserRoleRepository,
+): Promise<RequestContext> {
+  return resolveContextForToken(token, sessionId, userRepo, userRoleRepo);
+}
+
+// Cap parsed header length to bound work on hostile input. 4 KiB comfortably
+// fits any legitimate opaque bearer token (including JWT) while preventing
+// pathological allocations during string ops on attacker-controlled headers.
+const MAX_AUTH_HEADER_BYTES = 4096;
+// JWTs in production routinely run 1.5–3 KiB. The hard ceiling tracks the
+// header limit so an attacker cannot pad below it to bypass the per-token
+// guard.
+const MAX_TOKEN_BYTES = 4096;
+const BEARER_PREFIX = /^bearer\s+/i;
+
 export function extractBearerToken(authHeader: string | undefined): string | null {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-  return authHeader.slice(7).trim() || null;
+  if (!authHeader) return null;
+  if (authHeader.length > MAX_AUTH_HEADER_BYTES) return null;
+  const trimmed = authHeader.trim();
+  const match = trimmed.match(BEARER_PREFIX);
+  if (!match) return null;
+  const token = trimmed.slice(match[0].length).trim();
+  if (!token || token.length > MAX_TOKEN_BYTES) return null;
+  return token;
 }
 
 export type ContextBuilder = (extra: McpExtra) => Promise<RequestContext>;

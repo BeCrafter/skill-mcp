@@ -1,18 +1,29 @@
 import type { SkillService } from "../services/skill.service.js";
 import type { DomainEventBus } from "../events/event-bus.js";
 import type { PipelineDefinition, StageDefinition, StageResult, PipelineResult, PipelineResponse, PipelineAwaitingResult, PipelineStageRequest } from "./types.js";
+import type { RequestContext } from "../types/index.js";
 import { DAGScheduler } from "./dag.js";
 import { ExecutionContext } from "./context.js";
 import type { PipelineRunStore, PipelineRun } from "./run-store.js";
 
 export class PipelineExecutor {
+  // T-709 — per-runId mutex. resume() does check-then-act on completedStages
+  // before advanceBatch; two concurrent callers each completing the last
+  // missing stage in a batch would both observe allCompleted=true and both
+  // advance, skipping a batch entirely. Serialize per runId.
+  private resumeLocks = new Map<string, Promise<unknown>>();
+
   constructor(
     private skillService: SkillService,
     private runStore?: PipelineRunStore,
     private eventBus?: DomainEventBus,
   ) {}
 
-  async execute(pipeline: PipelineDefinition, inputs: Record<string, unknown>): Promise<PipelineResult> {
+  async execute(
+    pipeline: PipelineDefinition,
+    inputs: Record<string, unknown>,
+    requestContext?: RequestContext,
+  ): Promise<PipelineResult> {
     // Validate required inputs
     for (const [key, inputDef] of Object.entries(pipeline.inputs)) {
       if (inputDef.required && !(key in inputs)) {
@@ -32,7 +43,7 @@ export class PipelineExecutor {
     for (const batch of dag.getBatches()) {
       // Execute stages in parallel within a batch
       const batchResults = await Promise.allSettled(
-        batch.map(stageName => this.executeStage(stageName, pipeline.stages[stageName], context)),
+        batch.map(stageName => this.executeStage(stageName, pipeline.stages[stageName], context, requestContext)),
       );
 
       for (let i = 0; i < batch.length; i++) {
@@ -74,6 +85,7 @@ export class PipelineExecutor {
     name: string,
     stage: StageDefinition,
     context: ExecutionContext,
+    requestContext?: RequestContext,
   ): Promise<StageResult> {
     const start = Date.now();
 
@@ -87,7 +99,7 @@ export class PipelineExecutor {
         throw new Error(`Skill "${stage.skill}" not found`);
       }
 
-      const skillEntry = await this.skillService.viewSkillEntry(stage.skill);
+      const skillEntry = await this.skillService.viewSkillEntry(stage.skill, requestContext);
 
       // In a real execution, this would be passed to an LLM agent to execute
       // For now, we return the skill entry and resolved inputs as the output
@@ -119,18 +131,53 @@ export class PipelineExecutor {
   async start(
     pipeline: PipelineDefinition,
     inputs: Record<string, unknown>,
+    requestContext?: RequestContext,
   ): Promise<PipelineResponse> {
     if (!this.runStore) {
       throw new Error("PipelineRunStore required for two-phase execution");
     }
     this.validateInputs(pipeline, inputs);
     const runId = this.runStore.createRun(pipeline, inputs);
-    return this.executeBatch(runId);
+    return this.executeBatch(runId, requestContext);
   }
 
   async resume(
     runId: string,
     stageOutputs: Record<string, Record<string, unknown>>,
+    requestContext?: RequestContext,
+  ): Promise<PipelineResponse> {
+    // T-709 — chain onto the pending lock for this runId so completeStage +
+    // allCompleted check + advanceBatch run atomically. Without this, two
+    // concurrent resume() calls each completing the last missing stage in a
+    // batch would both observe allCompleted=true and both advanceBatch,
+    // silently skipping a batch.
+    const prev = this.resumeLocks.get(runId) ?? Promise.resolve();
+    // Run impl after prev settles regardless of outcome — prev may belong to a
+    // different caller that failed; that failure is theirs to handle, not ours.
+    const next = prev.then(
+      () => this.resumeImpl(runId, stageOutputs, requestContext),
+      () => this.resumeImpl(runId, stageOutputs, requestContext),
+    );
+    // Track a swallowed-rejection variant so the next chain link doesn't
+    // produce an unhandled rejection if `next` rejects and no future caller
+    // attaches a handler before the microtask queue flushes.
+    const tracked = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.resumeLocks.set(runId, tracked);
+    void tracked.then(() => {
+      if (this.resumeLocks.get(runId) === tracked) {
+        this.resumeLocks.delete(runId);
+      }
+    });
+    return await next;
+  }
+
+  private async resumeImpl(
+    runId: string,
+    stageOutputs: Record<string, Record<string, unknown>>,
+    requestContext?: RequestContext,
   ): Promise<PipelineResponse> {
     const run = this.runStore?.getRun(runId);
     if (!run) {
@@ -149,7 +196,7 @@ export class PipelineExecutor {
 
     if (!allCompleted) {
       // Return current batch (some stages still need outputs)
-      return await this.buildAwaitingResult(run);
+      return await this.buildAwaitingResult(run, requestContext);
     }
 
     // Advance to next batch
@@ -166,32 +213,19 @@ export class PipelineExecutor {
       };
     }
 
-    return this.executeBatch(runId);
+    return this.executeBatch(runId, requestContext);
   }
 
-  private async executeBatch(runId: string): Promise<PipelineResponse> {
+  private async executeBatch(runId: string, requestContext?: RequestContext): Promise<PipelineResponse> {
     const run = this.runStore?.getRun(runId);
     if (!run) throw new Error(`Pipeline run "${runId}" not found`);
 
     const batch = run.batches[run.currentBatchIndex];
-    const stageRequests: PipelineStageRequest[] = [];
-
-    for (const stageName of batch) {
-      const stage = run.pipeline.stages[stageName];
-      if (!stage) continue;
-
-      const resolved_inputs = run.context.resolveExpressions(stage.inputs) as Record<string, unknown>;
-      const skillEntry = await this.skillService.viewSkillEntry(stage.skill);
-
-      stageRequests.push({
-        stage: stageName,
-        skill: stage.skill,
-        skill_entry: skillEntry,
-        resolved_inputs,
-        depends_on: stage.depends_on ?? [],
-        status: "awaiting_execution",
-      });
-    }
+    // T-703 — stages within a single batch are dependency-free by construction
+    // (DAGScheduler guarantee), so resolve their skill entries in parallel
+    // instead of awaiting one at a time. Latency now scales with the slowest
+    // stage in the batch, not the sum.
+    const stageRequests = await this.buildStageRequests(batch, run, requestContext);
 
     return {
       run_id: runId,
@@ -206,26 +240,9 @@ export class PipelineExecutor {
     };
   }
 
-  private async buildAwaitingResult(run: PipelineRun): Promise<PipelineAwaitingResult> {
+  private async buildAwaitingResult(run: PipelineRun, requestContext?: RequestContext): Promise<PipelineAwaitingResult> {
     const batch = run.batches[run.currentBatchIndex];
-    const stageRequests: PipelineStageRequest[] = [];
-
-    for (const stageName of batch) {
-      const stage = run.pipeline.stages[stageName];
-      if (!stage) continue;
-
-      const resolved_inputs = run.context.resolveExpressions(stage.inputs) as Record<string, unknown>;
-      const skillEntry = await this.skillService.viewSkillEntry(stage.skill);
-
-      stageRequests.push({
-        stage: stageName,
-        skill: stage.skill,
-        skill_entry: skillEntry,
-        resolved_inputs,
-        depends_on: stage.depends_on ?? [],
-        status: "awaiting_execution",
-      });
-    }
+    const stageRequests = await this.buildStageRequests(batch, run, requestContext);
 
     return {
       run_id: run.runId,
@@ -238,6 +255,32 @@ export class PipelineExecutor {
       })),
       remaining_batches: run.batches.length - run.currentBatchIndex - 1,
     };
+  }
+
+  // T-703 — shared helper used by both `executeBatch` and `buildAwaitingResult`.
+  // Resolves each stage's skill entry concurrently so a wide batch's latency is
+  // bounded by the slowest stage rather than their sum.
+  private async buildStageRequests(
+    batch: string[],
+    run: PipelineRun,
+    requestContext?: RequestContext,
+  ): Promise<PipelineStageRequest[]> {
+    const stageNames = batch.filter((name) => run.pipeline.stages[name]);
+    return await Promise.all(
+      stageNames.map(async (stageName) => {
+        const stage = run.pipeline.stages[stageName];
+        const resolved_inputs = run.context.resolveExpressions(stage.inputs) as Record<string, unknown>;
+        const skillEntry = await this.skillService.viewSkillEntry(stage.skill, requestContext);
+        return {
+          stage: stageName,
+          skill: stage.skill,
+          skill_entry: skillEntry,
+          resolved_inputs,
+          depends_on: stage.depends_on ?? [],
+          status: "awaiting_execution" as const,
+        };
+      }),
+    );
   }
 
   private buildStageResults(run: PipelineRun): StageResult[] {

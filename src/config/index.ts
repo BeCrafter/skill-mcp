@@ -30,7 +30,6 @@ function loadConfig(): AppConfig {
       ? {
           cloudServiceUrl: process.env.CLOUD_SERVICE_URL,
           authToken: process.env.AUTH_TOKEN ?? "",
-          authTokenRefreshUrl: process.env.AUTH_TOKEN_REFRESH_URL,
         }
       : undefined,
     database: {
@@ -58,9 +57,12 @@ function loadConfig(): AppConfig {
     },
     security: {
       enableInjectionScan: process.env.SECURITY_INJECTION_SCAN !== "false",
+      hstsEnabled: process.env.SECURITY_HSTS_ENABLED === "true",
     },
     auth: {
       stdioToken: process.env.SKILL_MCP_AUTH_TOKEN,
+      adminAuthOptional: process.env.SKILL_MCP_ADMIN_AUTH_OPTIONAL === "true",
+      metricsAuthOptional: process.env.SKILL_MCP_METRICS_AUTH_OPTIONAL === "true",
     },
   };
 
@@ -128,6 +130,15 @@ export function getConfig(): AppConfig {
 
 export function resetConfig(): void {
   _config = null;
+}
+
+/**
+ * Build a fresh AppConfig from the current process environment, bypassing
+ * the module-level singleton cache. Use this in tests so cases never need
+ * to reach into the shared `_config` slot via `resetConfig()`.
+ */
+export function createConfig(): AppConfig {
+  return loadConfig();
 }
 
 export type { AppConfig };

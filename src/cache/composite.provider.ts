@@ -1,4 +1,4 @@
-import type { ICacheProvider } from "./provider.interface.js";
+import type { CacheEntryMeta, ICacheProvider } from "./provider.interface.js";
 import { MemoryLRUCacheProvider } from "./memory-lru.provider.js";
 import { FileCacheProvider } from "./file.provider.js";
 import { metrics } from "../telemetry/metrics.js";
@@ -26,20 +26,29 @@ export class CompositeCacheProvider implements ICacheProvider {
   }
 
   async get<T>(key: string): Promise<T | null> {
+    const meta = await this.getWithMeta<T>(key);
+    return meta ? meta.value : null;
+  }
+
+  async getWithMeta<T>(key: string): Promise<CacheEntryMeta<T> | null> {
     // L1 → L2
-    const l1Value = await this.l1.get<T>(key);
-    if (l1Value !== null) {
+    const l1Meta = await this.l1.getWithMeta<T>(key);
+    if (l1Meta !== null) {
       metrics.cacheOps.inc({ layer: "l1", result: "hit" });
-      return l1Value;
+      return l1Meta;
     }
     metrics.cacheOps.inc({ layer: "l1", result: "miss" });
 
-    const l2Value = await this.l2.get<T>(key);
-    if (l2Value !== null) {
+    const l2Meta = await this.l2.getWithMeta<T>(key);
+    if (l2Meta !== null) {
       metrics.cacheOps.inc({ layer: "l2", result: "hit" });
-      // Promote to L1
-      await this.l1.set(key, l2Value);
-      return l2Value;
+      // Promote to L1, preserving the L2 entry's remaining TTL so the L1
+      // copy expires no later than its L2 counterpart.
+      const remainingSeconds = l2Meta.expiresAt
+        ? Math.max(1, Math.ceil((l2Meta.expiresAt - Date.now()) / 1000))
+        : undefined;
+      await this.l1.set(key, l2Meta.value, remainingSeconds);
+      return l2Meta;
     }
     metrics.cacheOps.inc({ layer: "l2", result: "miss" });
 
@@ -75,6 +84,7 @@ export class CompositeCacheProvider implements ICacheProvider {
 /** No-op cache for when caching is disabled */
 class NoopCacheProvider implements ICacheProvider {
   async get<T>(): Promise<T | null> { return null; }
+  async getWithMeta<T>(): Promise<CacheEntryMeta<T> | null> { return null; }
   async set(): Promise<void> {}
   async has(): Promise<boolean> { return false; }
   async delete(): Promise<void> {}

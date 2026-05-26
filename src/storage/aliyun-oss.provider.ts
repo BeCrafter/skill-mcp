@@ -53,6 +53,25 @@ export class AliyunOssProvider implements IStorageProvider {
     }
   }
 
+  async moveDir(srcPrefix: string, dstPrefix: string): Promise<void> {
+    const normSrc = srcPrefix.endsWith("/") ? srcPrefix : srcPrefix + "/";
+    const normDst = dstPrefix.endsWith("/") ? dstPrefix : dstPrefix + "/";
+    let marker: string | undefined;
+    do {
+      const result = await this.client.list({ prefix: normSrc, marker, "max-keys": 1000 }, {});
+      if (result.objects && result.objects.length > 0) {
+        for (const obj of result.objects) {
+          const relative = obj.name.slice(normSrc.length);
+          if (!relative) continue;
+          const dstKey = normDst + relative;
+          await this.client.copy(dstKey, obj.name);
+          await this.client.delete(obj.name);
+        }
+      }
+      marker = result.nextMarker;
+    } while (marker);
+  }
+
   async deleteDir(prefix: string): Promise<void> {
     const normalizedPrefix = prefix.endsWith("/") ? prefix : prefix + "/";
     let marker: string | undefined;
@@ -69,12 +88,19 @@ export class AliyunOssProvider implements IStorageProvider {
   }
 
   async list(prefix: string): Promise<string[]> {
-    const result = await this.client.list({ prefix, delimiter: "/", "max-keys": 1000 }, {});
+    // T-706 — paginate through nextMarker. Single-page cap at 1000 silently
+    // truncated callers when a prefix had > 1000 entries (LocalFileSystemProvider
+    // has no such cap, so the two backends diverged). Mirrors listRecursive's
+    // do-while but keeps `delimiter: "/"` for current-level-only semantics.
     const items: string[] = [];
-    if (result.objects) {
-      // Return full paths with prefix (consistent with LocalFileSystemProvider)
-      items.push(...result.objects.map(o => o.name));
-    }
+    let marker: string | undefined;
+    do {
+      const result = await this.client.list({ prefix, delimiter: "/", marker, "max-keys": 1000 }, {});
+      if (result.objects) {
+        items.push(...result.objects.map(o => o.name));
+      }
+      marker = result.nextMarker;
+    } while (marker);
     return items;
   }
 

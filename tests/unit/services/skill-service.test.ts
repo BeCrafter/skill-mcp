@@ -2,9 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { SkillService } from "../../../src/services/skill.service.js";
 import type { ISkillProvider } from "../../../src/provider/interface.js";
 import type { ICacheProvider } from "../../../src/cache/provider.interface.js";
-import type { IPermissionFilter } from "../../../src/permission/filter.interface.js";
 import type { Logger } from "pino";
-import type { SkillMeta, SkillFileContent, FileInfo } from "../../../src/types/index.js";
+import type { SkillMeta, SkillFileContent, FileInfo, RequestContext } from "../../../src/types/index.js";
 
 const sampleSkill: SkillMeta = {
   id: "1", slug: "test-skill", name: "test-skill",
@@ -12,13 +11,14 @@ const sampleSkill: SkillMeta = {
   version: "0.0.1", category: null, tags: [], attributes: {},
   status: "published", visibility: "public", entryFile: "SKILL.md",
   storagePath: "skills/test/", contentHash: null,
-  conditions: null, assignedGroups: [], createdAt: 1, updatedAt: 1,
+  createdAt: 1, updatedAt: 1,
 };
 
 function createMockProvider(overrides?: Partial<ISkillProvider>): ISkillProvider {
   return {
     listSkills: vi.fn().mockResolvedValue([]),
     getSkillMeta: vi.fn().mockResolvedValue(sampleSkill),
+    getSkillMetaById: vi.fn().mockResolvedValue(null),
     getSkillEntry: vi.fn().mockResolvedValue("# Test Skill\n\nSome content"),
     getSkillFiles: vi.fn().mockResolvedValue([]),
     getSkillFileTree: vi.fn().mockResolvedValue([]),
@@ -30,18 +30,12 @@ function createMockProvider(overrides?: Partial<ISkillProvider>): ISkillProvider
 function createMockCache(): ICacheProvider {
   return {
     get: vi.fn().mockResolvedValue(null),
+    getWithMeta: vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue(undefined),
     has: vi.fn().mockResolvedValue(false),
     delete: vi.fn().mockResolvedValue(undefined),
     clear: vi.fn().mockResolvedValue(undefined),
     clearByPrefix: vi.fn().mockResolvedValue(undefined),
-  };
-}
-
-function createMockFilter(): IPermissionFilter {
-  return {
-    filter: vi.fn().mockImplementation((skills) => Promise.resolve(skills)),
-    check: vi.fn().mockResolvedValue(true),
   };
 }
 
@@ -58,10 +52,13 @@ function createMockLogger(): Logger {
   } as unknown as Logger;
 }
 
+function anonymousCtx(): RequestContext {
+  return { userId: "anon", sessionId: "s", tags: new Set(), isAuthenticated: false };
+}
+
 describe("SkillService", () => {
   const mockLogger = createMockLogger();
   const mockCache = createMockCache();
-  const mockFilter = createMockFilter();
 
   it("should list skills index as flat text", async () => {
     const skills: SkillMeta[] = [
@@ -72,12 +69,12 @@ describe("SkillService", () => {
         version: "0.0.1", category: null, tags: [], attributes: {},
         status: "draft", visibility: "public", entryFile: "SKILL.md",
         storagePath: "skills/draft/", contentHash: null,
-        conditions: null, assignedGroups: [], createdAt: 1, updatedAt: 1,
+        createdAt: 1, updatedAt: 1,
       },
     ];
 
     const provider = createMockProvider({ listSkills: vi.fn().mockResolvedValue(skills) });
-    const service = new SkillService(provider, mockCache, mockFilter, mockLogger);
+    const service = new SkillService(provider, mockCache, mockLogger);
 
     const index = await service.listSkillsIndex();
     expect(index).toContain("test-skill");
@@ -98,7 +95,7 @@ describe("SkillService", () => {
       getSkillEntry: vi.fn().mockResolvedValue(entryContent),
       getSkillFileTree: vi.fn().mockResolvedValue(fileTree),
     });
-    const service = new SkillService(provider, mockCache, mockFilter, mockLogger);
+    const service = new SkillService(provider, mockCache, mockLogger);
 
     const result = await service.viewSkillEntry("prompt-writer");
     expect(result).toContain("prompt-writer");
@@ -116,7 +113,7 @@ describe("SkillService", () => {
     const provider = createMockProvider({
       getSkillFiles: vi.fn().mockResolvedValue(files),
     });
-    const service = new SkillService(provider, mockCache, mockFilter, mockLogger);
+    const service = new SkillService(provider, mockCache, mockLogger);
 
     const result = await service.readSkillFiles("test-skill", ["references/a.md", "templates/b.md"]);
     expect(result).toHaveLength(2);
@@ -126,14 +123,14 @@ describe("SkillService", () => {
 
   it("should check skill existence", async () => {
     const provider = createMockProvider({ skillExists: vi.fn().mockResolvedValue(true) });
-    const service = new SkillService(provider, mockCache, mockFilter, mockLogger);
+    const service = new SkillService(provider, mockCache, mockLogger);
 
     expect(await service.skillExists("test-skill")).toBe(true);
   });
 
   it("should return empty index for no skills", async () => {
     const provider = createMockProvider({ listSkills: vi.fn().mockResolvedValue([]) });
-    const service = new SkillService(provider, mockCache, mockFilter, mockLogger);
+    const service = new SkillService(provider, mockCache, mockLogger);
 
     const index = await service.listSkillsIndex();
     expect(index).toBe("");
@@ -141,20 +138,38 @@ describe("SkillService", () => {
 
   it("should throw SkillNotFoundError when viewing non-existent skill", async () => {
     const provider = createMockProvider({ getSkillMeta: vi.fn().mockResolvedValue(null) });
-    const service = new SkillService(provider, mockCache, mockFilter, mockLogger);
+    const service = new SkillService(provider, mockCache, mockLogger);
 
     await expect(service.viewSkillEntry("nonexistent")).rejects.toThrow("Skill not found");
   });
 
-  it("should throw PermissionDeniedError when permission denied", async () => {
-    const provider = createMockProvider();
-    const denyFilter: IPermissionFilter = {
-      filter: vi.fn().mockImplementation((skills) => Promise.resolve(skills)),
-      check: vi.fn().mockResolvedValue(false),
-    };
-    const service = new SkillService(provider, mockCache, denyFilter, mockLogger);
+  it("should deny access to private skills for anonymous callers", async () => {
+    const privateSkill: SkillMeta = { ...sampleSkill, slug: "secret", visibility: "private" };
+    const provider = createMockProvider({
+      getSkillMeta: vi.fn().mockResolvedValue(privateSkill),
+    });
+    const service = new SkillService(provider, mockCache, mockLogger);
 
-    await expect(service.viewSkillEntry("test-skill")).rejects.toThrow("Permission denied");
-    await expect(service.readSkillFiles("test-skill", ["a.md"])).rejects.toThrow("Permission denied");
+    await expect(service.viewSkillEntry("secret", anonymousCtx())).rejects.toThrow("Permission denied");
+    await expect(service.readSkillFiles("secret", ["a.md"], anonymousCtx())).rejects.toThrow("Permission denied");
+  });
+
+  it("listAccessibleSkills should filter visibility, category and tags", async () => {
+    const skills: SkillMeta[] = [
+      { ...sampleSkill, id: "p1", slug: "pub-1", visibility: "public", category: "writing", tags: ["a"] },
+      { ...sampleSkill, id: "p2", slug: "pub-2", visibility: "public", category: "coding", tags: ["b"] },
+      { ...sampleSkill, id: "p3", slug: "priv-1", visibility: "private", category: "writing", tags: ["a"] },
+    ];
+    const provider = createMockProvider({ listSkills: vi.fn().mockResolvedValue(skills) });
+    const service = new SkillService(provider, mockCache, mockLogger);
+
+    const all = await service.listAccessibleSkills(anonymousCtx());
+    expect(all.map(s => s.slug).sort()).toEqual(["pub-1", "pub-2"]);
+
+    const writing = await service.listAccessibleSkills(anonymousCtx(), { category: "writing" });
+    expect(writing.map(s => s.slug)).toEqual(["pub-1"]);
+
+    const tagged = await service.listAccessibleSkills(anonymousCtx(), { tags: ["b"] });
+    expect(tagged.map(s => s.slug)).toEqual(["pub-2"]);
   });
 });

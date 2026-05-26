@@ -1,268 +1,154 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  ensureDistBuilt,
+  getFreePort,
+  seedPublicSkill,
+  seedRbac,
+  spawnHttpServer,
+  writeSkillPackage,
+  type SpawnedServer,
+} from "./_helpers.js";
 
-describe.skip("Scenario B: Local MCP + Remote Storage", () => {
+/**
+ * Scenario B: gateway in front of a remote cloud storage service.
+ *
+ *   client ──(Bearer userTok)──> Gateway HTTP ──(Bearer svcTok)──> Cloud HTTP
+ *
+ * The gateway uses `AUTH_TOKEN` env to authenticate itself to the cloud; the
+ * end user authenticates separately to the gateway with their own per-user
+ * bearer token. Both DBs are pre-seeded with matching users/roles so the
+ * spawned servers don't refuse the bearer at the gateway-auth middleware.
+ */
+describe("Scenario B: Local Gateway + Remote Cloud Storage", () => {
   let testDir: string;
-  let storageProcess: ChildProcess | null = null;
-  let mcpProcess: ChildProcess | null = null;
-  let storagePort = 3000;
-  let storageUrl = `http://localhost:${storagePort}`;
-  let apiKey = "test-key-scenario-b";
+  let cloudServer: SpawnedServer | null = null;
+  let gatewayServer: SpawnedServer | null = null;
+  let clientToken: string;
+  let serviceToken: string;
 
-  beforeAll(() => {
-    // Create test directory
-    testDir = join("/tmp", `scenario-b-${randomUUID()}`);
-    mkdirSync(testDir, { recursive: true });
+  beforeAll(async () => {
+    ensureDistBuilt();
 
-    // Create storage directory
-    const storageDir = join(testDir, "storage");
-    mkdirSync(storageDir, { recursive: true });
+    testDir = mkdtempSync(join(tmpdir(), "scenario-b-"));
 
-    // Create test skill package
-    const skillDir = join(storageDir, "data/skills/test-skill-b");
-    mkdirSync(skillDir, { recursive: true });
+    const cloudDir = join(testDir, "cloud");
+    const gatewayDir = join(testDir, "gateway");
+    const cloudDb = join(cloudDir, "skill-mcp.db");
+    const gatewayDb = join(gatewayDir, "skill-mcp.db");
+    const cloudStorage = join(cloudDir, "data/skills");
+    const gatewayStorage = join(gatewayDir, "data/skills");
 
-    writeFileSync(
-      join(skillDir, "SKILL.md"),
-      "# Test Skill B\n\nThis is a test skill for scenario B (remote storage).",
-    );
+    // The cloud-side DB carries two users: a "service" identity used by the
+    // gateway when proxying upstream, and the "client" identity that hits
+    // the gateway directly. We reuse the same plaintext for the gateway-side
+    // user to keep the test wiring simple.
+    const cloudSvc = seedRbac(cloudDb, { tags: ["svc-gateway"], tokenLabel: "svc-tok-cloud" });
+    const cloudClient = seedRbac(cloudDb, { tags: ["client"], tokenLabel: "client-tok" });
+    seedRbac(gatewayDb, { tags: ["client"], tokenLabel: cloudClient.token });
+    serviceToken = cloudSvc.token;
+    clientToken = cloudClient.token;
 
-    writeFileSync(
-      join(skillDir, "manifest.json"),
-      JSON.stringify({
-        name: "test-skill-b",
-        version: "0.0.1",
-        entry: "SKILL.md",
-      }),
-    );
+    writeSkillPackage(cloudStorage, "demo-skill-b", "# Demo Skill B");
+    seedPublicSkill(cloudDb, "demo-skill-b");
+    writeSkillPackage(gatewayStorage, "demo-skill-b", "# Demo Skill B");
 
-    // Create MCP client directory
-    const mcpDir = join(testDir, "mcp");
-    mkdirSync(mcpDir, { recursive: true });
-  });
-
-  afterAll(() => {
-    // Kill processes
-    if (storageProcess) {
-      storageProcess.kill();
-    }
-    if (mcpProcess) {
-      mcpProcess.kill();
-    }
-
-    // Cleanup
-    if (testDir && existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-  });
-
-  it("should start remote storage server with API key auth", (done) => {
-    const storageDir = join(testDir, "storage");
-    const env = {
-      ...process.env,
-      NODE_ENV: "test",
-      TRANSPORT_TYPE: "http",
-      TRANSPORT_PORT: String(storagePort),
-      DEPLOYMENT_MODE: "standalone",
-      DATABASE_PATH: join(storageDir, "skill-mcp.db"),
-      STORAGE_BASE_PATH: join(storageDir, "data/skills"),
-      CACHE_FILE_DIR: join(storageDir, "data/cache"),
-      ENABLE_API_KEY_AUTH: "true",
-      API_KEYS: apiKey,
-    };
-
-    storageProcess = spawn("npm", ["start"], {
-      cwd: process.cwd(),
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 15000,
-    });
-
-    if (!storageProcess.stdout || !storageProcess.stderr) {
-      done(new Error("Failed to create storage process"));
-      return;
-    }
-
-    let output = "";
-    storageProcess.stdout.on("data", (data) => {
-      output += data.toString();
-      if (output.includes("HTTP transport configured")) {
-        // Wait a bit for server to be ready
-        setTimeout(() => done(), 500);
-      }
-    });
-
-    storageProcess.stderr.on("data", (data) => {
-      console.error("Storage stderr:", data.toString());
-    });
-
-    storageProcess.on("error", (error) => {
-      done(new Error(`Failed to start storage: ${error.message}`));
-    });
-
-    setTimeout(() => {
-      if (!output.includes("HTTP transport configured")) {
-        done(new Error("Storage server did not start within 15 seconds"));
-      }
-    }, 15000);
-  });
-
-  it("should verify storage server health check", async () => {
-    const response = await fetch(`${storageUrl}/api/gateway/health`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
+    const cloudPort = await getFreePort();
+    cloudServer = await spawnHttpServer({
+      port: cloudPort,
+      env: {
+        NODE_ENV: "test",
+        DEPLOYMENT_MODE: "standalone",
+        DATABASE_PATH: cloudDb,
+        STORAGE_BASE_PATH: cloudStorage,
+        CACHE_FILE_DIR: join(cloudDir, "cache"),
       },
     });
 
-    expect(response.status).toBe(200);
-    const data = await response.json() as { status: string };
-    expect(data.status).toBe("ok");
-  });
-
-  it("should reject requests without API key", async () => {
-    const response = await fetch(`${storageUrl}/api/gateway/health`);
-    expect(response.status).toBe(401);
-  });
-
-  it("should reject requests with invalid API key", async () => {
-    const response = await fetch(`${storageUrl}/api/gateway/health`, {
-      headers: {
-        Authorization: "Bearer invalid-key",
+    const gatewayPort = await getFreePort();
+    gatewayServer = await spawnHttpServer({
+      port: gatewayPort,
+      env: {
+        NODE_ENV: "test",
+        DEPLOYMENT_MODE: "gateway",
+        CLOUD_SERVICE_URL: cloudServer.url,
+        AUTH_TOKEN: serviceToken,
+        DATABASE_PATH: gatewayDb,
+        STORAGE_BASE_PATH: gatewayStorage,
+        CACHE_FILE_DIR: join(gatewayDir, "cache"),
       },
     });
-    expect(response.status).toBe(401);
+  }, 60_000);
+
+  afterAll(async () => {
+    await gatewayServer?.stop();
+    await cloudServer?.stop();
+    if (testDir) rmSync(testDir, { recursive: true, force: true });
   });
 
-  it("should start MCP client connected to remote storage", (done) => {
-    const mcpDir = join(testDir, "mcp");
-    const env = {
-      ...process.env,
-      NODE_ENV: "test",
-      TRANSPORT_TYPE: "stdio",
-      DEPLOYMENT_MODE: "gateway",
-      CLOUD_SERVICE_URL: storageUrl,
-      AUTH_TOKEN: apiKey,
-      DATABASE_PATH: join(mcpDir, "skill-mcp.db"),
-      CACHE_FILE_DIR: join(mcpDir, "data/cache"),
-    };
-
-    mcpProcess = spawn("npm", ["start"], {
-      cwd: process.cwd(),
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 15000,
-    });
-
-    if (!mcpProcess.stdout || !mcpProcess.stderr) {
-      done(new Error("Failed to create MCP process"));
-      return;
-    }
-
-    let output = "";
-    mcpProcess.stdout.on("data", (data) => {
-      output += data.toString();
-      if (output.includes("Stdio transport configured")) {
-        setTimeout(() => done(), 500);
-      }
-    });
-
-    mcpProcess.stderr.on("data", (data) => {
-      console.error("MCP stderr:", data.toString());
-    });
-
-    mcpProcess.on("error", (error) => {
-      done(new Error(`Failed to start MCP: ${error.message}`));
-    });
-
-    setTimeout(() => {
-      if (!output.includes("Stdio transport configured")) {
-        done(new Error("MCP server did not start within 15 seconds"));
-      }
-    }, 15000);
+  it("cloud /api/gateway/health is unauthenticated and returns 200", async () => {
+    const r = await fetch(`${cloudServer!.url}/api/gateway/health`);
+    expect(r.status).toBe(200);
+    const body = await r.json() as { status: string };
+    expect(body.status).toBe("ok");
   });
 
-  it("should list skills from remote storage via MCP client", async () => {
-    // Wait for both services to be ready
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Query storage directly to verify skill exists
-    const response = await fetch(`${storageUrl}/api/gateway/skills`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
-
-    expect(response.status).toBe(200);
-    const data = await response.json() as { data: Array<{ slug: string; name: string }> };
-
-    // May be empty initially - that's ok
-    expect(Array.isArray(data.data)).toBe(true);
+  it("cloud rejects /api/gateway/skills without bearer", async () => {
+    const r = await fetch(`${cloudServer!.url}/api/gateway/skills`);
+    expect(r.status).toBe(401);
   });
 
-  it("should verify RemoteProvider caching", async () => {
-    // Make first request
-    const start1 = Date.now();
-    const response1 = await fetch(`${storageUrl}/api/gateway/skills`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+  it("cloud rejects /api/gateway/skills with invalid bearer", async () => {
+    const r = await fetch(`${cloudServer!.url}/api/gateway/skills`, {
+      headers: { Authorization: "Bearer bogus-token-xyz" },
     });
-    const time1 = Date.now() - start1;
-
-    // Make second request (should hit cache)
-    const start2 = Date.now();
-    const response2 = await fetch(`${storageUrl}/api/gateway/skills`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
-    const time2 = Date.now() - start2;
-
-    expect(response1.status).toBe(200);
-    expect(response2.status).toBe(200);
-
-    // Second request should be faster (or at least not slower by much)
-    // In reality cache is local, so this is just sanity check
-    expect(time2).toBeLessThanOrEqual(time1 + 100);
+    expect(r.status).toBe(401);
   });
 
-  it("should handle connection between MCP and storage", async () => {
-    // Both services running, verify they can communicate
-    // by checking MCP doesn't crash and storage is accessible
-
-    expect(mcpProcess?.pid).toBeDefined();
-    expect(storageProcess?.pid).toBeDefined();
-
-    // Verify storage is still responding
-    const response = await fetch(`${storageUrl}/api/gateway/health`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+  it("cloud accepts /api/gateway/skills with valid client bearer", async () => {
+    const r = await fetch(`${cloudServer!.url}/api/gateway/skills`, {
+      headers: { Authorization: `Bearer ${clientToken}` },
     });
-
-    expect(response.status).toBe(200);
+    expect(r.status).toBe(200);
+    const body = await r.json() as { data: Array<{ slug: string }> };
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data.find(s => s.slug === "demo-skill-b")).toBeTruthy();
   });
 
-  it("should verify auth token is used by RemoteProvider", async () => {
-    // Try with wrong token - should fail
-    const response = await fetch(`${storageUrl}/api/gateway/skills`, {
-      headers: {
-        Authorization: "Bearer wrong-token",
-      },
+  it("gateway forwards client bearer to cloud and returns the same skill list", async () => {
+    const r = await fetch(`${gatewayServer!.url}/api/gateway/skills`, {
+      headers: { Authorization: `Bearer ${clientToken}` },
     });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { data: Array<{ slug: string }> };
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data.find(s => s.slug === "demo-skill-b")).toBeTruthy();
+  });
 
-    expect(response.status).toBe(401);
+  it("gateway rejects requests without a bearer (no anonymous passthrough)", async () => {
+    const r = await fetch(`${gatewayServer!.url}/api/gateway/skills`);
+    expect(r.status).toBe(401);
+  });
 
-    // Try with correct token - should succeed
-    const response2 = await fetch(`${storageUrl}/api/gateway/skills`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+  it("gateway rejects requests whose bearer is unknown to the gateway DB", async () => {
+    const r = await fetch(`${gatewayServer!.url}/api/gateway/skills`, {
+      headers: { Authorization: "Bearer not-a-real-user" },
     });
+    expect(r.status).toBe(401);
+  });
 
-    expect(response2.status).toBe(200);
+  it("two consecutive list requests both succeed (RemoteProvider stays healthy)", async () => {
+    const headers = { Authorization: `Bearer ${clientToken}` };
+    const r1 = await fetch(`${gatewayServer!.url}/api/gateway/skills`, { headers });
+    const r2 = await fetch(`${gatewayServer!.url}/api/gateway/skills`, { headers });
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+  });
+
+  it("both spawned servers are still alive at the end of the suite", () => {
+    expect(cloudServer!.process.exitCode).toBeNull();
+    expect(gatewayServer!.process.exitCode).toBeNull();
   });
 });

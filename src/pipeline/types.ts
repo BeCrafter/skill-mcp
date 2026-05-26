@@ -13,13 +13,11 @@ export interface PipelineDefinition {
 export interface StageDefinition {
   skill: string; // skill slug
   depends_on?: string[];
-  inputs: Record<string, unknown>; // Can contain ${{ }} expressions
+  inputs: Record<string, unknown>; // Can contain ${{ }} expressions, supports embedded substitution
   outputs: string[];
-  condition?: string; // Future: conditional execution
-  retry?: {
-    max: number;
-    delay_ms: number;
-  };
+  // T-203: removed `condition` and `retry` — both were schema-only with no
+  // executor implementation, which made the API dishonest. Re-add when
+  // there's a concrete need and corresponding executor support.
 }
 
 export interface StageResult {

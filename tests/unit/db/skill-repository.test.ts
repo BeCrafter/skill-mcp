@@ -1,27 +1,33 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createDatabase, closeDatabase } from "../../../src/db/connection.js";
+import Database from "better-sqlite3";
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import * as schema from "../../../src/db/schema.js";
 import { SkillRepository, bumpVersion } from "../../../src/db/repositories/skill.repository.js";
-import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-const TEST_DB_PATH = join(tmpdir(), `skill-mcp-test-${process.pid}.db`);
+type DrizzleDB = BetterSQLite3Database<typeof schema>;
 
-function createTestTables(db: ReturnType<typeof createDatabase>): void {
+function createTestTables(db: DrizzleDB): void {
   const statements = [
     `CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
       display_name TEXT, description TEXT NOT NULL DEFAULT '',
       version TEXT NOT NULL DEFAULT '0.0.1', category TEXT DEFAULT NULL,
-      tags TEXT, attributes TEXT, status TEXT NOT NULL DEFAULT 'draft',
+      attributes TEXT, status TEXT NOT NULL DEFAULT 'draft',
       visibility TEXT NOT NULL DEFAULT 'private', entry_file TEXT DEFAULT 'SKILL.md',
-      storage_path TEXT NOT NULL, content_hash TEXT, conditions TEXT,
-      assigned_groups TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      storage_path TEXT NOT NULL, content_hash TEXT,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS skill_tags (
+      skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (skill_id, tag)
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_slug ON skills(slug)`,
     `CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)`,
     `CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status)`,
     `CREATE INDEX IF NOT EXISTS idx_skills_visibility ON skills(visibility)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS unique_name_content_hash ON skills(name, content_hash) WHERE content_hash IS NOT NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_skill_tags_tag ON skill_tags(tag)`,
   ];
   for (const sql of statements) {
     db.run(sql);
@@ -32,10 +38,9 @@ describe("SkillRepository", () => {
   let repo: SkillRepository;
 
   beforeEach(() => {
-    closeDatabase();
-    if (existsSync(TEST_DB_PATH)) unlinkSync(TEST_DB_PATH);
-
-    const db = createDatabase(TEST_DB_PATH);
+    const sqlite = new Database(":memory:");
+    sqlite.pragma("foreign_keys = ON");
+    const db = drizzle(sqlite, { schema });
     createTestTables(db);
     repo = new SkillRepository(db);
   });
@@ -87,6 +92,26 @@ describe("SkillRepository", () => {
     expect(updated).not.toBeNull();
     expect(updated!.description).toBe("Updated description");
     expect(updated!.category).toBe("writing");
+    expect(updated!.tags).toEqual(["prompt"]);
+  });
+
+  it("persists storagePath / contentHash when updated (importer + rollback path) — T-728", async () => {
+    // System callers (importer post-stage, rollback DB pointer) MUST be
+    // able to rewrite these columns. Untrusted-input filtering happens at
+    // the admin HTTP handler boundary, not here. See
+    // `tests/unit/http/admin-skills-put.test.ts`.
+    const skill = await repo.create({
+      slug: "system-update", name: "system-update",
+      storagePath: "skills/system-update/", contentHash: "old-hash",
+    });
+
+    await repo.update(skill.id, {
+      storagePath: "skills/system-update/",
+      contentHash: "new-hash",
+    });
+
+    const after = await repo.findById(skill.id);
+    expect(after!.contentHash).toBe("new-hash");
   });
 
   it("should delete a skill", async () => {
@@ -153,7 +178,7 @@ describe("SkillRepository", () => {
     expect(found!.id).toBe(skill.id);
   });
 
-  it("should store and retrieve tags as JSON array", async () => {
+  it("should store and retrieve tags via the relation table", async () => {
     await repo.create({
       slug: "tagged", name: "tagged",
       tags: ["prompt", "creative"],
@@ -162,7 +187,57 @@ describe("SkillRepository", () => {
 
     const found = await repo.findBySlug("tagged");
     expect(found).not.toBeNull();
-    expect(found!.tags).toEqual(["prompt", "creative"]);
+    expect(found!.tags.sort()).toEqual(["creative", "prompt"]);
+  });
+
+  it("should not match a skill whose tag merely contains the query as a substring (regression for LIKE %x% bug)", async () => {
+    await repo.create({
+      slug: "frontend-skill", name: "frontend-skill", status: "published",
+      tags: ["frontend"], storagePath: "skills/frontend-skill/",
+    });
+    await repo.create({
+      slug: "end-skill", name: "end-skill", status: "published",
+      tags: ["end"], storagePath: "skills/end-skill/",
+    });
+
+    const matchEnd = await repo.findAll({ tags: ["end"] });
+    expect(matchEnd.map(s => s.slug)).toEqual(["end-skill"]);
+  });
+
+  it("multi-tag filter requires ALL tags (AND semantics)", async () => {
+    await repo.create({
+      slug: "fe-only", name: "fe-only", status: "published",
+      tags: ["frontend"], storagePath: "skills/fe-only/",
+    });
+    await repo.create({
+      slug: "fe-and-design", name: "fe-and-design", status: "published",
+      tags: ["frontend", "design"], storagePath: "skills/fe-and-design/",
+    });
+
+    const both = await repo.findAll({ tags: ["frontend", "design"] });
+    expect(both.map(s => s.slug)).toEqual(["fe-and-design"]);
+  });
+
+  it("deleting a skill cascades to its tag rows", async () => {
+    const created = await repo.create({
+      slug: "tagged-2", name: "tagged-2",
+      tags: ["a", "b"], storagePath: "skills/tagged-2/",
+    });
+
+    await repo.delete("tagged-2");
+
+    const after = await repo.findById(created.id);
+    expect(after).toBeNull();
+  });
+
+  it("update with tags=[] clears existing tags", async () => {
+    const created = await repo.create({
+      slug: "clear-me", name: "clear-me",
+      tags: ["x", "y"], storagePath: "skills/clear-me/",
+    });
+    await repo.update(created.id, { tags: [] });
+    const found = await repo.findById(created.id);
+    expect(found!.tags).toEqual([]);
   });
 
   it("should store and retrieve attributes as JSON object", async () => {
@@ -187,6 +262,98 @@ describe("SkillRepository", () => {
     const found = await repo.findBySlug("hashed");
     expect(found).not.toBeNull();
     expect(found!.contentHash).toBe("sha256:abc123");
+  });
+
+  it("findByNameAndHash returns the matching row when both fields agree", async () => {
+    await repo.create({
+      slug: "a", name: "shared-name",
+      contentHash: "h-aaa", storagePath: "a/",
+    });
+    await repo.create({
+      slug: "b", name: "shared-name",
+      contentHash: "h-bbb", storagePath: "b/",
+    });
+
+    const hit = await repo.findByNameAndHash("shared-name", "h-bbb");
+    expect(hit).not.toBeNull();
+    expect(hit!.slug).toBe("b");
+
+    const miss = await repo.findByNameAndHash("shared-name", "h-zzz");
+    expect(miss).toBeNull();
+  });
+
+  it("(name, content_hash) UNIQUE index rejects duplicate content imports", async () => {
+    await repo.create({
+      slug: "first", name: "demo",
+      contentHash: "same-hash", storagePath: "first/",
+    });
+
+    await expect(repo.create({
+      slug: "second", name: "demo",
+      contentHash: "same-hash", storagePath: "second/",
+    })).rejects.toThrow(/UNIQUE constraint failed/);
+  });
+
+  it("findByIds returns all matching rows, hydrates tags, and is empty-safe", async () => {
+    await repo.create({ slug: "a", name: "a", tags: ["x"], storagePath: "a/" });
+    const b = await repo.create({ slug: "b", name: "b", tags: ["y", "z"], storagePath: "b/" });
+    const c = await repo.create({ slug: "c", name: "c", storagePath: "c/" });
+
+    const empty = await repo.findByIds([]);
+    expect(empty).toEqual([]);
+
+    const hits = await repo.findByIds([b.id, c.id, "missing-id"]);
+    const bySlug = Object.fromEntries(hits.map(s => [s.slug, s]));
+    expect(Object.keys(bySlug).sort()).toEqual(["b", "c"]);
+    expect(bySlug.b.tags.sort()).toEqual(["y", "z"]);
+    expect(bySlug.c.tags).toEqual([]);
+  });
+
+  it("(name, content_hash) UNIQUE index allows multiple rows when hash is NULL", async () => {
+    // Partial unique index excludes NULL content_hash so legacy rows
+    // without a hash don't collide with each other.
+    await repo.create({ slug: "p1", name: "legacy", storagePath: "p1/" });
+    await repo.create({ slug: "p2", name: "legacy", storagePath: "p2/" });
+
+    const all = await repo.findByName("legacy");
+    expect(all).toHaveLength(2);
+  });
+
+  it("T-721: hydrating a row with corrupt attributes JSON returns {} (not []) and bumps the parse-error counter", async () => {
+    const { metrics } = await import("../../../src/telemetry/metrics.js");
+    const created = await repo.create({
+      slug: "corrupt-attrs",
+      name: "corrupt-attrs",
+      storagePath: "corrupt-attrs/",
+    });
+    // Corrupt the JSON column directly: bypass the typed insert path so we
+    // simulate a manually-edited DB / pre-validation legacy row.
+    const sqlite = (repo as unknown as { db: { $client: { exec(s: string): void } } }).db.$client;
+    sqlite.exec(`UPDATE skills SET attributes = 'not-json{' WHERE id = '${created.id}'`);
+
+    metrics.skillRowJsonParseErrors.reset();
+    const hydrated = await repo.findById(created.id);
+    expect(hydrated).not.toBeNull();
+    expect(hydrated!.attributes).toEqual({});
+    // Crucially, attributes is an object — not an array.
+    expect(Array.isArray(hydrated!.attributes)).toBe(false);
+
+    const text = await (await import("../../../src/telemetry/metrics.js")).registry.metrics();
+    expect(text).toMatch(/skill_mcp_skill_row_json_parse_errors_total\{column="attributes"\}\s+1/);
+  });
+
+  it("T-721: a JSON array in attributes coerces to {} (consumers must see Record-shaped data)", async () => {
+    const created = await repo.create({
+      slug: "array-attrs",
+      name: "array-attrs",
+      storagePath: "array-attrs/",
+    });
+    const sqlite = (repo as unknown as { db: { $client: { exec(s: string): void } } }).db.$client;
+    sqlite.exec(`UPDATE skills SET attributes = '[1,2,3]' WHERE id = '${created.id}'`);
+
+    const hydrated = await repo.findById(created.id);
+    expect(hydrated!.attributes).toEqual({});
+    expect(Array.isArray(hydrated!.attributes)).toBe(false);
   });
 });
 

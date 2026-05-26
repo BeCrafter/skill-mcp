@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SkillService } from "../services/skill.service.js";
 import type { ISkillProvider } from "../provider/interface.js";
 import type { ContextBuilder } from "../permission/context-builder.js";
+import type { PipelineRunStore } from "../pipeline/run-store.js";
 import { buildSkillSystemPrompt } from "../prompt/system-prompt.js";
 import { registerTools } from "./tools/registry.js";
 
@@ -11,6 +12,7 @@ export async function createMcpServer(
   serverName?: string,
   serverVersion?: string,
   contextBuilder?: ContextBuilder,
+  pipelineRunStore?: PipelineRunStore,
 ): Promise<McpServer> {
   const skills = await skillProvider.listSkills();
   let instructions = buildSkillSystemPrompt(skills);
@@ -35,7 +37,7 @@ export async function createMcpServer(
     { instructions },
   );
 
-  registerTools(server, skillService, contextBuilder);
+  registerTools(server, skillService, contextBuilder, pipelineRunStore);
 
   return server;
 }

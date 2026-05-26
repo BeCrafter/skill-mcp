@@ -31,8 +31,16 @@ describe("validateFilePath", () => {
     expect(validateFilePath("templates/checklist.md")).toBe("templates/checklist.md");
   });
 
-  it("should reject paths with ..", () => {
+  it("should reject paths with .. segment", () => {
     expect(() => validateFilePath("../etc/passwd")).toThrow();
+    expect(() => validateFilePath("foo/../bar.md")).toThrow();
+    expect(() => validateFilePath("a/b/../../etc")).toThrow();
+  });
+
+  it("should accept filenames containing .. as part of the name", () => {
+    // Regression: previous substring-based check would falsely reject these.
+    expect(validateFilePath("foo..bar.md")).toBe("foo..bar.md");
+    expect(validateFilePath("references/v1..2/notes.md")).toBe("references/v1..2/notes.md");
   });
 
   it("should reject absolute paths", () => {

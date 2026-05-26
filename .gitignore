@@ -38,13 +38,14 @@ out
 *.tar.gz
 
 # CLI Compiled Scripts (generated from npm run build)
-# These are created during build and should not be in version control
-serve
-import
-list
-info
-update
-help
+# These are created during build and should not be in version control.
+# Anchored to repo root to avoid matching directory names like tests/unit/import/.
+/serve
+/import
+/list
+/info
+/update
+/help
 
 # TypeScript Build Cache
 *.tsbuildinfo

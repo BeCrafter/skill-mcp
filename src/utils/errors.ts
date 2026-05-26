@@ -81,6 +81,46 @@ export class InvalidPathError extends AppError {
   }
 }
 
+/** Generic 400 for client-side bad request shape (handlers / CLI). */
+export class BadRequestError extends AppError {
+  constructor(message: string) {
+    super(message, "BAD_REQUEST", 400);
+    this.name = "BadRequestError";
+  }
+}
+
+/** Specific version snapshot not found (skill exists, version doesn't). */
+export class VersionNotFoundError extends AppError {
+  constructor(slug: string, version: string) {
+    super(`Version ${version} not found for skill ${slug}`, "VERSION_NOT_FOUND", 404);
+    this.name = "VersionNotFoundError";
+  }
+}
+
+/** Required dependency / repository not configured (server misconfiguration). */
+export class ConfigurationError extends AppError {
+  constructor(message: string) {
+    super(message, "CONFIGURATION_ERROR", 500);
+    this.name = "ConfigurationError";
+  }
+}
+
+/**
+ * Failure when calling a remote dependency (cloud service, OSS, etc.).
+ * Carries the upstream HTTP status / cause so observability can dimension on it,
+ * while presenting a single 502 to clients.
+ */
+export class UpstreamError extends AppError {
+  constructor(
+    message: string,
+    public readonly upstreamStatus?: number,
+    public readonly cause?: unknown,
+  ) {
+    super(message, "UPSTREAM_ERROR", 502);
+    this.name = "UpstreamError";
+  }
+}
+
 /** MCP error response helper */
 export function toMcpError(error: unknown): { content: Array<{ type: "text"; text: string }>; isError: true } {
   const message = error instanceof Error ? error.message : String(error);
@@ -88,4 +128,20 @@ export function toMcpError(error: unknown): { content: Array<{ type: "text"; tex
     content: [{ type: "text", text: message }],
     isError: true,
   };
+}
+
+/**
+ * Translate any thrown value into an HTTP-shaped { status, body } pair.
+ * Handlers should funnel `catch` blocks through this so error→status mapping
+ * stays consistent across admin and gateway routes.
+ */
+export function mapErrorToResponse(
+  error: unknown,
+  fallback = "Internal error",
+): { status: number; body: { success: false; error: string; code?: string } } {
+  if (error instanceof AppError) {
+    return { status: error.statusCode, body: { success: false, error: error.message, code: error.code } };
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return { status: 500, body: { success: false, error: message || fallback } };
 }

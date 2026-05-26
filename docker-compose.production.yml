@@ -2,6 +2,12 @@ version: '3.8'
 
 services:
   # Storage Service
+  #
+  # NOTE: API-key auth has been replaced by per-user bearer tokens. Before
+  # bringing this stack up, bootstrap a service account on the storage DB
+  # (`skill-mcp user create svc-gateway --role <role-with-needed-tags>`),
+  # then export the printed token as $STORAGE_SVC_TOKEN so the gateway
+  # services below can forward it.
   storage:
     image: skill-mcp:latest
     restart: always
@@ -11,8 +17,6 @@ services:
       TRANSPORT_PORT: 3000
       DEPLOYMENT_MODE: standalone
       MCP_ONLY_MODE: "true"
-      ENABLE_API_KEY_AUTH: "true"
-      API_KEYS: ${STORAGE_API_KEY}
       STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
       STORAGE_BUCKET: ${OSS_BUCKET:-skill-mcp}
       STORAGE_REGION: ${OSS_REGION:-oss-cn-hangzhou}
@@ -26,7 +30,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${STORAGE_API_KEY}", "http://localhost:3000/api/gateway/health"]
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${STORAGE_SVC_TOKEN:?STORAGE_SVC_TOKEN must be set — bootstrap with `skill-mcp user create svc-gateway`}", "http://localhost:3000/api/gateway/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -50,7 +54,7 @@ services:
       TRANSPORT_PORT: 4000
       DEPLOYMENT_MODE: gateway
       CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: ${STORAGE_API_KEY}
+      AUTH_TOKEN: ${STORAGE_SVC_TOKEN:?STORAGE_SVC_TOKEN must be set — bootstrap with `skill-mcp user create svc-gateway`}
       MCP_ONLY_MODE: "true"
       DATABASE_PATH: /data/skill-mcp.db
       CACHE_FILE_DIR: /data/cache
@@ -88,7 +92,7 @@ services:
       TRANSPORT_PORT: 4000
       DEPLOYMENT_MODE: gateway
       CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: ${STORAGE_API_KEY}
+      AUTH_TOKEN: ${STORAGE_SVC_TOKEN:?STORAGE_SVC_TOKEN must be set — bootstrap with `skill-mcp user create svc-gateway`}
       MCP_ONLY_MODE: "true"
       DATABASE_PATH: /data/skill-mcp.db
       CACHE_FILE_DIR: /data/cache

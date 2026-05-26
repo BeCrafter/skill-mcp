@@ -30,8 +30,6 @@ export interface SkillMeta {
   entryFile: string;
   storagePath: string;
   contentHash: string | null;
-  conditions: Record<string, unknown> | null;
-  assignedGroups: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -39,6 +37,21 @@ export interface SkillMeta {
 /** Skill metadata input (for create/update) */
 export type SkillMetaInput = Partial<Omit<SkillMeta, "id" | "createdAt" | "updatedAt">> &
   Pick<SkillMeta, "slug" | "name">;
+
+/**
+ * Public-facing skill metadata returned to MCP clients / HTTP callers.
+ * Internal storage details (`storagePath`, `contentHash`, `storageBackend`)
+ * are stripped — they leak filesystem layout and enable path probing.
+ */
+export type SkillMetaPublic = Omit<SkillMeta, "storagePath" | "contentHash">;
+
+/** Strip internal storage fields before returning a skill to a client. */
+export function toSkillMetaPublic(skill: SkillMeta): SkillMetaPublic {
+  const { storagePath: _storagePath, contentHash: _contentHash, ...publicMeta } = skill;
+  void _storagePath;
+  void _contentHash;
+  return publicMeta;
+}
 
 /** File info in skill file tree */
 export interface FileInfo {

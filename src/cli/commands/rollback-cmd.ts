@@ -7,7 +7,6 @@ import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { SkillVersionRepository } from "../../db/repositories/skill-version.repository.js";
 import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { SkillFileRepository } from "../../db/repositories/skill-file.repository.js";
-import { NoopPermissionFilter } from "../../permission/noop-filter.js";
 import { SkillService } from "../../services/skill.service.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
 import { c, detail, ok, fail } from "../ui.js";
@@ -30,10 +29,10 @@ export async function rollbackAction(
   const storage = new LocalFileSystemProvider(basePath);
   const logger = createLogger("silent");
   const skillProvider = new LocalSkillProvider(storage, skillRepo, skillFileRepo, cache);
-  const permissionFilter = new NoopPermissionFilter();
   const skillService = new SkillService(
-    skillProvider, cache, permissionFilter, logger,
+    skillProvider, cache, logger,
     undefined, undefined, versionRepo, skillRepo, storage,
+    undefined, skillFileRepo,
   );
 
   try {

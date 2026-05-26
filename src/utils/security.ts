@@ -1,35 +1,65 @@
-const INJECTION_PATTERNS = [
-  /ignore\s+(previous|above|all)\s+(instructions?|prompts?)/i,
-  /forget\s+(everything|all|previous)/i,
-  /you\s+are\s+now\s+(a|an|free)/i,
-  /system\s*:\s*$/m,
+// Patterns are tagged so callers (and metrics) can group similar attempts.
+// Each entry name is stable — exposed as the `pattern` label on the
+// mcp_injection_alert counter — so don't rename without coordinating dashboards.
+const INJECTION_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: "ignore_previous", pattern: /ignore\s+(previous|above|all|prior)\s+(instructions?|prompts?|context|messages?)/i },
+  { name: "forget_context", pattern: /forget\s+(everything|all|previous|prior|the\s+above)/i },
+  { name: "role_override", pattern: /you\s+are\s+now\s+(a|an|the|free|no\s+longer)/i },
+  { name: "developer_mode", pattern: /(developer|dev|jailbreak|do\s+anything\s+now|dan)\s+mode/i },
+  { name: "system_role_inject", pattern: /(^|\n)\s*(system|assistant|user)\s*:\s*$/im },
+  { name: "im_start_marker", pattern: /<\|\s*im_start\s*\|>|<\|\s*im_end\s*\|>/i },
+  { name: "policy_override", pattern: /override\s+(your|the|all|safety|security|previous)\s+(rules?|policies|instructions?|guidelines?)/i },
+  { name: "exfiltrate_instructions", pattern: /(reveal|print|show|expose|leak|repeat)\s+(your|the)\s+(system\s+)?(prompt|instructions?|rules?)/i },
+  { name: "html_comment_marker", pattern: /<!--\s*(prompt|injection|system)\s*:/i },
+  { name: "data_uri_script", pattern: /data:\s*text\/(html|javascript)/i },
 ];
+
+export interface ScanIssue {
+  name: string;
+  description: string;
+}
 
 export interface ScanResult {
   safe: boolean;
   issues: string[];
+  matches: ScanIssue[];
 }
 
 export function scanForInjection(content: string): ScanResult {
   const issues: string[] = [];
-  for (const pattern of INJECTION_PATTERNS) {
+  const matches: ScanIssue[] = [];
+  for (const { name, pattern } of INJECTION_PATTERNS) {
     if (pattern.test(content)) {
-      issues.push(`Suspicious pattern detected: ${pattern.source}`);
+      const description = `Suspicious pattern detected: ${name}`;
+      issues.push(description);
+      matches.push({ name, description });
     }
   }
-  return { safe: issues.length === 0, issues };
+  return { safe: matches.length === 0, issues, matches };
 }
 
-/** Validate a file path to prevent directory traversal */
+/**
+ * Validate a file path to prevent directory traversal.
+ *
+ * Splits on `/` and checks segments — a substring `..` check (the previous
+ * implementation) would falsely reject legitimate filenames like
+ * `foo..bar.md`. This rejects only the actual traversal segment `..` and
+ * absolute paths.
+ *
+ * Note: storage providers should still apply `safeJoin` (see
+ * `src/utils/manifest.ts`) as a second line of defence — this function is
+ * for API-boundary input validation, not the canonical path-confinement check.
+ */
 export function validateFilePath(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/");
 
-  if (normalized.includes("..")) {
-    throw new Error(`Path traversal detected: ${filePath}`);
-  }
-
   if (normalized.startsWith("/")) {
     throw new Error(`Absolute paths not allowed: ${filePath}`);
+  }
+
+  const segments = normalized.split("/");
+  if (segments.some((seg) => seg === "..")) {
+    throw new Error(`Path traversal detected: ${filePath}`);
   }
 
   return normalized;

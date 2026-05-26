@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey(),
@@ -8,22 +8,35 @@ export const skills = sqliteTable("skills", {
   description: text("description").notNull().default(""),
   version: text("version").notNull().default("0.0.1"),
   category: text("category"),
-  tags: text("tags"), // JSON array
   attributes: text("attributes"), // JSON object
   status: text("status").notNull().default("draft"),
   visibility: text("visibility").notNull().default("private"),
   entryFile: text("entry_file").default("SKILL.md"),
   storagePath: text("storage_path").notNull(),
   contentHash: text("content_hash"),
-  conditions: text("conditions"), // JSON
-  assignedGroups: text("assigned_groups"), // JSON array
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 }, (table) => [
-  index("idx_skills_slug").on(table.slug),
+  // skills.slug already has a UNIQUE constraint, which SQLite implements as
+  // a unique index — a separate non-unique idx_skills_slug would be a no-op
+  // duplicate. Removed in migration 0001.
   index("idx_skills_name").on(table.name),
   index("idx_skills_status").on(table.status),
   index("idx_skills_visibility").on(table.visibility),
+  // T-202: idempotency — a skill is identified by (name, content_hash). Two
+  // concurrent imports of the same payload collapse onto the same row via
+  // the UNIQUE conflict path (caught by the importer and translated to an
+  // idempotent return). Implemented as a partial unique index in the
+  // migration so existing rows with NULL content_hash don't collide.
+  uniqueIndex("unique_name_content_hash").on(table.name, table.contentHash),
+]);
+
+export const skillTags = sqliteTable("skill_tags", {
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
+  tag: text("tag").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.skillId, table.tag] }),
+  index("idx_skill_tags_tag").on(table.tag),
 ]);
 
 export const skillFiles = sqliteTable("skill_files", {
@@ -41,7 +54,7 @@ export const skillFiles = sqliteTable("skill_files", {
 
 export const accessLogs = sqliteTable("access_logs", {
   id: text("id").primaryKey(),
-  skillId: text("skill_id").notNull().references(() => skills.id),
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   skillSlug: text("skill_slug").notNull(),
   action: text("action").notNull(),
   filePaths: text("file_paths"), // JSON
@@ -79,7 +92,10 @@ export const userRoles = sqliteTable("user_roles", {
   roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
   createdAt: integer("created_at"),
 }, (table) => [
-  index("idx_user_roles_user_id").on(table.userId),
+  // T-602 — uk_user_roles_user_role doubles as the per-user lookup index;
+  // the standalone idx_user_roles_user_id was dropped in 0005.
+  uniqueIndex("uk_user_roles_user_role").on(table.userId, table.roleId),
+  index("idx_user_roles_role_id").on(table.roleId),
 ]);
 
 export const skillFeedbacks = sqliteTable("skill_feedbacks", {
@@ -95,6 +111,7 @@ export const skillFeedbacks = sqliteTable("skill_feedbacks", {
 }, (table) => [
   index("idx_feedbacks_skill_slug").on(table.skillSlug),
   index("idx_feedbacks_created_at").on(table.createdAt),
+  index("idx_feedbacks_outcome").on(table.outcome),
 ]);
 
 export const skillVersions = sqliteTable("skill_versions", {
@@ -112,4 +129,25 @@ export const skillVersions = sqliteTable("skill_versions", {
   index("idx_skill_versions_skill_id").on(table.skillId),
   index("idx_skill_versions_version").on(table.skillId, table.version),
   index("idx_skill_versions_created_at").on(table.createdAt),
+]);
+
+// Pipeline runs (T-203). Persists two-phase pipeline state across process
+// restarts so a long-running pipeline can be resumed by clients. Definition,
+// inputs, batches, and completed stage outputs are JSON blobs because the
+// shape varies per pipeline; we rebuild ExecutionContext / DAGScheduler at
+// hydrate time from these snapshots.
+export const pipelineRuns = sqliteTable("pipeline_runs", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  status: text("status", { enum: ["running", "completed", "failed"] }).notNull(),
+  definitionJson: text("definition_json").notNull(),
+  inputsJson: text("inputs_json").notNull(),
+  batchesJson: text("batches_json").notNull(),
+  completedStagesJson: text("completed_stages_json").notNull().default("{}"),
+  currentBatchIndex: integer("current_batch_index").notNull().default(0),
+  startedAt: integer("started_at").notNull(),
+  finishedAt: integer("finished_at"),
+}, (table) => [
+  index("idx_pipeline_runs_status").on(table.status),
+  index("idx_pipeline_runs_started_at").on(table.startedAt),
 ]);

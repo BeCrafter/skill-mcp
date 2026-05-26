@@ -7,8 +7,8 @@ function skill(overrides: Partial<SkillMeta>): SkillMeta {
     id: "1", slug: "s", name: "s", displayName: null, description: "",
     version: "0.0.1", category: null, tags: [], attributes: {},
     status: "published", visibility: "private", entryFile: "SKILL.md",
-    storagePath: "s/", contentHash: null, conditions: null,
-    assignedGroups: [], createdAt: 0, updatedAt: 0, ...overrides,
+    storagePath: "s/", contentHash: null,
+    createdAt: 0, updatedAt: 0, ...overrides,
   };
 }
 

@@ -288,8 +288,37 @@ describe("AliyunOssProvider", () => {
       await provider.list("skills");
 
       expect(mockClient.list).toHaveBeenCalledWith(
-        { prefix: "skills", delimiter: "/", "max-keys": 1000 },
+        { prefix: "skills", delimiter: "/", marker: undefined, "max-keys": 1000 },
         {}
+      );
+    });
+
+    // T-706 — paginate through nextMarker; legacy single-page implementation
+    // silently truncated callers when a prefix had > 1000 entries.
+    it("should follow nextMarker across multiple pages", async () => {
+      mockClient.list
+        .mockResolvedValueOnce({
+          objects: [{ name: "skills/p1-a.txt" }, { name: "skills/p1-b.txt" }],
+          nextMarker: "page-2-cursor",
+        })
+        .mockResolvedValueOnce({
+          objects: [{ name: "skills/p2-a.txt" }],
+          nextMarker: undefined,
+        });
+
+      const result = await provider.list("skills");
+
+      expect(result).toEqual(["skills/p1-a.txt", "skills/p1-b.txt", "skills/p2-a.txt"]);
+      expect(mockClient.list).toHaveBeenCalledTimes(2);
+      expect(mockClient.list).toHaveBeenNthCalledWith(
+        1,
+        { prefix: "skills", delimiter: "/", marker: undefined, "max-keys": 1000 },
+        {},
+      );
+      expect(mockClient.list).toHaveBeenNthCalledWith(
+        2,
+        { prefix: "skills", delimiter: "/", marker: "page-2-cursor", "max-keys": 1000 },
+        {},
       );
     });
   });

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { DrizzleDB } from "../connection.js";
 import { accessLogs } from "../schema.js";
 import type { AccessLogEntry } from "../../types/index.js";
+import { getLogger } from "../../utils/logger.js";
 
 export class AccessLogRepository {
   constructor(private db: DrizzleDB) {}
@@ -27,16 +28,35 @@ export class AccessLogRepository {
       .limit(limit)
       .all();
 
-    return rows.map(row => ({
-      id: row.id,
-      skillId: row.skillId,
-      skillSlug: row.skillSlug,
-      action: row.action as AccessLogEntry["action"],
-      filePaths: row.filePaths ? JSON.parse(row.filePaths) : undefined,
-      latencyMs: row.latencyMs ?? undefined,
-      userId: row.userId ?? undefined,
-      sessionId: row.sessionId ?? undefined,
-      createdAt: row.createdAt,
-    }));
+    // T-716 — same defensive parse as PipelineRunRepository.findById (T-501).
+    // `filePaths` is a TEXT JSON blob; one corrupt row used to bubble a raw
+    // SyntaxError out of the admin audit endpoint and 500 the whole listing.
+    // Drop the malformed value (treat as undefined) and keep serving the rest.
+    const logger = getLogger();
+    return rows.map(row => {
+      let filePaths: string[] | undefined;
+      if (row.filePaths) {
+        try {
+          const parsed = JSON.parse(row.filePaths);
+          filePaths = Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : undefined;
+          if (filePaths === undefined) {
+            logger.warn({ rowId: row.id }, "access_log.file_paths is not a string array; dropping value");
+          }
+        } catch (err) {
+          logger.warn({ err, rowId: row.id }, "Failed to parse access_log.file_paths JSON; dropping value");
+        }
+      }
+      return {
+        id: row.id,
+        skillId: row.skillId,
+        skillSlug: row.skillSlug,
+        action: row.action as AccessLogEntry["action"],
+        filePaths,
+        latencyMs: row.latencyMs ?? undefined,
+        userId: row.userId ?? undefined,
+        sessionId: row.sessionId ?? undefined,
+        createdAt: row.createdAt,
+      };
+    });
   }
 }

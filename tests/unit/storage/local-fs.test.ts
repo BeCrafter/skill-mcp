@@ -77,4 +77,44 @@ describe("LocalFileSystemProvider", () => {
     const size = await provider.size("sized.txt");
     expect(size).toBe(5);
   });
+
+  it("creates nested parent directories when writing deeply-nested paths (T-002)", async () => {
+    await provider.put("a/b/c/d.txt", Buffer.from("nested"));
+    const result = await provider.get("a/b/c/d.txt");
+    expect(result?.toString()).toBe("nested");
+    // Sibling read paths should resolve via the actual parent (dirname),
+    // not via the file-as-directory shape produced by the previous
+    // join(fullPath, "..") pattern.
+    await provider.put("a/b/c/e.txt", Buffer.from("sibling"));
+    expect((await provider.get("a/b/c/e.txt"))?.toString()).toBe("sibling");
+  });
+
+  describe("T-730 — defense-in-depth path bounds", () => {
+    it("rejects get() with `..` traversal that escapes basePath", async () => {
+      await expect(provider.get("../etc/passwd")).rejects.toThrow(/escapes storage base/);
+    });
+
+    it("rejects put() with `..` traversal that escapes basePath", async () => {
+      await expect(provider.put("../evil.txt", Buffer.from("x"))).rejects.toThrow(/escapes storage base/);
+    });
+
+    it("rejects delete() with `..` traversal that escapes basePath", async () => {
+      await expect(provider.delete("../../target")).rejects.toThrow(/escapes storage base/);
+    });
+
+    it("rejects deleteDir() with absolute path that escapes basePath", async () => {
+      await expect(provider.deleteDir("/tmp/elsewhere")).rejects.toThrow(/escapes storage base/);
+    });
+
+    it("rejects moveDir() with `..` traversal that escapes basePath", async () => {
+      await expect(provider.moveDir("legit/", "../escape/")).rejects.toThrow(/escapes storage base/);
+    });
+
+    it("permits internal `..` segments that resolve back inside basePath", async () => {
+      await provider.put("inner/file.txt", Buffer.from("ok"));
+      // `inner/../inner/file.txt` resolves to inner/file.txt — still inside.
+      const got = await provider.get("inner/../inner/file.txt");
+      expect(got?.toString()).toBe("ok");
+    });
+  });
 });

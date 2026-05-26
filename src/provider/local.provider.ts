@@ -6,6 +6,9 @@ import { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { SkillFileRepository } from "../db/repositories/skill-file.repository.js";
 import { validateFilePath, isTextFile, getMimeType } from "../utils/security.js";
 import { SkillNotFoundError } from "../utils/errors.js";
+import { pMap } from "../utils/concurrency.js";
+
+const STORAGE_CONCURRENCY = 8;
 
 export class LocalSkillProvider implements ISkillProvider {
   constructor(
@@ -51,31 +54,33 @@ export class LocalSkillProvider implements ISkillProvider {
     const skill = await this.skillRepo.findBySlug(slug);
     if (!skill) throw new SkillNotFoundError(slug);
 
-    const results = await Promise.all(
-      filePaths.map(async (rawPath) => {
-        const path = validateFilePath(rawPath);
-        const cacheKey = `skill:file:${slug}:${path}`;
+    // T-725 — cap parallel storage gets. Without pMap, an authenticated
+    // caller via /api/{gateway,admin}/skills/:slug/files could request
+    // tens of thousands of paths in one body and trigger the same number
+    // of concurrent OSS / FS handles. Importer + rollback already use the
+    // same STORAGE_CONCURRENCY; reads are now consistent.
+    return pMap(filePaths, STORAGE_CONCURRENCY, async (rawPath) => {
+      const path = validateFilePath(rawPath);
+      const cacheKey = `skill:file:${slug}:${path}`;
 
-        if (isTextFile(path)) {
-          const cached = await this.cache.get<string>(cacheKey);
-          if (cached) return { path, content: cached, encoding: "utf-8" as const };
-        }
+      if (isTextFile(path)) {
+        const cached = await this.cache.get<string>(cacheKey);
+        if (cached) return { path, content: cached, encoding: "utf-8" as const };
+      }
 
-        const buffer = await this.storage.get(`${skill.storagePath}${path}`);
-        if (!buffer) throw new Error(`File not found: ${path}`);
+      const buffer = await this.storage.get(`${skill.storagePath}${path}`);
+      if (!buffer) throw new Error(`File not found: ${path}`);
 
-        const text = isTextFile(path);
-        const content = text ? buffer.toString("utf-8") : buffer.toString("base64");
-        const encoding = text ? ("utf-8" as const) : ("base64" as const);
+      const text = isTextFile(path);
+      const content = text ? buffer.toString("utf-8") : buffer.toString("base64");
+      const encoding = text ? ("utf-8" as const) : ("base64" as const);
 
-        if (text) {
-          await this.cache.set(cacheKey, content, 600);
-        }
+      if (text) {
+        await this.cache.set(cacheKey, content, 600);
+      }
 
-        return { path, content, encoding, mimeType: getMimeType(path) };
-      }),
-    );
-    return results;
+      return { path, content, encoding, mimeType: getMimeType(path) };
+    });
   }
 
   async getSkillFileTree(slug: string): Promise<FileInfo[]> {

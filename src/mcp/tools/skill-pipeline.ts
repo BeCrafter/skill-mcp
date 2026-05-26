@@ -6,8 +6,10 @@ import { parsePipeline } from "../../pipeline/parser.js";
 import { PipelineExecutor } from "../../pipeline/executor.js";
 import { PipelineRunStore } from "../../pipeline/run-store.js";
 
-// Singleton run store for two-phase execution
-const pipelineRunStore = new PipelineRunStore();
+// Fallback in-memory store for callers that don't provide one (tests, stdio
+// without DB). Production wiring (serve-cmd) injects a DB-backed store via
+// createSkillPipelineTool's `runStore` param so runs survive process restart.
+const fallbackRunStore = new PipelineRunStore();
 
 const SKILL_PIPELINE_DESC = [
   "【Skill Pipeline】Execute a DAG (Directed Acyclic Graph) of skills in orchestrated order.",
@@ -47,7 +49,12 @@ const SKILL_PIPELINE_DESC = [
   "```",
 ].join("\n");
 
-export function createSkillPipelineTool(skillService: SkillService, _contextBuilder?: ContextBuilder) {
+export function createSkillPipelineTool(
+  skillService: SkillService,
+  contextBuilder?: ContextBuilder,
+  runStore?: PipelineRunStore,
+) {
+  const store = runStore ?? fallbackRunStore;
   return {
     name: "skill_pipeline" as const,
     description: SKILL_PIPELINE_DESC,
@@ -61,13 +68,18 @@ export function createSkillPipelineTool(skillService: SkillService, _contextBuil
     }),
     handler: async (
       params: { pipeline?: string; inputs?: Record<string, unknown>; resume?: { run_id: string; stage_outputs: Record<string, Record<string, unknown>> } },
-      _extra?: McpExtra,
+      extra?: McpExtra,
     ) => {
       try {
+        // T-502: resolve the caller's RequestContext once per tool call so
+        // every viewSkillEntry inside the pipeline applies the same per-user
+        // permission filter as direct skill_view calls. Without this, a
+        // stage could read a private skill the caller is not allowed to see.
+        const requestContext = contextBuilder ? await contextBuilder(extra ?? {}) : undefined;
         if (params.resume) {
           // Resume path: Agent provides execution results for stages
-          const executor = new PipelineExecutor(skillService, pipelineRunStore);
-          const result = await executor.resume(params.resume.run_id, params.resume.stage_outputs);
+          const executor = new PipelineExecutor(skillService, store);
+          const result = await executor.resume(params.resume.run_id, params.resume.stage_outputs, requestContext);
           return {
             content: [
               {
@@ -79,8 +91,8 @@ export function createSkillPipelineTool(skillService: SkillService, _contextBuil
         } else if (params.pipeline) {
           // New run path: Start a new pipeline execution
           const pipelineDef = parsePipeline(params.pipeline);
-          const executor = new PipelineExecutor(skillService, pipelineRunStore);
-          const result = await executor.start(pipelineDef, params.inputs ?? {});
+          const executor = new PipelineExecutor(skillService, store);
+          const result = await executor.start(pipelineDef, params.inputs ?? {}, requestContext);
           return {
             content: [
               {

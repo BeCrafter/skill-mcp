@@ -1,7 +1,9 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDB } from "../connection.js";
 import { roles } from "../schema.js";
+import { getLogger } from "../../utils/logger.js";
+import { metrics } from "../../telemetry/metrics.js";
 
 export interface RoleEntity {
   id: string;
@@ -27,6 +29,17 @@ export class RoleRepository {
 
   async findAll(): Promise<RoleEntity[]> {
     const rows = this.db.select().from(roles).all();
+    return rows.map(r => this.toEntity(r));
+  }
+
+  /**
+   * Bulk lookup by id, used to avoid N+1 fan-out from CLI/HTTP role listings.
+   * Returns roles in the order they appear in the table; callers should index
+   * the result by id rather than rely on ordering.
+   */
+  async findByIds(ids: readonly string[]): Promise<RoleEntity[]> {
+    if (ids.length === 0) return [];
+    const rows = this.db.select().from(roles).where(inArray(roles.id, ids as string[])).all();
     return rows.map(r => this.toEntity(r));
   }
 
@@ -65,16 +78,29 @@ export class RoleRepository {
       id: row.id,
       name: row.name,
       description: row.description,
-      tags: this.parseTags(row.tags),
+      tags: this.parseTags(row.tags, row.id),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
   }
 
-  private parseTags(tagsStr: string): string[] {
+  // T-712 — A corrupt tags column previously degraded silently to `[]`. For
+  // `private` skills with empty tag lists, empty caller tags fail-open
+  // (visible to any authenticated user), so silent corruption silently
+  // widens visibility. We still return `[]` to avoid hard-failing role
+  // lookups, but log + bump a counter so the corruption is observable.
+  private parseTags(tagsStr: string, roleId: string): string[] {
     try {
-      return JSON.parse(tagsStr);
-    } catch {
+      const parsed = JSON.parse(tagsStr);
+      if (!Array.isArray(parsed)) {
+        getLogger().warn({ roleId }, "role.tags is not an array; treating as empty");
+        metrics.roleTagsParseErrors.inc();
+        return [];
+      }
+      return parsed.filter((t): t is string => typeof t === "string");
+    } catch (err) {
+      getLogger().warn({ err, roleId }, "Failed to parse role.tags JSON; treating as empty");
+      metrics.roleTagsParseErrors.inc();
       return [];
     }
   }

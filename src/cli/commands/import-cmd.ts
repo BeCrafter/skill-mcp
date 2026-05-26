@@ -9,6 +9,7 @@ import { SkillFileRepository } from "../../db/repositories/skill-file.repository
 import { SkillVersionRepository } from "../../db/repositories/skill-version.repository.js";
 import { DomainEventBus } from "../../events/event-bus.js";
 import { setupCacheSubscribers } from "../../events/cache-subscriber.js";
+import { CacheEpochManager } from "../../cache/cache-epochs.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
 import { c, badge, detail, ok, fail, infoBox } from "../ui.js";
 import { DuplicateSkillNameError } from "../../utils/errors.js";
@@ -32,7 +33,8 @@ export async function importAction(
   const storage = new LocalFileSystemProvider(basePath);
   const logger = createLogger("silent");
   const eventBus = new DomainEventBus();
-  setupCacheSubscribers(eventBus, cache);
+  const cacheEpochs = new CacheEpochManager();
+  setupCacheSubscribers(eventBus, cache, cacheEpochs);
 
   const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo);
 

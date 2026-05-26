@@ -1,10 +1,18 @@
 import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
-import { readBody, json, isValidSlug, parsePagination } from "../../helpers.js";
-import { TagPermissionFilter } from "../../../permission/tag-filter.js";
+import { json, isValidSlug, parsePagination, requireSlug, readJsonBody, requireFilePaths } from "../../helpers.js";
+import { BadRequestError } from "../../../utils/errors.js";
 
+/**
+ * Gateway skill routes — delegate to SkillService so the per-user list
+ * cache (`skill:list:${userId}`) and the unified TagPermissionFilter path
+ * are reused. Handlers stay thin: validate input, dispatch, and let the
+ * `errorMap` middleware (registered on the router) translate any thrown
+ * AppError into the appropriate HTTP response. No try/catch needed in the
+ * happy path.
+ */
 export function registerGatewaySkillRoutes(router: Router, deps: AppDependencies): void {
-  const { skillRepo, skillProvider } = deps;
+  const { skillService } = deps;
 
   router.get("/api/gateway/health", async (ctx) => {
     json(ctx.res, 200, { status: "ok", timestamp: new Date().toISOString() });
@@ -23,14 +31,11 @@ export function registerGatewaySkillRoutes(router: Router, deps: AppDependencies
       }
     }
 
-    let skills = await skillRepo.findAll({
+    const skills = await skillService.listAccessibleSkills(context, {
       category,
       tags,
       attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
     });
-
-    const filter = new TagPermissionFilter(context);
-    skills = await filter.filter(skills);
 
     const paginated = skills.slice(offset, offset + limit);
     json(ctx.res, 200, { success: true, data: paginated, total: skills.length, offset, limit });
@@ -40,105 +45,33 @@ export function registerGatewaySkillRoutes(router: Router, deps: AppDependencies
     const context = ctx.requestContext!;
     const identifier = ctx.params.identifier;
     if (!isValidSlug(identifier) && !/^[0-9a-f-]{36}$/i.test(identifier)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill identifier" });
-      return;
+      throw new BadRequestError("Invalid skill identifier");
     }
-    let skill = await skillRepo.findBySlug(identifier);
-    if (!skill) {
-      skill = await skillRepo.findById(identifier);
-    }
-    if (!skill) {
-      json(ctx.res, 404, { success: false, error: "Skill not found" });
-      return;
-    }
-    const filter = new TagPermissionFilter(context);
-    if (!filter.canAccess(skill)) {
-      json(ctx.res, 403, { success: false, error: "Access denied" });
-      return;
-    }
+    const skill = await skillService.getAccessibleSkillMeta(identifier, context);
     json(ctx.res, 200, { success: true, data: skill });
   });
 
   router.get("/api/gateway/skills/:slug/entry", async (ctx) => {
     const context = ctx.requestContext!;
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    const skill = await skillRepo.findBySlug(slug);
-    if (!skill) { json(ctx.res, 404, { success: false, error: "Skill not found" }); return; }
-    const filter = new TagPermissionFilter(context);
-    if (!filter.canAccess(skill)) { json(ctx.res, 403, { success: false, error: "Access denied" }); return; }
-    try {
-      const content = await skillProvider.getSkillEntry(slug);
-      ctx.res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
-      ctx.res.end(content);
-    } catch (error) {
-      if ((error as Error).constructor.name === "SkillNotFoundError") {
-        json(ctx.res, 404, { success: false, error: "Skill not found" });
-      } else {
-        json(ctx.res, 500, { success: false, error: "Failed to read entry file" });
-      }
-    }
+    const slug = requireSlug(ctx);
+    const content = await skillService.getAccessibleEntryRaw(slug, context);
+    ctx.res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
+    ctx.res.end(content);
   });
 
   router.post("/api/gateway/skills/:slug/files", async (ctx) => {
     const context = ctx.requestContext!;
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    const skill = await skillRepo.findBySlug(slug);
-    if (!skill) { json(ctx.res, 404, { success: false, error: "Skill not found" }); return; }
-    const filter = new TagPermissionFilter(context);
-    if (!filter.canAccess(skill)) { json(ctx.res, 403, { success: false, error: "Access denied" }); return; }
-    const body = await readBody(ctx.req);
-    let data: { paths?: string[] };
-    try {
-      data = JSON.parse(body.toString());
-    } catch {
-      json(ctx.res, 400, { success: false, error: "Invalid JSON in request body" });
-      return;
-    }
-    const { paths } = data;
-    if (!Array.isArray(paths)) {
-      json(ctx.res, 400, { success: false, error: "paths must be an array" });
-      return;
-    }
-    try {
-      const files = await skillProvider.getSkillFiles(slug, paths);
-      json(ctx.res, 200, { success: true, data: files });
-    } catch (error) {
-      if ((error as Error).constructor.name === "SkillNotFoundError") {
-        json(ctx.res, 404, { success: false, error: "Skill not found" });
-      } else {
-        json(ctx.res, 500, { success: false, error: "Failed to read files" });
-      }
-    }
+    const slug = requireSlug(ctx);
+    const data = await readJsonBody<{ paths?: unknown }>(ctx.req);
+    const paths = requireFilePaths(data.paths);
+    const files = await skillService.readSkillFiles(slug, paths, context);
+    json(ctx.res, 200, { success: true, data: files });
   });
 
   router.get("/api/gateway/skills/:slug/file-tree", async (ctx) => {
     const context = ctx.requestContext!;
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    const skill = await skillRepo.findBySlug(slug);
-    if (!skill) { json(ctx.res, 404, { success: false, error: "Skill not found" }); return; }
-    const filter = new TagPermissionFilter(context);
-    if (!filter.canAccess(skill)) { json(ctx.res, 403, { success: false, error: "Access denied" }); return; }
-    try {
-      const tree = await skillProvider.getSkillFileTree(slug);
-      json(ctx.res, 200, { success: true, data: tree });
-    } catch (error) {
-      if ((error as Error).constructor.name === "SkillNotFoundError") {
-        json(ctx.res, 404, { success: false, error: "Skill not found" });
-      } else {
-        json(ctx.res, 500, { success: false, error: "Failed to get file tree" });
-      }
-    }
+    const slug = requireSlug(ctx);
+    const tree = await skillService.getAccessibleFileTree(slug, context);
+    json(ctx.res, 200, { success: true, data: tree });
   });
 }

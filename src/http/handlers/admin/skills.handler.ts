@@ -1,7 +1,14 @@
 import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
-import { readBody, json, isValidSlug, parsePagination } from "../../helpers.js";
+import { json, parsePagination, requireSlug, readJsonBody, requireFilePaths } from "../../helpers.js";
+import { BadRequestError, SkillNotFoundError } from "../../../utils/errors.js";
+import { toSkillMetaPublic } from "../../../types/index.js";
 
+/**
+ * Admin skill routes — handlers throw domain errors (BadRequestError,
+ * SkillNotFoundError, …) which the router-level `errorMap` middleware
+ * translates into HTTP responses. No try/catch in the happy path.
+ */
 export function registerAdminSkillRoutes(router: Router, deps: AppDependencies): void {
   const { skillRepo, skillProvider, storage, importer, accessLogRepo, eventBus } = deps;
 
@@ -23,7 +30,7 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
       attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
     });
 
-    const paginated = skills.slice(offset, offset + limit);
+    const paginated = skills.slice(offset, offset + limit).map(toSkillMetaPublic);
     json(ctx.res, 200, { success: true, data: paginated, total: skills.length, offset, limit });
   });
 
@@ -45,182 +52,116 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
   router.get("/api/admin/skills/name/:name", async (ctx) => {
     const name = ctx.params.name;
     const skills = await skillRepo.findByName(name);
-    json(ctx.res, 200, { success: true, data: skills, total: skills.length });
+    json(ctx.res, 200, { success: true, data: skills.map(toSkillMetaPublic), total: skills.length });
   });
 
   router.get("/api/admin/skills/:slug", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
+    const slug = requireSlug(ctx);
     const skill = await skillRepo.findBySlug(slug);
-    if (!skill) {
-      json(ctx.res, 404, { success: false, error: "Skill not found" });
-      return;
-    }
-    json(ctx.res, 200, { success: true, data: skill });
+    if (!skill) throw new SkillNotFoundError(slug);
+    json(ctx.res, 200, { success: true, data: toSkillMetaPublic(skill) });
   });
 
   router.put("/api/admin/skills/:slug", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    const body = await readBody(ctx.req);
-    let data;
-    try {
-      data = JSON.parse(body.toString());
-    } catch {
-      json(ctx.res, 400, { success: false, error: "Invalid JSON in request body" });
-      return;
-    }
+    const slug = requireSlug(ctx);
+    const data = await readJsonBody<Record<string, unknown>>(ctx.req);
     const skill = await skillRepo.findBySlug(slug);
-    if (!skill) {
-      json(ctx.res, 404, { success: false, error: "Skill not found" });
-      return;
+    if (!skill) throw new SkillNotFoundError(slug);
+    // T-728 — project the request body to a known-safe allowlist before
+    // forwarding to the repo. `storagePath` / `contentHash` are
+    // system-managed (importer + rollback) and would let a privileged
+    // caller redirect a skill at an arbitrary storage path; admin PUT
+    // has no legitimate need to set them.
+    const ADMIN_PUT_ALLOWED = [
+      "description", "displayName", "version", "category",
+      "attributes", "status", "visibility", "entryFile", "tags",
+    ] as const;
+    const projected: Record<string, unknown> = {};
+    for (const key of ADMIN_PUT_ALLOWED) {
+      if (key in data) projected[key] = data[key];
     }
-    const updated = await skillRepo.update(skill.id, data);
-    eventBus.publish({ type: "skill:updated", slug });
-    json(ctx.res, 200, { success: true, data: updated });
+    const updated = await skillRepo.update(skill.id, projected);
+    // Publish post-update visibility/tags so cache subscriber can compute
+    // the affected user set; falls back to current values when unchanged.
+    eventBus.publish({
+      type: "skill:updated",
+      slug,
+      visibility: updated?.visibility ?? skill.visibility,
+      tags: updated?.tags ?? skill.tags,
+    });
+    json(ctx.res, 200, { success: true, data: updated ? toSkillMetaPublic(updated) : null });
   });
 
   router.delete("/api/admin/skills/:slug", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
+    const slug = requireSlug(ctx);
     const skill = await skillRepo.findBySlug(slug);
-    if (!skill) {
-      json(ctx.res, 404, { success: false, error: "Skill not found" });
-      return;
-    }
+    if (!skill) throw new SkillNotFoundError(slug);
     await storage.deleteDir(skill.storagePath);
     const deleted = await skillRepo.delete(slug);
-    eventBus.publish({ type: "skill:deleted", slug });
-    if (!deleted) {
-      json(ctx.res, 404, { success: false, error: "Skill not found" });
-      return;
-    }
+    eventBus.publish({ type: "skill:deleted", slug, visibility: skill.visibility, tags: skill.tags });
+    if (!deleted) throw new SkillNotFoundError(slug);
     json(ctx.res, 200, { success: true });
   });
 
   router.get("/api/admin/skills/:slug/entry", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    try {
-      const content = await skillProvider.getSkillEntry(slug);
-      ctx.res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
-      ctx.res.end(content);
-    } catch (error) {
-      if ((error as Error).constructor.name === "SkillNotFoundError") {
-        json(ctx.res, 404, { success: false, error: "Skill not found" });
-      } else {
-        json(ctx.res, 500, { success: false, error: "Failed to read entry file" });
-      }
-    }
+    const slug = requireSlug(ctx);
+    const content = await skillProvider.getSkillEntry(slug);
+    ctx.res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
+    ctx.res.end(content);
   });
 
   router.post("/api/admin/skills/:slug/files", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    const body = await readBody(ctx.req);
-    let data: { paths?: string[] };
-    try {
-      data = JSON.parse(body.toString());
-    } catch {
-      json(ctx.res, 400, { success: false, error: "Invalid JSON in request body" });
-      return;
-    }
-    const { paths } = data;
-    if (!Array.isArray(paths)) {
-      json(ctx.res, 400, { success: false, error: "paths must be an array" });
-      return;
-    }
-    try {
-      const files = await skillProvider.getSkillFiles(slug, paths);
-      json(ctx.res, 200, { success: true, data: files });
-    } catch (error) {
-      if ((error as Error).constructor.name === "SkillNotFoundError") {
-        json(ctx.res, 404, { success: false, error: "Skill not found" });
-      } else {
-        json(ctx.res, 500, { success: false, error: "Failed to read files" });
-      }
-    }
+    const slug = requireSlug(ctx);
+    const data = await readJsonBody<{ paths?: unknown }>(ctx.req);
+    const paths = requireFilePaths(data.paths);
+    const files = await skillProvider.getSkillFiles(slug, paths);
+    json(ctx.res, 200, { success: true, data: files });
   });
 
   router.get("/api/admin/skills/:slug/file-tree", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    try {
-      const tree = await skillProvider.getSkillFileTree(slug);
-      json(ctx.res, 200, { success: true, data: tree });
-    } catch (error) {
-      if ((error as Error).constructor.name === "SkillNotFoundError") {
-        json(ctx.res, 404, { success: false, error: "Skill not found" });
-      } else {
-        json(ctx.res, 500, { success: false, error: "Failed to get file tree" });
-      }
-    }
+    const slug = requireSlug(ctx);
+    const tree = await skillProvider.getSkillFileTree(slug);
+    json(ctx.res, 200, { success: true, data: tree });
   });
 
   router.post("/api/admin/skills", async (ctx) => {
     const contentType = ctx.req.headers["content-type"] ?? "";
     if (contentType.includes("multipart/form-data")) {
-      json(ctx.res, 400, { success: false, error: "ZIP upload not yet supported, use CLI import or JSON body with source path" });
-      return;
+      throw new BadRequestError("ZIP upload not yet supported, use CLI import or JSON body with source path");
     }
-    const body = await readBody(ctx.req);
-    let data;
-    try {
-      data = JSON.parse(body.toString());
-    } catch {
-      json(ctx.res, 400, { success: false, error: "Invalid JSON in request body" });
-      return;
-    }
-    if (!data.source) {
-      json(ctx.res, 400, { success: false, error: "source is required" });
-      return;
-    }
-    try {
-      const result = await importer.import(data.source, {
-        category: data.category,
-        tags: data.tags,
-        description: data.description,
-        targetId: data.target_id,
-        versionBump: data.version_bump ?? "patch",
-        overwrite: data.overwrite ?? false,
-        allowDuplicate: data.allow_duplicate ?? false,
-        slug: data.slug,
-        branch: data.branch,
-        subDir: data.sub_dir,
-      });
-      json(ctx.res, 201, { success: true, data: result });
-    } catch (error) {
-      const err = error as Error;
-      const status = (err as { statusCode?: number }).statusCode ?? 400;
-      json(ctx.res, status, { success: false, error: err.message });
-    }
+    const data = await readJsonBody<{
+      source?: string;
+      category?: string;
+      tags?: string[];
+      description?: string;
+      target_id?: string;
+      version_bump?: "major" | "minor" | "patch";
+      overwrite?: boolean;
+      allow_duplicate?: boolean;
+      slug?: string;
+      branch?: string;
+      sub_dir?: string;
+    }>(ctx.req);
+    if (!data.source) throw new BadRequestError("source is required");
+    const result = await importer.import(data.source, {
+      category: data.category,
+      tags: data.tags,
+      description: data.description,
+      targetId: data.target_id,
+      versionBump: data.version_bump ?? "patch",
+      overwrite: data.overwrite ?? false,
+      allowDuplicate: data.allow_duplicate ?? false,
+      slug: data.slug,
+      branch: data.branch,
+      subDir: data.sub_dir,
+    });
+    json(ctx.res, 201, { success: true, data: result });
   });
 
   router.get("/api/admin/logs", async (ctx) => {
     const skillSlug = ctx.query.get("skill_slug") ?? "";
     const limit = Math.min(200, Math.max(1, parseInt(ctx.query.get("limit") ?? "50", 10)));
-    if (!skillSlug) {
-      json(ctx.res, 400, { success: false, error: "skill_slug query parameter is required" });
-      return;
-    }
+    if (!skillSlug) throw new BadRequestError("skill_slug query parameter is required");
     const logs = await accessLogRepo.findBySkill(skillSlug, limit);
     json(ctx.res, 200, { success: true, data: logs, total: logs.length });
   });
@@ -230,52 +171,25 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
     json(ctx.res, 200, { success: true, data: { totalSkills: total } });
   });
 
-  // Version management routes
   router.get("/api/admin/skills/:slug/versions", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    try {
-      const limit = parseInt(ctx.query.get("limit") ?? "10", 10);
-      const versions = await deps.skillService.getVersions(slug, limit);
-      json(ctx.res, 200, { success: true, data: versions });
-    } catch (error) {
-      const err = error as Error;
-      if (err.constructor.name === "SkillNotFoundError") {
-        json(ctx.res, 404, { success: false, error: "Skill not found" });
-      } else {
-        json(ctx.res, 500, { success: false, error: err.message });
-      }
-    }
+    const slug = requireSlug(ctx);
+    const limit = parseInt(ctx.query.get("limit") ?? "10", 10);
+    const versions = await deps.skillService.getVersions(slug, limit);
+    json(ctx.res, 200, { success: true, data: versions });
   });
 
   router.post("/api/admin/skills/:slug/rollback", async (ctx) => {
-    const slug = ctx.params.slug;
-    if (!isValidSlug(slug)) {
-      json(ctx.res, 400, { success: false, error: "Invalid skill slug" });
-      return;
-    }
-    const body = await readBody(ctx.req);
-    let data: { version: string; bump?: "major" | "minor" | "patch" };
-    try {
-      data = JSON.parse(body.toString());
-    } catch {
-      json(ctx.res, 400, { success: false, error: "Invalid JSON in request body" });
-      return;
-    }
-    if (!data.version) {
-      json(ctx.res, 400, { success: false, error: "version is required" });
-      return;
-    }
-    try {
-      await deps.skillService.rollbackToVersion(slug, data.version, data.bump ?? "patch");
-      eventBus.publish({ type: "skill:updated", slug });
-      json(ctx.res, 200, { success: true, message: `Rolled back to version ${data.version}` });
-    } catch (error) {
-      const err = error as Error;
-      json(ctx.res, 500, { success: false, error: err.message });
-    }
+    const slug = requireSlug(ctx);
+    const data = await readJsonBody<{ version?: string; bump?: "major" | "minor" | "patch" }>(ctx.req);
+    if (!data.version) throw new BadRequestError("version is required");
+    await deps.skillService.rollbackToVersion(slug, data.version, data.bump ?? "patch");
+    const skillAfter = await skillRepo.findBySlug(slug);
+    eventBus.publish({
+      type: "skill:updated",
+      slug,
+      visibility: skillAfter?.visibility,
+      tags: skillAfter?.tags,
+    });
+    json(ctx.res, 200, { success: true, message: `Rolled back to version ${data.version}` });
   });
 }
