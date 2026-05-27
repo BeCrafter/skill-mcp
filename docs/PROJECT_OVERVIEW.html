@@ -25,13 +25,39 @@
   .badge{font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);background:rgba(255,255,255,.02)}
   .badge.ok{color:var(--ok);border-color:rgba(93,211,158,.4)}
 
-  nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:8px}
+  nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:8px;
+    position:sticky;top:0;z-index:50;background:rgba(11,16,32,.92);backdrop-filter:blur(8px);padding-top:10px;margin-left:-24px;margin-right:-24px;padding-left:24px;padding-right:24px}
   nav.tabs button{
     background:transparent;color:var(--muted);border:1px solid transparent;padding:10px 14px;border-radius:8px 8px 0 0;
     font-size:14px;cursor:pointer;transition:.15s;font-family:inherit
   }
   nav.tabs button:hover{color:var(--fg);background:rgba(255,255,255,.03)}
   nav.tabs button.active{color:var(--accent);background:var(--panel);border-color:var(--border);border-bottom-color:var(--panel);position:relative;top:1px}
+  nav.tabs .kbd-hint{margin-left:auto;align-self:center;font-size:11px;color:var(--muted);padding-right:6px}
+
+  /* Filter input for searchable tables */
+  .filter-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .filter-row input{
+    flex:1;background:var(--bg-2);border:1px solid var(--border);color:var(--fg);
+    padding:8px 12px;border-radius:8px;font-family:inherit;font-size:13.5px;outline:none;transition:.15s
+  }
+  .filter-row input:focus{border-color:var(--accent);background:var(--panel)}
+  .filter-row .count{font-size:12px;color:var(--muted);font-family:"SF Mono",monospace}
+
+  /* Reference table */
+  table.ref{width:100%;font-size:13px;color:var(--fg);border-collapse:collapse;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  table.ref th{background:rgba(255,255,255,.04);color:var(--muted);text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);font-weight:600;font-size:12px;letter-spacing:.3px;text-transform:uppercase}
+  table.ref td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  table.ref tr:last-child td{border-bottom:none}
+  table.ref tr:hover td{background:rgba(124,196,255,.04)}
+  table.ref td code, table.ref td .mono{font-family:"SF Mono",monospace;font-size:12px;color:#cfe6ff;background:var(--code);padding:1px 6px;border-radius:3px;border:1px solid var(--border)}
+  table.ref td.method{font-family:"SF Mono",monospace;font-size:11.5px;font-weight:700}
+  .m-get{color:#5dd39e}.m-post{color:#7cc4ff}.m-put{color:#ffb86b}.m-delete{color:#ff7a8a}
+
+  /* Back to top */
+  #to-top{position:fixed;bottom:24px;right:24px;width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));border:none;color:#0b1020;font-size:18px;cursor:pointer;box-shadow:0 6px 20px rgba(124,196,255,.25);display:none;align-items:center;justify-content:center;z-index:60;transition:.2s}
+  #to-top:hover{transform:translateY(-2px) scale(1.05)}
+  #to-top.show{display:flex}
 
   section.panel{display:none;animation:fade .25s ease}
   section.panel.active{display:block}
@@ -152,12 +178,12 @@
   <h1>Skill MCP Server</h1>
   <p class="sub">云端技能文件系统 + MCP 权限网关 · 让 AI 助手按需加载可复用的"技能包"</p>
   <div class="meta">
-    <span class="badge ok">v0.1.1</span>
+    <span class="badge ok">v0.1.1-beta.0</span>
     <span class="badge">TypeScript · ESM · Node ≥22</span>
     <span class="badge">MCP SDK</span>
     <span class="badge">SQLite + Drizzle</span>
     <span class="badge">stdio / HTTP / SSE</span>
-    <span class="badge ok">452 tests passed</span>
+    <span class="badge ok">743 tests passed</span>
   </div>
 </header>
 
@@ -169,7 +195,11 @@
   <button data-tab="deploy">🚀 部署模式</button>
   <button data-tab="rbac">🔐 鉴权 & RBAC</button>
   <button data-tab="usage">⚡ 快速上手</button>
+  <button data-tab="cli">📜 CLI 命令</button>
+  <button data-tab="config">🔧 配置 & 包格式</button>
+  <button data-tab="api">🌐 REST API</button>
   <button data-tab="features">✨ 关键特性</button>
+  <span class="kbd-hint" title="数字键 1-0 切换标签 / Esc 回到顶部">⌨️ 1-0 / Esc</span>
 </nav>
 
 <!-- ============ OVERVIEW ============ -->
@@ -555,7 +585,170 @@ $ curl <span class="hl-k">-H</span> <span class="hl-s">"Authorization: Bearer sk
 <span class="hl-c"># 或者作为 Claude Code 的 MCP 服务器</span>
 <span class="prompt">$</span> <span class="copy">claude mcp add skill-mcp -- node dist/index.js serve --transport stdio --auth-token sk-live-...</span></div>
   </div>
-  <div id="copy-toast" style="position:fixed;bottom:30px;right:30px;background:var(--ok);color:#0b1020;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;display:none;box-shadow:0 8px 20px rgba(0,0,0,.4)">已复制 ✓</div>
+</section>
+
+<!-- ============ CLI ============ -->
+<section id="cli" class="panel">
+  <p style="color:var(--muted);margin-bottom:14px">所有命令通过 <code class="inline">skill-mcp &lt;cmd&gt;</code> 或 <code class="inline">node dist/index.js &lt;cmd&gt;</code> 调用 · 输入命令名过滤 ↓</p>
+  <div class="filter-row">
+    <input id="cli-filter" type="text" placeholder="按命令名 / 描述 / 子命令过滤…">
+    <span class="count" id="cli-count"></span>
+  </div>
+  <table class="ref" id="cli-table">
+    <thead><tr><th style="width:170px">命令</th><th style="width:280px">参数 / 标志</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>serve</code></td><td><code>--transport stdio|http|sse</code> · <code>--port</code> · <code>--host</code> · <code>--auth-token</code> · <code>--db</code></td><td>启动 MCP 服务（三种传输任选）</td></tr>
+      <tr><td><code>import &lt;src&gt;</code></td><td><code>--name</code> · <code>--tags</code> · <code>--visibility public|internal|private</code> · <code>--overwrite</code> · <code>--from-git</code></td><td>导入本地目录或 Git 仓库为技能包，走 staging-commit + 注入扫描</td></tr>
+      <tr><td><code>list</code></td><td><code>--tag</code> · <code>--visibility</code> · <code>--json</code></td><td>列出已注册技能（管理员视角，不走 RBAC）</td></tr>
+      <tr><td><code>info &lt;slug&gt;</code></td><td><code>--version</code> · <code>--show-files</code></td><td>查看单个技能详情：版本、文件清单、tags、metadata</td></tr>
+      <tr><td><code>search &lt;query&gt;</code></td><td><code>--limit</code> · <code>--tag</code></td><td>按名称 / 描述 / tag 模糊搜索技能</td></tr>
+      <tr><td><code>remove &lt;slug&gt;</code></td><td><code>--force</code> · <code>--all-versions</code></td><td>删除技能（默认仅删 live 版本，<code>--all-versions</code> 清整条历史）</td></tr>
+      <tr><td><code>update &lt;slug&gt;</code></td><td><code>--tags</code> · <code>--visibility</code> · <code>--description</code></td><td>更新技能元数据，不变更内容文件</td></tr>
+      <tr><td><code>versions &lt;slug&gt;</code></td><td>—</td><td>列出该技能的全部历史版本（含 content-hash）</td></tr>
+      <tr><td><code>rollback &lt;slug&gt; &lt;version&gt;</code></td><td><code>--dry-run</code></td><td>把 live 版本切回历史版本，自动失效缓存</td></tr>
+      <tr><td><code>lint &lt;path&gt;</code></td><td>—</td><td>校验目录是否符合 SKILL 包规范（manifest / frontmatter / 文件类型）</td></tr>
+      <tr><td><code>pipeline validate &lt;file&gt;</code></td><td>—</td><td>校验 YAML pipeline 定义（Zod schema + DAG 拓扑无环）</td></tr>
+      <tr><td><code>pipeline graph &lt;file&gt;</code></td><td><code>--mermaid</code> · <code>--json</code></td><td>导出 pipeline DAG 为 Mermaid 或 JSON</td></tr>
+      <tr><td><code>pipeline run &lt;file&gt;</code></td><td><code>--inputs &lt;json&gt;</code> · <code>--mode single|persist</code></td><td>本地执行 pipeline，支持持久化（<code>persist</code>）以便后续 resume</td></tr>
+      <tr><td><code>user list</code></td><td><code>--json</code></td><td>列出所有用户（id / name / status / role 数）</td></tr>
+      <tr><td><code>user create</code></td><td><code>--name</code> · <code>--role-ids</code> · <code>--metadata</code></td><td>创建用户并签发 <code>sk-live-…</code> bearer token（仅显示一次）</td></tr>
+      <tr><td><code>user get &lt;id&gt;</code></td><td>—</td><td>查看用户详情 + 聚合 tag 集合</td></tr>
+      <tr><td><code>user delete &lt;id&gt;</code></td><td><code>--force</code></td><td>禁用 / 软删用户</td></tr>
+      <tr><td><code>user assign-roles &lt;id&gt;</code></td><td><code>--role-ids</code></td><td>覆盖式重置某用户的角色绑定</td></tr>
+      <tr><td><code>role list</code> / <code>create</code> / <code>get</code> / <code>update</code> / <code>delete</code></td><td><code>--name</code> · <code>--tags</code> · <code>--description</code></td><td>角色 CRUD（角色携带 tag 列表，user→role 聚合得到 RequestContext.tags）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ CONFIG ============ -->
+<section id="config" class="panel">
+  <h3 style="margin-bottom:10px">🌱 环境变量参考</h3>
+  <p style="color:var(--muted);margin-bottom:12px">配置优先级：CLI flag &gt; 环境变量 &gt; <code class="inline">SKILL_MCP_CONFIG</code> 指定的 JSON 文件 &gt; 默认值。所有值经 Zod schema（<code class="inline">src/config/schema.ts</code>）校验。</p>
+  <div class="filter-row">
+    <input id="env-filter" type="text" placeholder="按变量名 / 描述过滤…">
+    <span class="count" id="env-count"></span>
+  </div>
+  <table class="ref" id="env-table">
+    <thead><tr><th style="width:230px">变量</th><th style="width:120px">默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>NODE_ENV</code></td><td><code>development</code></td><td>development / production</td></tr>
+      <tr><td><code>DEPLOYMENT_MODE</code></td><td><code>standalone</code></td><td>standalone / gateway / cloud</td></tr>
+      <tr><td><code>MCP_ONLY_MODE</code></td><td><code>false</code></td><td>禁用 <code>/api/admin/*</code>，最小化攻击面</td></tr>
+      <tr><td><code>LOG_LEVEL</code></td><td><code>info</code></td><td>trace / debug / info / warn / error</td></tr>
+      <tr><td><code>TRANSPORT_TYPE</code></td><td><code>stdio</code></td><td>stdio / http / sse</td></tr>
+      <tr><td><code>TRANSPORT_PORT</code></td><td><code>3000</code></td><td>HTTP/SSE 监听端口</td></tr>
+      <tr><td><code>TRANSPORT_HOST</code></td><td><code>0.0.0.0</code></td><td>HTTP/SSE 监听地址</td></tr>
+      <tr><td><code>STORAGE_TYPE</code></td><td><code>local-fs</code></td><td>local-fs / aliyun-oss</td></tr>
+      <tr><td><code>STORAGE_BASE_PATH</code></td><td><code>./data/skills</code></td><td>技能包根目录（按 slug 分子目录）</td></tr>
+      <tr><td><code>ALIYUN_ACCESS_KEY_ID</code> / <code>_SECRET</code></td><td>—</td><td>OSS 凭证（仅 storage=aliyun-oss）</td></tr>
+      <tr><td><code>ALIYUN_BUCKET</code> / <code>_REGION</code></td><td><code>skill-mcp</code> / <code>oss-cn-hangzhou</code></td><td>OSS bucket 与区域</td></tr>
+      <tr><td><code>DATABASE_PATH</code></td><td><code>./data/skill-mcp.db</code></td><td>SQLite 文件路径</td></tr>
+      <tr><td><code>DATABASE_TIMEOUT</code></td><td><code>5000</code></td><td>busy timeout (ms)</td></tr>
+      <tr><td><code>CACHE_MEMORY_ENABLED</code></td><td><code>true</code></td><td>L1 LRU 缓存开关</td></tr>
+      <tr><td><code>CACHE_MEMORY_MAX_SIZE</code></td><td><code>1000</code></td><td>L1 容量（条目数）</td></tr>
+      <tr><td><code>CACHE_FILE_ENABLED</code></td><td><code>true</code></td><td>L2 文件缓存开关</td></tr>
+      <tr><td><code>CACHE_FILE_DIR</code></td><td><code>./data/cache</code></td><td>L2 文件缓存目录</td></tr>
+      <tr><td><code>CACHE_L2_TTL_MULTIPLIER</code></td><td><code>2</code></td><td>L2 TTL = L1 TTL × 此倍数</td></tr>
+      <tr><td><code>SECURITY_INJECTION_SCAN</code></td><td><code>true</code></td><td>导入时启用 prompt-injection 扫描</td></tr>
+      <tr><td><code>SKILL_MCP_AUTH_TOKEN</code></td><td>—</td><td>stdio 模式注入的 bearer token；CLI <code>--auth-token</code> 覆盖。未设且库内有非 public 技能时 <code>serve --transport stdio</code> 拒绝启动</td></tr>
+      <tr><td><code>SKILL_MCP_METRICS_AUTH_OPTIONAL</code></td><td><code>false</code></td><td>放开 <code>/metrics</code> 给内网 Prometheus 抓取</td></tr>
+      <tr><td><code>SKILL_MCP_ADMIN_AUTH_OPTIONAL</code></td><td><code>false</code></td><td>开发期可关掉 admin 鉴权（生产禁用）</td></tr>
+      <tr><td><code>CLOUD_SERVICE_URL</code></td><td>—</td><td>gateway 模式必填，远端 cloud service 基址</td></tr>
+      <tr><td><code>AUTH_TOKEN</code></td><td>—</td><td>gateway → cloud 内部调用使用的服务账号 token（建议绑定 <code>svc-gateway</code> 用户）</td></tr>
+      <tr><td><code>SKILL_MCP_CONFIG</code></td><td>—</td><td>可选 JSON 配置文件路径，深合并到 env 之上</td></tr>
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:24px;margin-bottom:10px">📦 SKILL 包格式</h3>
+  <div class="grid cols-2">
+    <div class="card">
+      <h3><span class="ico">M</span><code class="inline">manifest.json</code></h3>
+      <pre class="code"><span class="hl-c">// 必填字段</span>
+{
+  <span class="hl-k">"name"</span>: <span class="hl-s">"prompt-writer"</span>,        <span class="hl-c">// kebab-case，唯一</span>
+  <span class="hl-k">"version"</span>: <span class="hl-s">"1.0.0"</span>,             <span class="hl-c">// semver</span>
+  <span class="hl-k">"description"</span>: <span class="hl-s">"Write prompts"</span>,
+  <span class="hl-k">"entry"</span>: <span class="hl-s">"SKILL.md"</span>,             <span class="hl-c">// 默认 SKILL.md</span>
+  <span class="hl-k">"files"</span>: [<span class="hl-s">"SKILL.md"</span>, <span class="hl-s">"examples/"</span>],
+  <span class="hl-k">"tags"</span>: [<span class="hl-s">"writing"</span>, <span class="hl-s">"team-alpha"</span>],
+  <span class="hl-k">"category"</span>: <span class="hl-s">"productivity"</span>,
+  <span class="hl-k">"visibility"</span>: <span class="hl-s">"private"</span>          <span class="hl-c">// public/internal/private</span>
+}</pre>
+    </div>
+    <div class="card">
+      <h3><span class="ico">S</span><code class="inline">SKILL.md</code> 入口</h3>
+      <pre class="code"><span class="hl-c">// 可选 frontmatter（覆盖 manifest）</span>
+---
+name: prompt-writer
+version: 1.0.0
+description: Help craft system prompts
+tags: [writing, ai]
+---
+
+<span class="hl-k"># Prompt Writer Skill</span>
+
+You are an expert at...
+
+<span class="hl-c">## When to use</span>
+Trigger this skill when the user asks
+to refine prompts or instructions.</pre>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h3>📐 限制 & 安全</h3>
+    <ul style="color:var(--muted);font-size:13.5px;padding-left:18px">
+      <li>仅接受文本文件（<code class="inline">isTextFile()</code> 白名单：md / txt / json / yaml / py / js / ts / sh / …）</li>
+      <li>路径走 <code class="inline">safeJoin</code> 拒绝 <code class="inline">..</code> 与符号链接，最大深度 16 层 / 1000 文件 / 50MB 总大小</li>
+      <li>所有文本均经 <code class="inline">scanForInjection</code>（命中 <code class="inline">&lt;system&gt;</code>、<code class="inline">ignore previous instructions</code> 等模式直接拒绝）</li>
+      <li>导入采用 staging-commit：写到 <code class="inline">__staging__/&lt;runId&gt;/</code> → DB 落库 → 原子 <code class="inline">moveDir</code> 提交，失败可逆</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ API ============ -->
+<section id="api" class="panel">
+  <p style="color:var(--muted);margin-bottom:14px">所有 HTTP 请求需带 <code class="inline">Authorization: Bearer sk-live-…</code>（除 <code class="inline">/api/gateway/health</code> 外）。MCP 端点见底部。</p>
+  <div class="filter-row">
+    <input id="api-filter" type="text" placeholder="按 path / method / 描述过滤…">
+    <span class="count" id="api-count"></span>
+  </div>
+  <table class="ref" id="api-table">
+    <thead><tr><th style="width:80px">METHOD</th><th style="width:340px">PATH</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td class="method m-get">GET</td><td><code>/api/gateway/health</code></td><td>健康检查（公开，无需鉴权，供 LB / k8s probe）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/gateway/skills</code></td><td>列出当前调用者可见的技能（经 TagPermissionFilter）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/gateway/skills/:identifier</code></td><td>按 slug 或 name 取技能详情</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/gateway/skills/:slug/entry</code></td><td>读取 SKILL.md 主入口（支持缓存命中）</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/api/gateway/skills/:slug/files</code></td><td>批量读取技能内多个辅助文件（body: <code>{paths:[...]}</code>）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/gateway/skills/:slug/file-tree</code></td><td>列出技能包内文件树</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/skills</code></td><td>管理视图：所有技能（不过滤可见性）</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/api/admin/skills</code></td><td>从上传 / Git 创建技能（与 CLI <code>import</code> 等价）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/skills/:slug</code></td><td>取单个技能完整元数据</td></tr>
+      <tr><td class="method m-put">PUT</td><td><code>/api/admin/skills/:slug</code></td><td>更新元数据（tags / visibility / description）</td></tr>
+      <tr><td class="method m-delete">DELETE</td><td><code>/api/admin/skills/:slug</code></td><td>删除技能</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/skills/:slug/entry</code></td><td>管理员读取 entry（不受 RBAC 限制）</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/api/admin/skills/:slug/files</code></td><td>管理员批量读文件</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/skills/:slug/file-tree</code></td><td>管理员看文件树</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/skills/:slug/versions</code></td><td>列出该技能历史版本</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/api/admin/skills/:slug/rollback</code></td><td>回滚到指定 version（body: <code>{version}</code>）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/skills/name/:name</code></td><td>按 name 反查（兼容旧客户端）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/skills/effectiveness-report</code></td><td>技能命中率 / 调用统计报表</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/users</code> · <code>/users/:id</code></td><td>用户列表 / 详情</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/api/admin/users</code></td><td>创建用户（返回一次性 token）</td></tr>
+      <tr><td class="method m-put">PUT</td><td><code>/api/admin/users/:id</code> · <code>/users/:id/roles</code></td><td>更新用户 / 重置角色</td></tr>
+      <tr><td class="method m-delete">DELETE</td><td><code>/api/admin/users/:id</code></td><td>软删用户</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/roles</code> · <code>/roles/:id</code></td><td>角色列表 / 详情</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/api/admin/roles</code></td><td>创建角色（含 tag 列表）</td></tr>
+      <tr><td class="method m-put">PUT</td><td><code>/api/admin/roles/:id</code></td><td>更新角色</td></tr>
+      <tr><td class="method m-delete">DELETE</td><td><code>/api/admin/roles/:id</code></td><td>删除角色</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/api/admin/logs</code> · <code>/stats</code></td><td>审计日志 / 概览统计</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/mcp</code></td><td>MCP Streamable HTTP transport（单端点 + <code>mcp-session-id</code> 头）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/mcp/sse</code></td><td>SSE 模式建立 session（返回 sessionId）</td></tr>
+      <tr><td class="method m-post">POST</td><td><code>/mcp/messages</code></td><td>SSE 模式发送 JSON-RPC 消息</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/metrics</code></td><td>Prometheus 指标（默认走 admin auth）</td></tr>
+      <tr><td class="method m-get">GET</td><td><code>/health</code></td><td>顶层健康检查（兼容旧路径）</td></tr>
+    </tbody>
+  </table>
 </section>
 
 <!-- ============ FEATURES ============ -->
@@ -586,7 +779,7 @@ $ curl <span class="hl-k">-H</span> <span class="hl-s">"Authorization: Bearer sk
   </details>
   <details>
     <summary>🧪 测试覆盖</summary>
-    <p>62 测试文件 / 452 测试通过。包含：单元（service/provider/cache/permission），集成（scenario A/B 用 spawn 真实进程），E2E（scenario C 多容器）。MCP 鉴权直通、initialize.instructions 不泄露私有元数据等都有黑盒回归。</p>
+    <p>93 测试文件 / 743 测试通过。包含：单元（service/provider/cache/permission/repository/handler），集成（scenario A/B 用 spawn 真实进程），E2E（scenario C 多容器）。MCP 鉴权直通、initialize.instructions 不泄露私有元数据等都有黑盒回归。</p>
   </details>
   <details>
     <summary>📜 版本化 & 回滚</summary>
@@ -600,6 +793,9 @@ $ curl <span class="hl-k">-H</span> <span class="hl-s">"Authorization: Bearer sk
   <a href="./ARCHITECTURE.md">完整架构文档</a> ·
   <a href="./REFACTORING_BACKLOG.md">优化条目</a>
 </footer>
+
+<button id="to-top" title="回到顶部 (Esc)" aria-label="回到顶部">↑</button>
+<div id="copy-toast" style="position:fixed;bottom:30px;right:30px;background:var(--ok);color:#0b1020;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;display:none;box-shadow:0 8px 20px rgba(0,0,0,.4);z-index:70">已复制 ✓</div>
 
 </div>
 
@@ -744,6 +940,82 @@ document.querySelectorAll('.copy').forEach(el => {
     });
   });
 });
+
+// ============== Click any code/cell to copy ==============
+document.querySelectorAll('table.ref td code').forEach(el => {
+  el.style.cursor = 'pointer';
+  el.title = '点击复制';
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const txt = el.textContent.trim();
+    navigator.clipboard?.writeText(txt).then(() => {
+      if (!toast) return;
+      toast.textContent = '已复制 ✓ ' + (txt.length > 30 ? txt.slice(0,30)+'…' : txt);
+      toast.style.display = 'block';
+      setTimeout(()=>{toast.style.display='none'; toast.textContent='已复制 ✓';}, 1400);
+    });
+  });
+});
+
+// ============== Keyboard shortcuts (1-0 → tabs, Esc → top, / → focus filter) ==============
+document.addEventListener('keydown', (e) => {
+  const inEditable = e.target.matches('input, textarea, [contenteditable]');
+  if (e.key === 'Escape') {
+    if (inEditable) { e.target.blur(); return; }
+    window.scrollTo({top:0, behavior:'smooth'});
+    return;
+  }
+  if (inEditable) return;
+  if (e.key === '/') {
+    const active = document.querySelector('section.panel.active');
+    const inp = active?.querySelector('.filter-row input');
+    if (inp) { e.preventDefault(); inp.focus(); }
+    return;
+  }
+  if (/^[0-9]$/.test(e.key)) {
+    const idx = e.key === '0' ? 9 : parseInt(e.key, 10) - 1;
+    const btn = tabs[idx];
+    if (btn) btn.click();
+  }
+});
+
+// ============== Searchable tables ==============
+function wireFilter(inputId, tableId, countId) {
+  const input = document.getElementById(inputId);
+  const table = document.getElementById(tableId);
+  const count = document.getElementById(countId);
+  if (!input || !table) return;
+  const rows = Array.from(table.querySelectorAll('tbody tr'));
+  const total = rows.length;
+  const update = () => {
+    const q = input.value.trim().toLowerCase();
+    let shown = 0;
+    rows.forEach(r => {
+      const text = r.textContent.toLowerCase();
+      const ok = !q || text.includes(q);
+      r.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    if (count) count.textContent = q ? `${shown} / ${total}` : `${total} 条`;
+  };
+  input.addEventListener('input', update);
+  update();
+}
+wireFilter('cli-filter', 'cli-table', 'cli-count');
+wireFilter('env-filter', 'env-table', 'env-count');
+wireFilter('api-filter', 'api-table', 'api-count');
+
+// ============== Back to top ==============
+const toTop = document.getElementById('to-top');
+if (toTop) {
+  const onScroll = () => {
+    if (window.scrollY > 400) toTop.classList.add('show');
+    else toTop.classList.remove('show');
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  toTop.addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
+  onScroll();
+}
 </script>
 </body>
 </html>

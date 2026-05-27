@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
+import { createHash } from "node:crypto";
 import {
   withFallbackToken,
   extractBearerToken,
   attachMcpAuthFromHeaders,
+  buildRequestContext,
+  buildRequestContextFromHttp,
+  createContextBuilder,
   type ContextBuilder,
   type McpExtra,
 } from "../../../src/permission/context-builder.js";
+import type { UserRepository } from "../../../src/db/repositories/user.repository.js";
+import type { UserRoleRepository } from "../../../src/db/repositories/user-role.repository.js";
 import type { RequestContext } from "../../../src/types/index.js";
 
 function makeBase(): { base: ContextBuilder; calls: McpExtra[] } {
@@ -157,5 +163,105 @@ describe("attachMcpAuthFromHeaders (T-738)", () => {
     const req = { headers: { authorization: ["Bearer first", "Bearer second"] } } as Parameters<typeof attachMcpAuthFromHeaders>[0];
     attachMcpAuthFromHeaders(req);
     expect(req.auth).toEqual({ token: "first" });
+  });
+});
+
+function sha256hex(s: string): string {
+  return createHash("sha256").update(s).digest("hex");
+}
+
+function makeRepos(opts: {
+  user?: { id: string; status: "active" | "disabled" } | null;
+  tags?: string[];
+}): { userRepo: UserRepository; userRoleRepo: UserRoleRepository } {
+  const userRepo = { findByToken: vi.fn(async () => opts.user ?? null) } as unknown as UserRepository;
+  const userRoleRepo = {
+    getAggregatedTagsByUserId: vi.fn(async () => opts.tags ?? []),
+  } as unknown as UserRoleRepository;
+  return { userRepo, userRoleRepo };
+}
+
+describe("buildRequestContext / buildRequestContextFromHttp", () => {
+  it("returns anonymous context with provided sessionId when token is missing", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({ user: null });
+    const ctx = await buildRequestContext({ sessionId: "sess-1" }, userRepo, userRoleRepo);
+    expect(ctx).toEqual({ userId: "anonymous", sessionId: "sess-1", tags: new Set(), isAuthenticated: false });
+    expect((userRepo.findByToken as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+  });
+
+  it("generates a sessionId when none provided", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({ user: null });
+    const ctx = await buildRequestContext({}, userRepo, userRoleRepo);
+    expect(ctx.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("returns anonymous when token does not match any user", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({ user: null });
+    const ctx = await buildRequestContext(
+      { sessionId: "s", authInfo: { token: "unknown" } },
+      userRepo,
+      userRoleRepo,
+    );
+    expect(ctx.isAuthenticated).toBe(false);
+    expect(ctx.userId).toBe("anonymous");
+    expect((userRepo.findByToken as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(sha256hex("unknown"));
+  });
+
+  it("returns anonymous when matched user is disabled", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({ user: { id: "u1", status: "disabled" }, tags: ["admin"] });
+    const ctx = await buildRequestContext(
+      { sessionId: "s", authInfo: { token: "tok" } },
+      userRepo,
+      userRoleRepo,
+    );
+    expect(ctx.isAuthenticated).toBe(false);
+    expect(ctx.userId).toBe("anonymous");
+    expect(ctx.tags.size).toBe(0);
+  });
+
+  it("returns authenticated context with aggregated tags for active user", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({
+      user: { id: "user-42", status: "active" },
+      tags: ["alpha", "beta"],
+    });
+    const ctx = await buildRequestContext(
+      { sessionId: "s-1", authInfo: { token: "real-tok" } },
+      userRepo,
+      userRoleRepo,
+    );
+    expect(ctx.isAuthenticated).toBe(true);
+    expect(ctx.userId).toBe("user-42");
+    expect(ctx.sessionId).toBe("s-1");
+    expect([...ctx.tags].sort()).toEqual(["alpha", "beta"]);
+  });
+
+  it("buildRequestContextFromHttp delegates to the same resolution path", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({
+      user: { id: "u-http", status: "active" },
+      tags: ["t"],
+    });
+    const ctx = await buildRequestContextFromHttp("http-tok", "http-sess", userRepo, userRoleRepo);
+    expect(ctx.userId).toBe("u-http");
+    expect(ctx.sessionId).toBe("http-sess");
+    expect(ctx.tags.has("t")).toBe(true);
+  });
+
+  it("buildRequestContextFromHttp with null token returns anonymous", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({ user: null });
+    const ctx = await buildRequestContextFromHttp(null, "s", userRepo, userRoleRepo);
+    expect(ctx.isAuthenticated).toBe(false);
+  });
+});
+
+describe("createContextBuilder", () => {
+  it("returns a builder that closes over the provided repos", async () => {
+    const { userRepo, userRoleRepo } = makeRepos({
+      user: { id: "u", status: "active" },
+      tags: ["x"],
+    });
+    const builder = createContextBuilder(userRepo, userRoleRepo);
+    const ctx = await builder({ sessionId: "s", authInfo: { token: "tok" } });
+    expect(ctx.userId).toBe("u");
+    expect(ctx.tags.has("x")).toBe(true);
   });
 });
