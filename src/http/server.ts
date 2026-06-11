@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { json, parseQuery, RequestBodyTooLargeError } from "./helpers.js";
+import { getOpenApiSpec } from "./openapi/spec.js";
+import { renderSwaggerUiHtml } from "./openapi/swagger-ui.js";
 import { attachRequestId } from "./middleware/request-id.js";
 import { enforceGatewayAuth } from "./middleware/gateway-auth.js";
 import { enforceAdminAuth } from "./middleware/admin-auth.js";
@@ -10,6 +12,11 @@ import type { HttpContext } from "./context.js";
 import type { AppConfig } from "../config/schema.js";
 import type { UserRepository } from "../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../db/repositories/user-role.repository.js";
+import type { SkillRepository } from "../db/repositories/skill.repository.js";
+import type { UsageMeterService } from "../services/usage-meter.service.js";
+import type { OidcContextOptions } from "../permission/context-builder.js";
+import { DEFAULT_TENANT_ID } from "../types/index.js";
+import { checkLiveness, checkReadiness } from "./probes.js";
 
 export interface RequestHandlerDeps {
   appConfig: AppConfig;
@@ -19,6 +26,14 @@ export interface RequestHandlerDeps {
   gatewayRouter: Router;
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
+  skillRepo?: SkillRepository;
+  // P1-13 — when wired, every dispatched HTTP request emits a fire-and-forget
+  // `api.call` event tagged by route template (not raw URL — the cardinality
+  // bucket already exists for Prometheus, reuse it for the metering ledger).
+  usageMeter?: UsageMeterService;
+  // P1-14 stage 2 — when wired, JWT-shaped bearer tokens are verified via
+  // OIDC before falling through to the opaque sha256 lookup.
+  oidc?: OidcContextOptions;
 }
 
 // Translates the raw http.Server `request` event into router dispatch with
@@ -34,10 +49,40 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
   // is the classic high-cardinality OOM footgun on internet-facing exposure.
   const UNMATCHED_ROUTE_LABEL = "__not_matched__";
 
-  function recordMetrics(route: string, method: string, statusCode: number, startTime: number) {
+  // P0-1 — API versioning. `/api/v1/*` is the canonical prefix; the unversioned
+  // `/api/admin/*` and `/api/gateway/*` paths remain functional aliases for a
+  // 6-month deprecation window per RFC 8594 (Sunset header) + review §14.2.
+  // After 2026-11-28 the legacy aliases are slated for removal.
+  const LEGACY_SUNSET_DATE = "Sat, 28 Nov 2026 00:00:00 GMT";
+
+  function emitDeprecationHeaders(res: ServerResponse, canonical: string) {
+    res.setHeader("Deprecation", "true");
+    res.setHeader("Sunset", LEGACY_SUNSET_DATE);
+    res.setHeader("Link", `<${canonical}>; rel="successor-version"`);
+  }
+
+  function recordMetrics(route: string, method: string, statusCode: number, startTime: number, ctx?: HttpContext) {
     const duration = (Date.now() - startTime) / 1000;
     metrics.httpRequests.inc({ route, method, status_code: statusCode });
     metrics.httpDuration.observe({ route }, duration);
+    // P1-13 — usage metering. Fire-and-forget; rejected requests count too
+    // because billing for "calls made" includes 4xx/5xx ratio (the metadata
+    // carries status_code so partition queries can split if needed).
+    // Skip the unmatched-route bucket so fuzzed `/wp-admin` hits don't inflate
+    // the metering ledger. Skip /metrics to avoid feedback loops where a
+    // Prometheus scrape registers as an api.call.
+    if (deps.usageMeter && route !== UNMATCHED_ROUTE_LABEL && route !== "/metrics") {
+      const tenantId = ctx?.requestContext?.tenantId ?? DEFAULT_TENANT_ID;
+      const userId = ctx?.requestContext?.userId;
+      void deps.usageMeter.record({
+        tenantId,
+        userId,
+        eventType: "api.call",
+        resourceId: route,
+        quantity: 1,
+        metadata: { method, status_code: statusCode },
+      });
+    }
   }
 
   return async (req: IncomingMessage, res: ServerResponse) => {
@@ -57,7 +102,29 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
     res.setHeader("Cache-Control", "no-store");
 
     try {
-      const url = req.url?.split("?")[0] ?? "";
+      const rawUrl = req.url?.split("?")[0] ?? "";
+
+      // P0-1 — Normalize `/api/v1/*` (canonical) and legacy `/api/admin/*` /
+      // `/api/gateway/*` to the same internal path the routers were registered
+      // with (`/api/admin/*` / `/api/gateway/*`). Legacy callers still work but
+      // get Deprecation + Sunset headers on every response so SDKs can surface
+      // the migration warning without a breaking change.
+      let url = rawUrl;
+      let isLegacyAlias = false;
+      let canonicalRedirect: string | null = null;
+      if (rawUrl.startsWith("/api/v1/")) {
+        url = "/api/" + rawUrl.slice("/api/v1/".length);
+      } else if (rawUrl.startsWith("/api/admin/") || rawUrl.startsWith("/api/gateway/")) {
+        isLegacyAlias = true;
+        canonicalRedirect = "/api/v1/" + rawUrl.slice("/api/".length);
+      } else if (rawUrl === "/api/health") {
+        // Allow legacy `/api/health` to also emit deprecation pointing at v1.
+        isLegacyAlias = true;
+        canonicalRedirect = "/api/v1/livez";
+      }
+      if (isLegacyAlias && canonicalRedirect) {
+        emitDeprecationHeaders(res, canonicalRedirect);
+      }
 
       if (url === "/mcp" || url === "/mcp/sse" || url === "/mcp/messages") {
         if (mcpHandler) { await mcpHandler(req, res); return; }
@@ -76,6 +143,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           const requestContext = await enforceAdminAuth(ctx, {
             userRepo: deps.userRepo,
             userRoleRepo: deps.userRoleRepo,
+            oidc: deps.oidc,
             authOptional: false,
           });
           if (!requestContext) {
@@ -90,7 +158,41 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         return;
       }
 
-      if (url === "/api/health") { json(res, 200, { status: "ok", timestamp: new Date().toISOString() }); return; }
+      // P0-7 — k8s probes: liveness ("am I alive?") vs readiness ("should I
+      // receive traffic?"). `/api/health` is a back-compat alias for liveness.
+      if (url === "/api/health" || url === "/api/livez") {
+        json(res, 200, checkLiveness());
+        recordMetrics(url === "/api/livez" ? "/api/livez" : "/api/health", req.method!, 200, startTime);
+        return;
+      }
+      if (url === "/api/readyz") {
+        const probe = await checkReadiness({ skillRepo: deps.skillRepo });
+        const code = probe.status === "ok" ? 200 : 503;
+        json(res, code, probe);
+        recordMetrics("/api/readyz", req.method!, code, startTime);
+        return;
+      }
+
+      // P0-2 — OpenAPI spec + Swagger UI. Anonymous (no auth) so SDK generators
+      // and developers can introspect the API without a token. The canonical
+      // URLs use the `/api/v1/` prefix; legacy `/api/openapi.json` and
+      // `/api/docs` resolve here (after the v1 → unprefixed normalization
+      // above) and get the same Deprecation/Sunset headers as other legacy
+      // aliases. The spec doc itself lists `/api/v1` as the primary server.
+      if (url === "/api/openapi.json") {
+        const spec = getOpenApiSpec();
+        res.setHeader("Cache-Control", "public, max-age=300");
+        json(res, 200, spec);
+        recordMetrics("/api/openapi.json", req.method!, 200, startTime);
+        return;
+      }
+      if (url === "/api/docs" || url === "/api/docs/") {
+        const html = renderSwaggerUiHtml("/api/v1/openapi.json");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(html);
+        recordMetrics("/api/docs", req.method!, 200, startTime);
+        return;
+      }
 
       // Gateway routes — token enforced by enforceGatewayAuth middleware before dispatch.
       // /api/gateway/health is the only anonymous-accessible endpoint (LB / k8s probes).
@@ -99,15 +201,19 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         if (match) {
           const ctx: HttpContext = { req, res, url, method: req.method!, params: match.params, query: parseQuery(req.url ?? "/", req.headers.host), logger };
           if (url !== "/api/gateway/health") {
-            const requestContext = await enforceGatewayAuth(ctx, deps);
+            const requestContext = await enforceGatewayAuth(ctx, {
+              userRepo: deps.userRepo,
+              userRoleRepo: deps.userRoleRepo,
+              oidc: deps.oidc,
+            });
             if (!requestContext) {
-              recordMetrics(url, req.method!, res.statusCode, startTime);
+              recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
               return;
             }
             ctx.requestContext = requestContext;
           }
           await gatewayRouter.dispatch(ctx);
-          recordMetrics(url, req.method!, res.statusCode, startTime);
+          recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
           return;
         }
       }
@@ -122,15 +228,16 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           const requestContext = await enforceAdminAuth(ctx, {
             userRepo: deps.userRepo,
             userRoleRepo: deps.userRoleRepo,
+            oidc: deps.oidc,
             authOptional: appConfig.auth.adminAuthOptional,
           });
           if (!requestContext) {
-            recordMetrics(url, req.method!, res.statusCode, startTime);
+            recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
             return;
           }
           ctx.requestContext = requestContext;
           await adminRouter.dispatch(ctx);
-          recordMetrics(url, req.method!, res.statusCode, startTime);
+          recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
           return;
         }
       }

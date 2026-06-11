@@ -14,7 +14,7 @@ function skill(overrides: Partial<SkillMeta>): SkillMeta {
 
 function ctx(overrides: Partial<RequestContext>): RequestContext {
   return {
-    userId: "anonymous", sessionId: "x", tags: new Set<string>(),
+    tenantId: "default", userId: "anonymous", sessionId: "x", tags: new Set<string>(),
     isAuthenticated: false, ...overrides,
   };
 }
@@ -62,5 +62,60 @@ describe("TagPermissionFilter visibility gate", () => {
     const blocked = skill({ slug: "be", visibility: "private", tags: ["backend"] });
     const out = await filter.filter([matching, blocked]);
     expect(out.map(s => s.slug)).toEqual(["fe"]);
+  });
+});
+
+describe("TagPermissionFilter lifecycle gate (P0-9)", () => {
+  it("hides draft skills from non-admin authenticated callers", async () => {
+    const filter = new TagPermissionFilter(ctx({
+      userId: "u1", isAuthenticated: true, tags: new Set(),
+    }));
+    const out = await filter.filter([skill({ visibility: "public", status: "draft" })]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("hides archived skills from non-admin callers", async () => {
+    const filter = new TagPermissionFilter(ctx({
+      userId: "u1", isAuthenticated: true, tags: new Set(),
+    }));
+    const out = await filter.filter([skill({ visibility: "public", status: "archived" })]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("keeps deprecated skills visible (soft-retire window)", async () => {
+    const filter = new TagPermissionFilter(ctx({
+      userId: "u1", isAuthenticated: true, tags: new Set(),
+    }));
+    const out = await filter.filter([skill({ visibility: "public", status: "deprecated" })]);
+    expect(out).toHaveLength(1);
+  });
+
+  it("admin:read tag bypasses the lifecycle filter and sees drafts", async () => {
+    const filter = new TagPermissionFilter(ctx({
+      userId: "admin", isAuthenticated: true, tags: new Set(["admin:read"]),
+    }));
+    const out = await filter.filter([
+      skill({ slug: "d", visibility: "private", status: "draft" }),
+      skill({ slug: "a", visibility: "private", status: "archived" }),
+    ]);
+    expect(out.map(s => s.slug).sort()).toEqual(["a", "d"]);
+  });
+
+  it("admin:write tag also bypasses the lifecycle filter", async () => {
+    const filter = new TagPermissionFilter(ctx({
+      userId: "admin", isAuthenticated: true, tags: new Set(["admin:write"]),
+    }));
+    const out = await filter.filter([skill({ visibility: "public", status: "draft" })]);
+    expect(out).toHaveLength(1);
+  });
+
+  it("anonymous caller does NOT pick up admin bypass via tags alone (auth required)", async () => {
+    // Sanity: even if tags somehow include admin:write, isAuthenticated=false
+    // means isAdmin() short-circuits to false.
+    const filter = new TagPermissionFilter(ctx({
+      tags: new Set(["admin:write"]), isAuthenticated: false,
+    }));
+    const out = await filter.filter([skill({ visibility: "public", status: "draft" })]);
+    expect(out).toHaveLength(0);
   });
 });

@@ -53,7 +53,7 @@ function createMockLogger(): Logger {
 }
 
 function anonymousCtx(): RequestContext {
-  return { userId: "anon", sessionId: "s", tags: new Set(), isAuthenticated: false };
+  return { tenantId: "default", userId: "anon", sessionId: "s", tags: new Set(), isAuthenticated: false };
 }
 
 describe("SkillService", () => {

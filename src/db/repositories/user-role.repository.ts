@@ -4,6 +4,7 @@ import type { DrizzleDB } from "../connection.js";
 import { userRoles, roles } from "../schema.js";
 import { getLogger } from "../../utils/logger.js";
 import { metrics } from "../../telemetry/metrics.js";
+import { withSpan } from "../../telemetry/spans.js";
 
 export class UserRoleRepository {
   constructor(private db: DrizzleDB) {}
@@ -40,6 +41,10 @@ export class UserRoleRepository {
   }
 
   async getAggregatedTagsByUserId(userId: string): Promise<string[]> {
+    return withSpan("db.query", { attributes: { "db.repo": "user_roles", "db.method": "getAggregatedTagsByUserId" } }, () => this._getAggregatedTagsByUserIdImpl(userId));
+  }
+
+  private async _getAggregatedTagsByUserIdImpl(userId: string): Promise<string[]> {
     const rows = this.db
       .select({ roleId: roles.id, tags: roles.tags })
       .from(userRoles)

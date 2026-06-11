@@ -227,6 +227,10 @@ npx skill-mcp lint ./path/to/skill-package
 | `AUTH_TOKEN` | 网关出向令牌 | - |
 | `SKILL_MCP_AUTH_TOKEN` | stdio 模式权限隔离 bearer token | - |
 | `LOG_LEVEL` | 日志级别 | `info` |
+| `OTEL_ENABLED` | 启用 OpenTelemetry tracing（`true` / `false`） | `false` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP endpoint URL；未设时回落 `ConsoleSpanExporter` | - |
+| `OTEL_SERVICE_NAME` | `service.name` 资源属性 | `skill-mcp` |
+| `OTEL_SERVICE_VERSION` | `service.version` 资源属性 | package.json 版本 |
 
 ### Stdio 模式权限隔离
 
@@ -269,30 +273,153 @@ skill-mcp user create --name alice --role-ids <role-id>
 
 `/mcp/*`（SSE / Streamable HTTP）及 stdio 传输不受影响 —— stdio 使用上文 `SKILL_MCP_AUTH_TOKEN` 启动期注入路径。
 
+### OIDC / SSO（P1-14）
+
+`skill-mcp` 接受任意标准 OIDC IdP（Auth0 / Okta / Keycloak / Azure AD / Google Workspace）签发的 JWT bearer token。配置 OIDC 后，服务端会透明地接受两类 bearer 凭证 —— 三段式 base64url JWT 走加密验证；其它形式回退到 opaque-token sha256 查表。JWT 验证使用 Node 内置 `crypto` 模块，**未引入 `jose` / `jsonwebtoken` / `jwks-rsa` 等依赖**。
+
+#### 1. 配置你的 IdP
+
+在 IdP 中创建一个 API/audience 标识（例如 Auth0 → APIs → Create API；Keycloak → Clients → audience mapper），该标识即 `OIDC_AUDIENCE`。记录 issuer URL（`OIDC_ISSUER`）与 JWKS 端点（`OIDC_JWKS_URI`，通常为 `<issuer>/.well-known/jwks.json`）。
+
+IdP 必须签发包含以下字段的 token：
+
+- `iss` 与 `OIDC_ISSUER` 严格相等（字符串完全匹配，不能差一个尾斜杠）。
+- `aud` 包含 `OIDC_AUDIENCE`（可以是字符串或数组，交集非空即通过）。
+- `sub` —— 稳定的主体标识（默认 user claim）。如果希望按 email 作为用户主键，设置 `OIDC_USER_CLAIM=email`。
+- 签名算法为 `RS256`（默认）。`RS384` / `RS512` 通过 `OIDC_ALLOWED_ALGORITHMS=RS256,RS512` 显式启用。`HS*` 与 `alg=none` 无条件拒绝。
+- *（可选）* `groups: ["engineering", "ops"]` —— 由下文的 group→role 映射消费。如 IdP 使用其它字段名承载角色，使用 `OIDC_GROUPS_CLAIM=roles`。
+
+#### 2. 配置服务端
+
+设置三个必填环境变量（缺任一项即视为未启用 OIDC，完全向后兼容）：
+
+```bash
+OIDC_ISSUER=https://login.example.com/
+OIDC_AUDIENCE=https://api.skill-mcp.example.com
+OIDC_JWKS_URI=https://login.example.com/.well-known/jwks.json
+# 可选微调：
+OIDC_USER_CLAIM=sub                 # 默认
+OIDC_GROUPS_CLAIM=groups            # 默认
+OIDC_CLOCK_SKEW_SEC=60              # 默认；exp/nbf 校验的 ± 容差
+OIDC_JWKS_TTL_MS=600000             # 默认 10 分钟；JWKS 缓存 TTL
+OIDC_ALLOWED_ALGORITHMS=RS256       # 默认；CSV 添加更多算法
+```
+
+重启服务后，三段式 JWT 走 verifier；opaque token（`skill-mcp user create` 输出）继续按原路径工作。
+
+#### 3. 首次登录自动建档
+
+来自新 `(issuer, subject)` 的首个验证通过的 token 触达服务时，内部 provisioner 会创建：
+
+1. 一行 `users`：`name = "oidc:<iss>:<sub>"`，token 字段为随机哨兵值（用于满足 `UNIQUE(token)` 约束，且**故意不可作为有效凭证使用**）。
+2. 一行 `oidc_identities`：将 `(issuer, subject)` 与该用户 UUID 绑定。后续登录均解析为同一 UUID。
+
+哨兵 token 形如 `sha256("oidc-sentinel:" + random)` —— opaque token 永远不会以该前缀开头，碰撞在计算上不可能。
+
+#### 4. 配置 IdP 群组到角色的映射
+
+group→role 映射**按租户隔离** —— 同名 `engineering` 群组在不同租户可映射到不同角色，互不冲突。通过 admin REST 接口管理（需要持有 `admin:write` 标签的 admin token）：
+
+```bash
+# 列出 default 租户下的所有映射
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:3000/api/admin/oidc/groups-mapping
+
+# 新增映射：engineering 群组授予 r-frontend 角色
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"groupName":"engineering","roleId":"r-frontend"}' \
+  http://localhost:3000/api/admin/oidc/groups-mapping
+
+# 原子地替换某一群组对应的全部角色
+curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"groupName":"engineering","roleIds":["r-frontend","r-backend"]}' \
+  http://localhost:3000/api/admin/oidc/groups-mapping
+
+# 删除单条映射
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:3000/api/admin/oidc/groups-mapping/<row-id>
+
+# 审计：列出某用户绑定的全部 OIDC identity
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://localhost:3000/api/admin/oidc/identities?userId=<user-uuid>"
+```
+
+每次 JWT 验证通过后，provisioner 会读取用户的 groups，在该用户所属租户下查找匹配映射，并以**追加（additive）** 语义写入 `user_roles` —— 通过 `user-role-cmd grant` 的人工授权在登录间会被保留。如果通过 `user-role-cmd revoke` 收回了一个仍在映射中的角色，下次登录会被重新授予；要让 revoke 生效，请先删除映射。
+
+#### 5. 请求上下文中的 tag 解析
+
+`RequestContext.tags` 为以下两类来源的并集：
+
+- 从该用户 DB 角色（含步骤 4 自动种入的角色）聚合得到的 tag。
+- JWT `groups` claim 中的字符串（非空字符串过滤后的结果；非字符串条目静默丢弃）。
+
+如果 IdP 在 claim 里直接挂出 `groups: ["admin:write"]`，该用户即可立刻拥有管理员写权限，**无需任何 DB 行** —— 这是为打破玻璃（break-glass）场景设计的能力。常态化运维仍应通过显式角色授权来管理。
+
+#### 6. 失败模式
+
+- JWT 验证失败（过期、issuer 不匹配、audience 不匹配、kid 缺失、签名错误）一律返回 **401**。9 种内部失败原因不会透传给客户端（防 oracle 攻击）。
+- 三段式 JWT 验证失败时**不会**回退到 opaque-token 查表 —— 过期的 Auth0 token 是真实认证失败，不应被当作可能合法的 opaque token。
+- provisioning 过程中出现暂态 DB 失败时，回退到合成上下文 `userId = "oidc:<iss>:<sub>"`，请求仍可成功（token 验证已通过），但依赖 DB 落库的能力（审计、角色授权）跳过，下次访问继续重试。provisioner 失败会输出 `oidc.logger.warn({reason:"oidc-provisioner-failed"})` 供运维诊断。
+
 ## 技能包格式
 
 技能包是一个包含以下内容的目录：
 
 ```
 my-skill/
-├── manifest.json     # 包元数据（name, version, entry）
-├── SKILL.md          # 主要技能内容（默认入口点）
+├── SKILL.md          # 主要技能内容 + YAML frontmatter（必填）
 ├── references/       # 支持参考文件
 │   └── examples.md
 └── templates/        # 模板文件
     └── checklist.md
 ```
 
-### manifest.json
+### SKILL.md frontmatter
 
-```json
-{
-  "name": "my-skill",
-  "version": "0.0.1",
-  "entry": "SKILL.md",
-  "files": ["references/examples.md"]
-}
+技能元数据写在 `SKILL.md` 顶部的 YAML frontmatter 中：
+
+```yaml
+---
+manifest_schema: "1.0"   # P1-21 — 见下方 "Manifest 版本契约"
+name: my-skill
+version: 0.0.1
+description: 列表 API 展示的简短描述
+entry: SKILL.md
+files:
+  - references/examples.md
+tags: [writing, prompt]
+category: writing
+---
+
+# 技能正文 markdown
 ```
+
+### Manifest 版本契约（P1-21）
+
+可选的 `manifest_schema` 字段声明该包遵循的契约版本。当前 schema 为 **`1.0`**。
+
+| 客户端 `manifest_schema` | 本服务（1.x） | 未来服务（2.x） |
+|--------------------------|---------------|------------------|
+| 缺省 / `0.x`             | ✅ 自动当作 `1.0` 并输出 deprecated warning | ⚠️ 2.x 发布后可能拒绝 |
+| `1.0`（任意 1.y）        | ✅ | ✅（向后兼容窗口：2 个 minor） |
+| `2.0+`                   | ❌ "服务端版本过低，请升级" | ✅ |
+
+可用内置 CLI 迁移历史包：
+
+```bash
+# Dry-run 扫描（默认）
+skill-mcp manifest:migrate ./my-skills
+
+# 直接改写 SKILL.md
+skill-mcp manifest:migrate ./my-skills --apply
+
+# 或输出 unified diff 走 code review / `git apply`
+skill-mcp manifest:migrate ./my-skills --patch | git apply
+```
+
+> **遗留的 `manifest.json`** 已被弃用——遇到时 importer 会输出警告，并优先使用 `SKILL.md` frontmatter。schema 版本规则对两种载体一视同仁。
 
 ## 流程格式
 
@@ -380,6 +507,7 @@ src/
 | `versions <slug>` | 显示版本历史 |
 | `rollback <slug>` | 回滚到之前的版本 |
 | `lint <path>` | 检查技能包 |
+| `manifest:migrate <dir>` | 扫描并迁移 `manifest_schema`（P1-21，支持 `--apply` / `--patch`）|
 | `pipeline validate` | 验证流程 YAML |
 | `pipeline graph` | 可视化流程 DAG |
 | `pipeline run` | 执行流程 |

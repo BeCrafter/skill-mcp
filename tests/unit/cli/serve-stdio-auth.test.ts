@@ -7,6 +7,7 @@ const noopLogger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn(
 describe("withFallbackToken", () => {
   it("injects fallback token when extra has no authInfo", async () => {
     const base = vi.fn(async (extra: McpExtra) => ({
+      tenantId: "default",
       userId: extra.authInfo?.token ?? "anon",
       sessionId: "s",
       tags: new Set<string>(),
@@ -21,6 +22,7 @@ describe("withFallbackToken", () => {
 
   it("does not override an existing token", async () => {
     const base = vi.fn(async (extra: McpExtra) => ({
+      tenantId: "default",
       userId: extra.authInfo?.token ?? "anon",
       sessionId: "s",
       tags: new Set<string>(),
@@ -34,7 +36,7 @@ describe("withFallbackToken", () => {
 
   it("returns base builder unchanged when no fallback token configured", async () => {
     const base = vi.fn(async () => ({
-      userId: "anon", sessionId: "s", tags: new Set<string>(), isAuthenticated: false,
+      tenantId: "default", userId: "anon", sessionId: "s", tags: new Set<string>(), isAuthenticated: false,
     })) as unknown as ContextBuilder;
 
     const wrapped = withFallbackToken(base, undefined);

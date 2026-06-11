@@ -84,3 +84,54 @@ describe("DomainEventBus", () => {
     expect(c).toHaveBeenCalled();
   });
 });
+
+describe("DomainEventBus async dispatch (P0-B)", () => {
+  it("default sync mode invokes listeners on the same call stack", () => {
+    const bus = new DomainEventBus();
+    const handler = vi.fn();
+    bus.on("skill:created", handler);
+    bus.publish({ type: "skill:created", slug: "x" });
+    // Sync dispatch: handler ran before publish() returned.
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("async mode defers listener invocation to the next tick", async () => {
+    const bus = new DomainEventBus({ async: true });
+    const handler = vi.fn();
+    bus.on("skill:created", handler);
+    bus.publish({ type: "skill:created", slug: "x" });
+    // Right after publish(), the listener has NOT run yet.
+    expect(handler).not.toHaveBeenCalled();
+    // Wait for the deferred task.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("async mode preserves listener isolation: a throwing listener does not break siblings", async () => {
+    const bus = new DomainEventBus({ async: true });
+    const bad = vi.fn(() => { throw new Error("boom"); });
+    const good = vi.fn();
+    bus.on("skill:updated", bad);
+    bus.on("skill:updated", good);
+
+    metrics.eventListenerErrors.reset();
+    expect(() => bus.publish({ type: "skill:updated", slug: "x" })).not.toThrow();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bad).toHaveBeenCalled();
+    expect(good).toHaveBeenCalled();
+    const text = await registry.metrics();
+    expect(text).toMatch(/skill_mcp_event_listener_errors_total\{event="skill:updated"\}\s+1/);
+  });
+
+  it("async mode delivers full event payload (visibility/tags) intact", async () => {
+    const bus = new DomainEventBus({ async: true });
+    const handler = vi.fn();
+    bus.on("skill:imported", handler);
+    const event: Extract<DomainEvent, { type: "skill:imported" }> = {
+      type: "skill:imported", slug: "x", visibility: "public", tags: ["t1", "t2"],
+    };
+    bus.publish(event);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(handler).toHaveBeenCalledWith(event);
+  });
+});

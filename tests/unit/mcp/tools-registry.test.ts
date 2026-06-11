@@ -13,16 +13,16 @@ function fakeService(): SkillService {
 }
 
 describe("mcp/tools/registry — registerTools", () => {
-  it("registers all five tools on the server", () => {
+  it("registers all six tools on the server", () => {
     const server = new McpServer({ name: "t", version: "0" });
     registerTools(server, fakeService());
     const registered = (server as unknown as { _registeredTools: Record<string, unknown> })
       ._registeredTools;
     const names = Object.keys(registered ?? {});
     expect(names).toEqual(expect.arrayContaining([
-      "skill_list", "skill_view", "skill_file", "skill_feedback", "skill_pipeline",
+      "skill_list", "skill_search", "skill_view", "skill_file", "skill_feedback", "skill_pipeline",
     ]));
-    expect(names).toHaveLength(5);
+    expect(names).toHaveLength(6);
   });
 
   it("instrument() wrapper passes through the original return value on success", () => {

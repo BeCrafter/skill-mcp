@@ -1,3 +1,22 @@
+export const SKILL_SEARCH_DESC = [
+  "【Relevance Search】Search skills by free-text query and return BM25-ranked hits.",
+  "",
+  "Use this when the user describes an intent or task in their own words and you ",
+  "need to discover the most relevant skill(s) without scrolling the full catalog.",
+  "Each hit carries a relevance score so you can decide whether to act on the top ",
+  "result or ask a clarifying question.",
+  "",
+  "Usage:",
+  "- skill_search({query: 'check broken images on a webpage'}) — top 10 hits",
+  "- skill_search({query: '...', limit: 5}) — narrow the result",
+  "- skill_search({query: '...', tags: ['analysis']}) — pre-filter by tag",
+  "",
+  "When to call skill_list vs skill_search:",
+  "- Browsing / 'what's available' → skill_list",
+  "- Specific user intent / 'I want to do X' → skill_search",
+  "- skill_list({query: '...'}) is also valid as a shortcut",
+].join("\n");
+
 export const SKILL_LIST_DESC = [
   "【Must-Check Resource】List ALL available skills (built-in, plugin, and extension).",
   "",
@@ -18,6 +37,7 @@ export const SKILL_LIST_DESC = [
   "Usage:",
   "- skill_list() — returns all skills",
   "- skill_list({tags: [\"tag1\", \"tag2\"]}) — filter by tags",
+  "- skill_list({query: \"check broken links\"}) — return top-20 matches by relevance (BM25)",
   "",
   "Examples:",
   "- User: 'what skills are installed' → skill_list()",
@@ -25,6 +45,7 @@ export const SKILL_LIST_DESC = [
   "- User: 'refresh skills' → skill_list()",
   "- User: 'help me fix this bug' → skill_list()",
   "- User: 'skills for code review' → skill_list({tags: [\"code-review\"]})",
+  "- User: 'I want to scan a page for broken images' → skill_list({query: \"broken images\"})",
   "",
   "List format: - slug [id:uuid]: description. Use skill_view(slug) or skill_view(id) to load.",
 ].join("\n");

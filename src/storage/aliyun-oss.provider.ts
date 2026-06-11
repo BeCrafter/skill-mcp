@@ -1,5 +1,6 @@
 import OSS from "ali-oss";
 import type { IStorageProvider } from "./provider.interface.js";
+import { withSpan } from "../telemetry/spans.js";
 
 interface AliyunOssConfig {
   bucket: string;
@@ -21,14 +22,16 @@ export class AliyunOssProvider implements IStorageProvider {
   }
 
   async get(path: string): Promise<Buffer | null> {
-    try {
-      const result = await this.client.get(path);
-      return Buffer.from(result.content);
-    } catch (e: unknown) {
-      const error = e as { code?: string; name?: string };
-      if (error.code === "NoSuchKey" || error.name === "NoSuchKeyError") return null;
-      throw e;
-    }
+    return withSpan("storage.read", { attributes: { "storage.backend": "aliyun-oss", "storage.path": path } }, async () => {
+      try {
+        const result = await this.client.get(path);
+        return Buffer.from(result.content);
+      } catch (e: unknown) {
+        const error = e as { code?: string; name?: string };
+        if (error.code === "NoSuchKey" || error.name === "NoSuchKeyError") return null;
+        throw e;
+      }
+    });
   }
 
   async exists(path: string): Promise<boolean> {

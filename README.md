@@ -125,7 +125,20 @@ This project supports **three flexible deployment modes**:
 - **Scenario A** - [Local Development](./docs/SCENARIOS/SCENARIO_A.md)
 - **Scenario B** - [Hybrid Deployment](./docs/SCENARIOS/SCENARIO_B.md)
 - **Scenario C** - [Distributed Deployment](./docs/SCENARIOS/SCENARIO_C.md)
+- **Kubernetes** - [Helm Chart](./charts/skill-mcp/README.md)
 - **Full Architecture** - [Complete Reference](./docs/ARCHITECTURE.md)
+
+### Kubernetes (Helm)
+
+A production-grade Helm chart is available at [`charts/skill-mcp/`](./charts/skill-mcp/):
+
+```bash
+helm install skill-mcp ./charts/skill-mcp \
+  --namespace skill-mcp --create-namespace \
+  --set secrets.authToken=$(openssl rand -hex 32)
+```
+
+The chart wires three Kubernetes probes (`/api/v1/livez` for liveness without DB I/O, `/api/v1/readyz` for readiness with a DB ping, plus a startup probe) and defaults to `replicas: 1` + `strategy: Recreate` because the runtime uses SQLite (single-writer). Autoscaling is intentionally disabled by default — re-enable only after migrating to Postgres. See [`charts/skill-mcp/README.md`](./charts/skill-mcp/README.md) for the standalone / gateway / cloud presets, secrets externalization, and the full values reference.
 
 ## Quick Start
 
@@ -284,6 +297,10 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
 | `AUTH_TOKEN` | Auth token (gateway outbound) | - |
 | `SKILL_MCP_AUTH_TOKEN` | Stdio mode bearer token for permission isolation | - |
 | `LOG_LEVEL` | Logging level | `info` |
+| `OTEL_ENABLED` | Enable OpenTelemetry tracing (`true` / `false`) | `false` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP endpoint URL; falls back to `ConsoleSpanExporter` when unset | - |
+| `OTEL_SERVICE_NAME` | `service.name` resource attribute | `skill-mcp` |
+| `OTEL_SERVICE_VERSION` | `service.version` resource attribute | package.json version |
 
 ### Stdio Permission Isolation
 
@@ -326,30 +343,154 @@ For Gateway → Cloud Service internal calls, create a dedicated `svc-gateway` u
 
 `/mcp/*` (SSE / Streamable HTTP) and stdio transports are unaffected — stdio uses the `SKILL_MCP_AUTH_TOKEN` startup-injection path described above.
 
+### OIDC / SSO (P1-14)
+
+`skill-mcp` accepts JWT bearer tokens from any standards-compliant OIDC IdP (Auth0 / Okta / Keycloak / Azure AD / Google Workspace). When OIDC is configured, the server transparently accepts both classes of bearer credential — a 3-segment base64url JWT goes through cryptographic verification, anything else falls through to the opaque-token sha256 lookup. JWT verification is implemented with Node's built-in `crypto` module (no `jose` / `jsonwebtoken` / `jwks-rsa` dependency).
+
+#### 1. Configure your IdP
+
+Create an API/audience identifier in your IdP (e.g. Auth0 → APIs → Create API; Keycloak → Clients → audience mapper). The identifier becomes `OIDC_AUDIENCE`. Note the issuer URL (`OIDC_ISSUER`) and the JWKS endpoint (`OIDC_JWKS_URI`, typically `<issuer>/.well-known/jwks.json`).
+
+The IdP MUST issue tokens with:
+
+- `iss` matching `OIDC_ISSUER` exactly (string equality, no trailing slash differences).
+- `aud` containing `OIDC_AUDIENCE` (string OR array — intersection wins).
+- `sub` — the stable subject identifier (default user claim). Use `OIDC_USER_CLAIM=email` if you want to key users on email instead.
+- A signing algorithm of `RS256` (default). `RS384` / `RS512` are opt-in via `OIDC_ALLOWED_ALGORITHMS=RS256,RS512`. `HS*` and `alg=none` are unconditionally rejected.
+- *(Optional)* `groups: ["engineering", "ops"]` — used by the group→role mapping below. Override the claim name with `OIDC_GROUPS_CLAIM=roles` if your IdP carries roles under a different name.
+
+#### 2. Wire the server config
+
+Set the three required env vars (omitting any of the three keeps OIDC disabled — fully back-compatible):
+
+```bash
+OIDC_ISSUER=https://login.example.com/
+OIDC_AUDIENCE=https://api.skill-mcp.example.com
+OIDC_JWKS_URI=https://login.example.com/.well-known/jwks.json
+# Optional fine-tuning:
+OIDC_USER_CLAIM=sub                 # default
+OIDC_GROUPS_CLAIM=groups            # default
+OIDC_CLOCK_SKEW_SEC=60              # default; ± window for exp/nbf checks
+OIDC_JWKS_TTL_MS=600000             # default 10min; JWKS cache TTL
+OIDC_ALLOWED_ALGORITHMS=RS256       # default; CSV for additional algs
+```
+
+Restart the server. JWT-shaped bearer tokens now route through the verifier; opaque tokens (`skill-mcp user create` output) keep working unchanged.
+
+#### 3. First-login auto-provisioning
+
+The first time a verified token from a new `(issuer, subject)` pair reaches the server, an internal provisioner creates:
+
+1. A `users` row with `name = "oidc:<iss>:<sub>"` and a randomized sentinel token (so the row satisfies `UNIQUE(token)` without colliding with real bearer tokens — the sentinel is intentionally not a usable credential).
+2. An `oidc_identities` row pinning `(issuer, subject)` to that user UUID. Subsequent logins resolve to the same UUID.
+
+The sentinel-token format is `sha256("oidc-sentinel:" + random)` — opaque tokens never start with that prefix, so collision is computationally impossible.
+
+#### 4. Map IdP groups to roles
+
+Group→role mapping is **tenant-scoped** — the same `engineering` group can grant different roles in different tenants without collision. Manage mappings via the admin REST surface (requires an admin token with `admin:write`):
+
+```bash
+# List mappings for the default tenant
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:3000/api/admin/oidc/groups-mapping
+
+# Create a mapping: "engineering" group grants role r-frontend
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"groupName":"engineering","roleId":"r-frontend"}' \
+  http://localhost:3000/api/admin/oidc/groups-mapping
+
+# Atomically replace ALL roles mapped to one group
+curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"groupName":"engineering","roleIds":["r-frontend","r-backend"]}' \
+  http://localhost:3000/api/admin/oidc/groups-mapping
+
+# Delete a single mapping row
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:3000/api/admin/oidc/groups-mapping/<row-id>
+
+# Audit: list OIDC identities tied to one user
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://localhost:3000/api/admin/oidc/identities?userId=<user-uuid>"
+```
+
+On every verified-JWT request the provisioner reads the user's groups, looks up matching mappings for the user's tenant, and **additively** merges those role grants into `user_roles` — manual `user-role-cmd grant` operations are preserved across logins. Manual `user-role-cmd revoke` for a role still named in the active mapping will be re-granted on the next login; remove the mapping if you want the revoke to stick.
+
+#### 5. Tag resolution on the request context
+
+The `RequestContext.tags` Set is the **union** of:
+
+- Tags aggregated from the user's DB role grants (including roles seeded by step 4).
+- Strings from the JWT's `groups` claim (filtered to non-empty strings — non-string entries are silently dropped).
+
+If your IdP issues `groups: ["admin:write"]` literally, the user immediately has admin-write privileges without any DB rows — this is intentional for break-glass access. Provision a real role grant for steady-state operators.
+
+#### 6. Failure modes
+
+- A JWT that fails verification (expired, wrong issuer, wrong audience, kid not found, bad signature) returns **401** uniformly. The 9 internal failure reasons are not leaked to the client (defeats oracle attacks).
+- A JWT-shaped bearer token does **not** fall through to opaque-token lookup on verification failure — an expired Auth0 token is a real authentication failure, not a hint to try a different code path.
+- A transient DB failure during provisioning falls back to the synthetic `userId = "oidc:<iss>:<sub>"` context — the request still succeeds (token verification already passed), but DB-anchored features (audit log, role grants) skip until the next visit. Provisioner failures emit `oidc.logger.warn({reason:"oidc-provisioner-failed"})` for ops triage.
+
 ## Skill Package Format
 
 A skill package is a directory containing:
 
 ```
 my-skill/
-├── manifest.json     # Package metadata (name, version, entry)
-├── SKILL.md          # Main skill content (default entry point)
+├── SKILL.md          # Main skill content + YAML frontmatter (required)
 ├── references/       # Supporting reference files
 │   └── examples.md
 └── templates/        # Template files
     └── checklist.md
 ```
 
-### manifest.json
+### SKILL.md frontmatter
 
-```json
-{
-  "name": "my-skill",
-  "version": "0.0.1",
-  "entry": "SKILL.md",
-  "files": ["references/examples.md"]
-}
+The skill's metadata lives in YAML frontmatter at the top of `SKILL.md`:
+
+```yaml
+---
+manifest_schema: "1.0"   # P1-21 — see "Manifest Schema Versioning" below
+name: my-skill
+version: 0.0.1
+description: Short skill description for the listing API
+entry: SKILL.md
+files:
+  - references/examples.md
+tags: [writing, prompt]
+category: writing
+---
+
+# Skill body in markdown
 ```
+
+### Manifest Schema Versioning (P1-21)
+
+The optional `manifest_schema` field declares which contract version the
+package targets. The current schema is **`1.0`**.
+
+| Client `manifest_schema` | This server (1.x) | Future server (2.x) |
+|--------------------------|-------------------|---------------------|
+| missing / `0.x`          | ✅ coerced to `1.0` + deprecation warning | ⚠️ may be rejected once 2.x ships |
+| `1.0` (any 1.y)          | ✅                | ✅ (back-compat window: 2 minors)   |
+| `2.0+`                   | ❌ "server too old, please upgrade" | ✅ |
+
+Migrate existing packages with the bundled CLI:
+
+```bash
+# Dry-run a tree (default)
+skill-mcp manifest:migrate ./my-skills
+
+# Rewrite SKILL.md in place
+skill-mcp manifest:migrate ./my-skills --apply
+
+# Or emit a unified diff for code review / `git apply`
+skill-mcp manifest:migrate ./my-skills --patch | git apply
+```
+
+> **Legacy `manifest.json`** is deprecated — the importer warns when it sees one, and prefers `SKILL.md` frontmatter. The schema versioning rules above apply identically to either source location.
 
 ## Pipeline Format
 
@@ -437,6 +578,7 @@ src/
 | `versions <slug>` | Show version history |
 | `rollback <slug>` | Rollback to previous version |
 | `lint <path>` | Lint skill package |
+| `manifest:migrate <dir>` | Scan & migrate `manifest_schema` (P1-21, supports `--apply` / `--patch`) |
 | `pipeline validate` | Validate pipeline YAML |
 | `pipeline graph` | Visualize pipeline DAG |
 | `pipeline run` | Execute pipeline |

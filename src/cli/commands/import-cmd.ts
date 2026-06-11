@@ -7,6 +7,7 @@ import { SkillImporter } from "../../import/importer.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { SkillFileRepository } from "../../db/repositories/skill-file.repository.js";
 import { SkillVersionRepository } from "../../db/repositories/skill-version.repository.js";
+import { SkillEvalRepository } from "../../db/repositories/skill-eval.repository.js";
 import { DomainEventBus } from "../../events/event-bus.js";
 import { setupCacheSubscribers } from "../../events/cache-subscriber.js";
 import { CacheEpochManager } from "../../cache/cache-epochs.js";
@@ -28,6 +29,7 @@ export async function importAction(
   const skillRepo = new SkillRepository(db);
   const skillFileRepo = new SkillFileRepository(db);
   const versionRepo = new SkillVersionRepository(db);
+  const evalRepo = new SkillEvalRepository(db);
   const cache = new CompositeCacheProvider({ memory: config.cache.memory, file: config.cache.file });
   const basePath = config.storage.type === "local-fs" ? config.storage.basePath : "./data/skills";
   const storage = new LocalFileSystemProvider(basePath);
@@ -36,7 +38,7 @@ export async function importAction(
   const cacheEpochs = new CacheEpochManager();
   setupCacheSubscribers(eventBus, cache, cacheEpochs);
 
-  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo);
+  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo, undefined, evalRepo);
 
   try {
     const r = await importer.import(source, options);

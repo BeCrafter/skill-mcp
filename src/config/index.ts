@@ -33,7 +33,11 @@ function loadConfig(): AppConfig {
         }
       : undefined,
     database: {
-      path: process.env.DATABASE_PATH ?? defaultDbPath,
+      // P0-8 — DATABASE_URL takes precedence over DATABASE_PATH. URL format
+      // (`sqlite://...` / `postgres://...`) lets the dialect factory pick the
+      // right driver. DATABASE_PATH remains supported as a bare-path shortcut
+      // for the SQLite default install.
+      path: process.env.DATABASE_URL ?? process.env.DATABASE_PATH ?? defaultDbPath,
     },
     storage: {
       type: (process.env.STORAGE_TYPE as "local-fs") ?? "local-fs",
@@ -63,6 +67,28 @@ function loadConfig(): AppConfig {
       stdioToken: process.env.SKILL_MCP_AUTH_TOKEN,
       adminAuthOptional: process.env.SKILL_MCP_ADMIN_AUTH_OPTIONAL === "true",
       metricsAuthOptional: process.env.SKILL_MCP_METRICS_AUTH_OPTIONAL === "true",
+      oidc: process.env.OIDC_ISSUER && process.env.OIDC_AUDIENCE && process.env.OIDC_JWKS_URI
+        ? {
+            issuer: process.env.OIDC_ISSUER,
+            audience: process.env.OIDC_AUDIENCE.includes(",")
+              ? process.env.OIDC_AUDIENCE.split(",").map((s) => s.trim()).filter(Boolean)
+              : process.env.OIDC_AUDIENCE,
+            jwksUri: process.env.OIDC_JWKS_URI,
+            userClaim: process.env.OIDC_USER_CLAIM ?? "sub",
+            groupsClaim: process.env.OIDC_GROUPS_CLAIM ?? "groups",
+            clockSkewSec: parseInt(process.env.OIDC_CLOCK_SKEW_SEC ?? "60", 10),
+            jwksTtlMs: parseInt(process.env.OIDC_JWKS_TTL_MS ?? "600000", 10),
+            allowedAlgorithms: (process.env.OIDC_ALLOWED_ALGORITHMS ?? "RS256")
+              .split(",").map((s) => s.trim()).filter(Boolean),
+          }
+        : undefined,
+    },
+    rateLimit: {
+      enabled: process.env.RATE_LIMIT_ENABLED !== "false",
+      adminCapacity: parseInt(process.env.RATE_LIMIT_ADMIN_CAPACITY ?? "60", 10),
+      adminRefillPerSec: parseFloat(process.env.RATE_LIMIT_ADMIN_REFILL_PER_SEC ?? "10"),
+      gatewayCapacity: parseInt(process.env.RATE_LIMIT_GATEWAY_CAPACITY ?? "120", 10),
+      gatewayRefillPerSec: parseFloat(process.env.RATE_LIMIT_GATEWAY_REFILL_PER_SEC ?? "20"),
     },
   };
 

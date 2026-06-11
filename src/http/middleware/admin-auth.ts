@@ -2,13 +2,18 @@ import { randomUUID } from "node:crypto";
 import type { HttpContext } from "../context.js";
 import type { UserRepository } from "../../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
-import type { RequestContext } from "../../types/index.js";
-import { extractBearerToken, buildRequestContextFromHttp } from "../../permission/context-builder.js";
+import { DEFAULT_TENANT_ID, type RequestContext } from "../../types/index.js";
+import {
+  extractBearerToken,
+  buildRequestContextFromHttp,
+  type OidcContextOptions,
+} from "../../permission/context-builder.js";
 import { json } from "../helpers.js";
 
 export interface AdminAuthDeps {
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
+  oidc?: OidcContextOptions;
   /**
    * Backwards-compat: when true, admin auth is bypassed entirely. Intended only
    * for legacy deployments transitioning off network-isolation-only protection.
@@ -49,6 +54,7 @@ export async function enforceAdminAuth(
     // this env var as soon as the first real admin user is provisioned via
     // `skill-mcp user create --role admin`. Tracked for removal in T-004.
     return {
+      tenantId: DEFAULT_TENANT_ID,
       userId: "anonymous-admin",
       sessionId: (ctx.req.headers["x-session-id"] as string) || randomUUID(),
       tags: new Set([ADMIN_WRITE_TAG]),
@@ -77,6 +83,7 @@ export async function enforceAdminAuth(
     sessionId,
     deps.userRepo,
     deps.userRoleRepo,
+    deps.oidc,
   );
 
   if (!requestContext.isAuthenticated) {

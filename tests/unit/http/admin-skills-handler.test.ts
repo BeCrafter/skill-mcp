@@ -4,6 +4,7 @@ import { errorMap } from "@/http/middleware/error-map.js";
 import { registerAdminSkillRoutes } from "@/http/handlers/admin/skills.handler.js";
 import type { HttpContext } from "@/http/context.js";
 import type { AppDependencies } from "@/app-dependencies.js";
+import { SkillNotFoundError } from "@/utils/errors.js";
 
 function makeRes() {
   let body = "";
@@ -45,32 +46,40 @@ function bodyOf(ctx: HttpContext) {
 }
 function safeJson(s: string) { try { return JSON.parse(s); } catch { return s; } }
 
+const PUBLIC_DEMO = {
+  id: "s1", slug: "demo", name: "demo", displayName: null, description: "",
+  version: "1", category: null, tags: [] as string[], attributes: {},
+  status: "published" as const, visibility: "private" as const, entryFile: "SKILL.md",
+  createdAt: 1, updatedAt: 1,
+};
+
 function setup() {
-  const skillRepo = {
-    findAll: vi.fn().mockResolvedValue([
-      { id: "s1", slug: "a", name: "A", visibility: "private", tags: [], status: "published", storagePath: "a/", createdAt: 1, updatedAt: 1, version: "1", attributes: {}, entryFile: "SKILL.md", displayName: null, category: null, description: "" },
-      { id: "s2", slug: "b", name: "B", visibility: "private", tags: [], status: "published", storagePath: "b/", createdAt: 1, updatedAt: 1, version: "1", attributes: {}, entryFile: "SKILL.md", displayName: null, category: null, description: "" },
-      { id: "s3", slug: "c", name: "C", visibility: "private", tags: [], status: "published", storagePath: "c/", createdAt: 1, updatedAt: 1, version: "1", attributes: {}, entryFile: "SKILL.md", displayName: null, category: null, description: "" },
-    ]),
-    findBySlug: vi.fn(async (slug: string) => (
-      slug === "demo"
-        ? { id: "s1", slug: "demo", visibility: "private", tags: ["x"], storagePath: "demo/", contentHash: "h", name: "demo", displayName: null, description: "", version: "1", category: null, attributes: {}, status: "published", entryFile: "SKILL.md", createdAt: 1, updatedAt: 1 }
-        : null
-    )),
-    findByName: vi.fn().mockResolvedValue([{ id: "s1", slug: "demo", name: "demo", visibility: "private", tags: [], status: "published", storagePath: "demo/", createdAt: 1, updatedAt: 1, version: "1", attributes: {}, entryFile: "SKILL.md", displayName: null, category: null, description: "" }]),
-    update: vi.fn(async (id: string, fields: Record<string, unknown>) => ({ id, slug: "demo", visibility: "private", tags: ["x"], storagePath: "demo/", contentHash: "h", name: "demo", displayName: null, description: "", version: "1", category: null, attributes: {}, status: "published", entryFile: "SKILL.md", createdAt: 1, updatedAt: 1, ...fields })),
-    delete: vi.fn().mockResolvedValue(true),
-    count: vi.fn().mockResolvedValue(42),
-  };
-  const skillProvider = {
-    getSkillEntry: vi.fn().mockResolvedValue("# entry"),
-    getSkillFiles: vi.fn().mockResolvedValue([{ filePath: "a.md", content: "x" }]),
-    getSkillFileTree: vi.fn().mockResolvedValue([{ filePath: "a.md" }]),
-  };
-  const storage = { deleteDir: vi.fn().mockResolvedValue(undefined) };
-  const importer = { import: vi.fn().mockResolvedValue({ skill: { slug: "imported" } }) };
-  const accessLogRepo = { findBySkill: vi.fn().mockResolvedValue([{ id: "log1" }]) };
   const skillService = {
+    adminListSkills: vi.fn().mockResolvedValue([
+      { ...PUBLIC_DEMO, id: "s1", slug: "a", name: "A" },
+      { ...PUBLIC_DEMO, id: "s2", slug: "b", name: "B" },
+      { ...PUBLIC_DEMO, id: "s3", slug: "c", name: "C" },
+    ]),
+    adminFindSkillsByName: vi.fn().mockResolvedValue([PUBLIC_DEMO]),
+    adminGetSkillBySlug: vi.fn(async (slug: string) => {
+      if (slug === "demo") return PUBLIC_DEMO;
+      throw new SkillNotFoundError(slug);
+    }),
+    adminUpdateSkill: vi.fn(async (_slug: string, body: Record<string, unknown>) => ({ ...PUBLIC_DEMO, ...body })),
+    adminDeleteSkill: vi.fn().mockResolvedValue(undefined),
+    adminGetEntry: vi.fn().mockResolvedValue("# entry"),
+    adminGetFiles: vi.fn().mockResolvedValue([{ filePath: "a.md", content: "x" }]),
+    adminGetFileTree: vi.fn().mockResolvedValue([{ filePath: "a.md" }]),
+    adminCountSkills: vi.fn().mockResolvedValue(42),
+    adminFindAccessLogs: vi.fn().mockResolvedValue([{ id: "log1" }]),
+    adminImportSkill: vi.fn().mockResolvedValue({ slug: "imported" }),
+    adminRollbackToVersion: vi.fn().mockResolvedValue(undefined),
+    adminTransitionLifecycle: vi.fn(async (slug: string, target: string) => ({
+      id: "s1", slug, name: slug, displayName: null, description: "",
+      version: "1", category: null, tags: ["x"], attributes: {},
+      status: target, visibility: "private", entryFile: "SKILL.md",
+      storagePath: `${slug}/`, contentHash: "h", createdAt: 1, updatedAt: 1,
+    })),
     getEffectivenessRates: vi.fn().mockResolvedValue(new Map([
       ["good", { rate: 0.9, count: 50 }],
       ["middling", { rate: 0.6, count: 20 }],
@@ -78,28 +87,24 @@ function setup() {
       ["new", { rate: 0.1, count: 3 }],
     ])),
     getVersions: vi.fn().mockResolvedValue([{ version: "1.0.0" }]),
-    rollbackToVersion: vi.fn().mockResolvedValue(undefined),
+    getNextLifecycleStates: vi.fn(async () => ({ current: "draft", next: ["published", "archived"] })),
   };
-  const eventBus = { publish: vi.fn() };
   const router = new Router();
   router.use(errorMap());
-  registerAdminSkillRoutes(router, {
-    skillRepo, skillProvider, storage, importer, accessLogRepo, eventBus, skillService,
-  } as unknown as AppDependencies);
-  return { router, skillRepo, skillProvider, storage, importer, accessLogRepo, eventBus, skillService };
+  registerAdminSkillRoutes(router, { skillService } as unknown as AppDependencies);
+  return { router, skillService };
 }
 
-describe("registerAdminSkillRoutes — coverage extension", () => {
-  it("GET /api/admin/skills paginates and projects to public meta", async () => {
-    const { router, skillRepo } = setup();
+describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
+  it("GET /api/admin/skills paginates and forwards filter options to service", async () => {
+    const { router, skillService } = setup();
     const ctx = makeCtx("GET", "/api/admin/skills", new URLSearchParams({ offset: "1", limit: "1", "attributes.lang": "zh" }));
     await router.dispatch(ctx);
-    expect(skillRepo.findAll).toHaveBeenCalledWith(expect.objectContaining({ attributes: { lang: "zh" } }));
+    expect(skillService.adminListSkills).toHaveBeenCalledWith(expect.objectContaining({ attributes: { lang: "zh" } }));
     const out = bodyOf(ctx);
     expect(out.statusCode).toBe(200);
     const data = (out.body as { data: unknown[]; total: number }).data;
     expect(data).toHaveLength(1);
-    // toSkillMetaPublic should not leak storagePath or contentHash
     expect(data[0]).not.toHaveProperty("storagePath");
     expect(data[0]).not.toHaveProperty("contentHash");
   });
@@ -117,11 +122,11 @@ describe("registerAdminSkillRoutes — coverage extension", () => {
     expect(report.find(r => r.slug === "new")?.recommendation).toMatch(/Insufficient data/);
   });
 
-  it("GET /api/admin/skills/name/:name forwards to findByName", async () => {
-    const { router, skillRepo } = setup();
+  it("GET /api/admin/skills/name/:name forwards to adminFindSkillsByName", async () => {
+    const { router, skillService } = setup();
     const ctx = makeCtx("GET", "/api/admin/skills/name/demo");
     await router.dispatch(ctx);
-    expect(skillRepo.findByName).toHaveBeenCalledWith("demo");
+    expect(skillService.adminFindSkillsByName).toHaveBeenCalledWith("demo");
   });
 
   it("GET /api/admin/skills/:slug 404 unknown slug", async () => {
@@ -138,32 +143,37 @@ describe("registerAdminSkillRoutes — coverage extension", () => {
     expect(bodyOf(ctx).statusCode).toBe(400);
   });
 
-  it("DELETE /api/admin/skills/:slug deletes storage then row, then publishes skill:deleted", async () => {
-    const { router, storage, skillRepo, eventBus } = setup();
+  it("PUT /api/admin/skills/:slug forwards body to adminUpdateSkill", async () => {
+    const { router, skillService } = setup();
+    const ctx = makeCtx("PUT", "/api/admin/skills/demo", new URLSearchParams(), { description: "updated", storagePath: "evil/" });
+    await router.dispatch(ctx);
+    expect(skillService.adminUpdateSkill).toHaveBeenCalledWith("demo", expect.objectContaining({ description: "updated", storagePath: "evil/" }));
+    expect(bodyOf(ctx).statusCode).toBe(200);
+  });
+
+  it("DELETE /api/admin/skills/:slug delegates to adminDeleteSkill", async () => {
+    const { router, skillService } = setup();
     const ctx = makeCtx("DELETE", "/api/admin/skills/demo");
     await router.dispatch(ctx);
-    expect(storage.deleteDir).toHaveBeenCalledWith("demo/");
-    expect(skillRepo.delete).toHaveBeenCalledWith("demo");
-    expect(eventBus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: "skill:deleted", slug: "demo" }));
-    const storageOrder = storage.deleteDir.mock.invocationCallOrder[0];
-    const dbOrder = skillRepo.delete.mock.invocationCallOrder[0];
-    expect(storageOrder).toBeLessThan(dbOrder);
+    expect(skillService.adminDeleteSkill).toHaveBeenCalledWith("demo");
+    expect(bodyOf(ctx).statusCode).toBe(200);
   });
 
   it("GET /api/admin/skills/:slug/entry serves text/markdown", async () => {
-    const { router } = setup();
+    const { router, skillService } = setup();
     const ctx = makeCtx("GET", "/api/admin/skills/demo/entry");
     await router.dispatch(ctx);
     const out = bodyOf(ctx);
     expect(out.statusCode).toBe(200);
     expect(String(out.headers["Content-Type"])).toMatch(/text\/markdown/);
+    expect(skillService.adminGetEntry).toHaveBeenCalledWith("demo");
   });
 
   it("POST /api/admin/skills/:slug/files validates body via requireFilePaths", async () => {
-    const { router, skillProvider } = setup();
+    const { router, skillService } = setup();
     const ctx = makeCtx("POST", "/api/admin/skills/demo/files", new URLSearchParams(), { paths: ["a.md"] });
     await router.dispatch(ctx);
-    expect(skillProvider.getSkillFiles).toHaveBeenCalledWith("demo", ["a.md"]);
+    expect(skillService.adminGetFiles).toHaveBeenCalledWith("demo", ["a.md"]);
   });
 
   it("POST /api/admin/skills/:slug/files rejects empty paths with 400", async () => {
@@ -173,11 +183,11 @@ describe("registerAdminSkillRoutes — coverage extension", () => {
     expect(bodyOf(ctx).statusCode).toBe(400);
   });
 
-  it("GET /api/admin/skills/:slug/file-tree calls provider", async () => {
-    const { router, skillProvider } = setup();
+  it("GET /api/admin/skills/:slug/file-tree calls adminGetFileTree", async () => {
+    const { router, skillService } = setup();
     const ctx = makeCtx("GET", "/api/admin/skills/demo/file-tree");
     await router.dispatch(ctx);
-    expect(skillProvider.getSkillFileTree).toHaveBeenCalledWith("demo");
+    expect(skillService.adminGetFileTree).toHaveBeenCalledWith("demo");
   });
 
   it("POST /api/admin/skills rejects multipart with 400", async () => {
@@ -196,13 +206,13 @@ describe("registerAdminSkillRoutes — coverage extension", () => {
     expect(bodyOf(ctx).statusCode).toBe(400);
   });
 
-  it("POST /api/admin/skills calls importer with normalized options + defaults", async () => {
-    const { router, importer } = setup();
+  it("POST /api/admin/skills calls adminImportSkill with normalized options + defaults", async () => {
+    const { router, skillService } = setup();
     const ctx = makeCtx("POST", "/api/admin/skills", new URLSearchParams(), {
       source: "/local/path", tags: ["t"], category: "ai",
     });
     await router.dispatch(ctx);
-    expect(importer.import).toHaveBeenCalledWith("/local/path", expect.objectContaining({
+    expect(skillService.adminImportSkill).toHaveBeenCalledWith("/local/path", expect.objectContaining({
       tags: ["t"], category: "ai", versionBump: "patch", overwrite: false, allowDuplicate: false,
     }));
     expect(bodyOf(ctx).statusCode).toBe(201);
@@ -216,13 +226,13 @@ describe("registerAdminSkillRoutes — coverage extension", () => {
   });
 
   it("GET /api/admin/logs caps limit at 200", async () => {
-    const { router, accessLogRepo } = setup();
+    const { router, skillService } = setup();
     const ctx = makeCtx("GET", "/api/admin/logs", new URLSearchParams({ skill_slug: "demo", limit: "9999" }));
     await router.dispatch(ctx);
-    expect(accessLogRepo.findBySkill).toHaveBeenCalledWith("demo", 200);
+    expect(skillService.adminFindAccessLogs).toHaveBeenCalledWith("demo", 200);
   });
 
-  it("GET /api/admin/stats returns total skill count", async () => {
+  it("GET /api/admin/stats returns total skill count from adminCountSkills", async () => {
     const { router } = setup();
     const ctx = makeCtx("GET", "/api/admin/stats");
     await router.dispatch(ctx);
@@ -244,12 +254,88 @@ describe("registerAdminSkillRoutes — coverage extension", () => {
     expect(bodyOf(ctx).statusCode).toBe(400);
   });
 
-  it("POST /api/admin/skills/:slug/rollback publishes skill:updated after rollback", async () => {
-    const { router, skillService, eventBus } = setup();
+  it("POST /api/admin/skills/:slug/rollback delegates to adminRollbackToVersion", async () => {
+    const { router, skillService } = setup();
     const ctx = makeCtx("POST", "/api/admin/skills/demo/rollback", new URLSearchParams(), { version: "1.0.0", bump: "minor" });
     await router.dispatch(ctx);
-    expect(skillService.rollbackToVersion).toHaveBeenCalledWith("demo", "1.0.0", "minor");
-    expect(eventBus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: "skill:updated", slug: "demo" }));
+    expect(skillService.adminRollbackToVersion).toHaveBeenCalledWith("demo", "1.0.0", "minor");
     expect(bodyOf(ctx).statusCode).toBe(200);
+  });
+
+  describe("lifecycle transitions (P0-9)", () => {
+    it("POST /api/admin/skills/:slug/publish calls adminTransitionLifecycle('published')", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams(), {});
+      await router.dispatch(ctx);
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: false });
+      expect(bodyOf(ctx).statusCode).toBe(200);
+    });
+
+    it("POST /api/admin/skills/:slug/publish?force=true forwards skipEvalGate=true (P1-12 stage 3)", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams("force=true"), {});
+      await router.dispatch(ctx);
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: true });
+      expect(bodyOf(ctx).statusCode).toBe(200);
+    });
+
+    it("POST /api/admin/skills/:slug/publish?force=1 does NOT bypass (only literal 'true')", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams("force=1"), {});
+      await router.dispatch(ctx);
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: false });
+    });
+
+    it("POST /api/admin/skills/:slug/deprecate calls adminTransitionLifecycle('deprecated')", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/deprecate", new URLSearchParams(), {});
+      await router.dispatch(ctx);
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "deprecated", { skipEvalGate: false });
+      expect(bodyOf(ctx).statusCode).toBe(200);
+    });
+
+    it("POST /api/admin/skills/:slug/archive calls adminTransitionLifecycle('archived')", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/archive", new URLSearchParams(), {});
+      await router.dispatch(ctx);
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "archived", { skipEvalGate: false });
+      expect(bodyOf(ctx).statusCode).toBe(200);
+    });
+
+    it("POST /api/admin/skills/:slug/republish maps to 'published'", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/republish", new URLSearchParams(), {});
+      await router.dispatch(ctx);
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: false });
+      expect(bodyOf(ctx).statusCode).toBe(200);
+    });
+
+    it("POST /api/admin/skills/:slug/republish?force=true forwards skipEvalGate=true", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/republish", new URLSearchParams("force=true"), {});
+      await router.dispatch(ctx);
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: true });
+    });
+
+    it("POST /api/admin/skills/:slug/publish returns 409 when service throws IllegalTransitionError", async () => {
+      const { router, skillService } = setup();
+      const { IllegalTransitionError } = await import("@/services/skill.service.js");
+      skillService.adminTransitionLifecycle = vi.fn().mockRejectedValue(new IllegalTransitionError("archived", "published"));
+      const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams(), {});
+      await router.dispatch(ctx);
+      const out = bodyOf(ctx);
+      expect(out.statusCode).toBe(409);
+      expect((out.body as { code: string }).code).toBe("ILLEGAL_LIFECYCLE_TRANSITION");
+    });
+
+    it("GET /api/admin/skills/:slug/lifecycle/next returns the next-state set", async () => {
+      const { router, skillService } = setup();
+      const ctx = makeCtx("GET", "/api/admin/skills/demo/lifecycle/next");
+      await router.dispatch(ctx);
+      expect(skillService.getNextLifecycleStates).toHaveBeenCalledWith("demo");
+      const out = bodyOf(ctx);
+      expect(out.statusCode).toBe(200);
+      expect((out.body as { data: { next: string[] } }).data.next).toEqual(["published", "archived"]);
+    });
   });
 });

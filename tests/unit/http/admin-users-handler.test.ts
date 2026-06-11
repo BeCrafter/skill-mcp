@@ -49,9 +49,15 @@ function setup(overrides: Partial<AppDependencies> = {}): {
   const userRepo = {
     findAll: vi.fn().mockResolvedValue([{ id: "u1", name: "alice" }]),
     findById: vi.fn(async (id: string) => (id === "u1" ? { id: "u1", name: "alice", status: "active" } : null)),
-    create: vi.fn(async ({ name }: { name?: string }) => ({ id: "u-new", name: name ?? null })),
+    create: vi.fn(async ({ name, tokenExpiresAt }: { name?: string; tokenExpiresAt?: number | null }) => ({ id: "u-new", name: name ?? null, tokenExpiresAt: tokenExpiresAt ?? null })),
     update: vi.fn(async (id: string, fields: Record<string, unknown>) => (id === "u1" ? { id, ...fields } : null)),
     delete: vi.fn(async (id: string) => id === "u1"),
+    rotateToken: vi.fn(async (id: string, hash: string, opts: { graceMs?: number; tokenExpiresAt?: number | null } = {}) => (
+      id === "u1"
+        ? { id, name: "alice", token: hash, tokenExpiresAt: opts.tokenExpiresAt ?? null, previousToken: "old-hash", previousTokenExpiresAt: Date.now() + (opts.graceMs ?? 7 * 86400_000) }
+        : null
+    )),
+    clearPreviousToken: vi.fn(async () => undefined),
   };
   const roleRepo = {
     findByIds: vi.fn().mockResolvedValue([{ id: "r1", name: "admin", tags: ["alpha"] }]),
@@ -183,5 +189,79 @@ describe("registerAdminUserRoutes", () => {
     await router.dispatch(ctx);
     expect(bodyOf(ctx).statusCode).toBe(404);
     expect(eventBus.publish).not.toHaveBeenCalled();
+  });
+
+  describe("token rotation (P0-4)", () => {
+    it("POST /api/admin/users/:userId/rotate-token returns plaintext token + grace expiry", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/u1/rotate-token", {});
+      await router.dispatch(ctx);
+      const out = bodyOf(ctx);
+      expect(out.statusCode).toBe(200);
+      const body = out.body as { data: { token: string; previous_token_expires_at: number; grace_seconds: number } };
+      expect(body.data.token).toMatch(/^sk-live-[0-9a-f]{24}$/);
+      expect(body.data.previous_token_expires_at).toBeGreaterThan(Date.now());
+      expect(body.data.grace_seconds).toBe(7 * 86400);
+      // Persisted hash, not plaintext, was passed to rotateToken.
+      const persistedHash = userRepo.rotateToken.mock.calls[0][1];
+      expect(persistedHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(persistedHash).not.toBe(body.data.token);
+    });
+
+    it("POST /api/admin/users/:userId/rotate-token honors expires_in for new token TTL", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/u1/rotate-token", { expires_in: 3600 });
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(200);
+      const opts = userRepo.rotateToken.mock.calls[0][2];
+      expect(opts.tokenExpiresAt).toBeGreaterThan(Date.now());
+      expect(opts.tokenExpiresAt).toBeLessThanOrEqual(Date.now() + 3601_000);
+    });
+
+    it("POST /api/admin/users/:userId/rotate-token honors grace_seconds override", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/u1/rotate-token", { grace_seconds: 60 });
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(200);
+      const opts = userRepo.rotateToken.mock.calls[0][2];
+      expect(opts.graceMs).toBe(60_000);
+    });
+
+    it("POST /api/admin/users/:userId/rotate-token returns 404 for unknown user", async () => {
+      const { router } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/missing/rotate-token", {});
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(404);
+    });
+
+    it("POST /api/admin/users/:userId/rotate-token rejects malformed expires_in", async () => {
+      const { router } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/u1/rotate-token", { expires_in: -1 });
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(400);
+    });
+
+    it("POST /api/admin/users honors expires_in (P0-4 expiring tokens at create time)", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users", { name: "ttl-user", expires_in: 7200 });
+      await router.dispatch(ctx);
+      const persisted = userRepo.create.mock.calls[0][0];
+      expect(persisted.tokenExpiresAt).toBeGreaterThan(Date.now());
+    });
+
+    it("DELETE /api/admin/users/:userId/previous-token clears the grace slot (revoke-on-compromise)", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("DELETE", "/api/admin/users/u1/previous-token");
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(200);
+      expect(userRepo.clearPreviousToken).toHaveBeenCalledWith("u1");
+    });
+
+    it("DELETE /api/admin/users/:userId/previous-token returns 404 for unknown user", async () => {
+      const { router } = setup();
+      const ctx = makeCtx("DELETE", "/api/admin/users/missing/previous-token");
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(404);
+    });
   });
 });

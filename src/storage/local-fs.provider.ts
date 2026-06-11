@@ -3,6 +3,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import type { Dirent } from "node:fs";
 import { existsSync } from "node:fs";
 import type { IStorageProvider } from "./provider.interface.js";
+import { withSpan } from "../telemetry/spans.js";
 
 export class LocalFileSystemProvider implements IStorageProvider {
   private resolvedBase: string;
@@ -31,13 +32,17 @@ export class LocalFileSystemProvider implements IStorageProvider {
   }
 
   async get(path: string): Promise<Buffer | null> {
-    const fullPath = this.safeResolve(path);
-    try {
-      return await readFile(fullPath);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
+    // P0-6 — `storage.read` span (§17.6). The path is the only stable label
+    // here; we keep it on the span (not metrics) since it's high-cardinality.
+    return withSpan("storage.read", { attributes: { "storage.backend": "local-fs", "storage.path": path } }, async () => {
+      const fullPath = this.safeResolve(path);
+      try {
+        return await readFile(fullPath);
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      }
+    });
   }
 
   async exists(path: string): Promise<boolean> {

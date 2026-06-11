@@ -14,6 +14,49 @@ export type VersionBump = "major" | "minor" | "patch";
 /** File encoding */
 export type FileEncoding = "utf-8" | "base64";
 
+/**
+ * P1-11 — retrieval-signal envelope persisted on the skill row. Extended in
+ * stage 3 with embedding metadata (vector hash, provider/model version);
+ * keeping it under a single JSON column means stage 3 can add fields without
+ * a follow-up migration.
+ */
+export interface SkillRetrievalMeta {
+  triggers?: string[];
+  whenToUse?: string;
+  embeddingText?: string;
+}
+
+/**
+ * P1-12 stage 1 — Skill eval case authored in SKILL.md frontmatter. Stage 1
+ * only persists the contract (manifest validation + lint nudge); stage 2
+ * adds DB persistence + runner; stage 3 wires version-transition gating.
+ *
+ * At least one of `expectedTools` / `expectedOutputContains` /
+ * `expectedOutputNotContains` MUST be present — a case with zero
+ * expectations cannot fail the regression and is therefore ignored.
+ */
+export interface SkillEvalCase {
+  /** Stable identifier for the case, unique within a skill. 1..128 chars. */
+  name: string;
+  /** Natural-language input the agent receives when running the case. 1..4096 chars. */
+  input: string;
+  /**
+   * Tool names the agent is expected to call (in any order). EVERY entry
+   * must appear in the run's tool list. Empty / omitted skips this assertion.
+   */
+  expectedTools?: string[];
+  /**
+   * Output substrings the run must contain — EVERY entry must appear.
+   * Empty / omitted skips this assertion.
+   */
+  expectedOutputContains?: string[];
+  /**
+   * Output substrings the run must NOT contain — NO entry may appear.
+   * Empty / omitted skips this assertion.
+   */
+  expectedOutputNotContains?: string[];
+}
+
 /** Skill metadata (DB entity) */
 export interface SkillMeta {
   id: string;
@@ -25,6 +68,12 @@ export interface SkillMeta {
   category: string | null;
   tags: string[];
   attributes: Record<string, unknown>;
+  /**
+   * P1-11 stage 2a — retrieval signals (triggers / whenToUse / embeddingText).
+   * `null` for legacy rows imported before stage 2a; `{}` after a JSON parse
+   * failure (mirrors the `attributes` corruption-tolerance contract).
+   */
+  retrievalMeta: SkillRetrievalMeta | null;
   status: SkillStatus;
   visibility: SkillVisibility;
   entryFile: string;
@@ -84,6 +133,38 @@ export interface SkillFrontmatter {
   files?: string[];
   tags?: string[];
   category?: string;
+  /**
+   * P1-21 — Manifest schema version (`major.minor`). Missing means legacy
+   * "0.x" content; the validator coerces it to {@link CURRENT_MANIFEST_SCHEMA}
+   * with a deprecation warning. Values are validated against
+   * {@link MAX_SUPPORTED_MANIFEST_MAJOR} so future major bumps surface a
+   * clear "server too old" error instead of silently accepting unknown shapes.
+   */
+  manifestSchema?: string;
+  /**
+   * P1-11 — retrieval signal: short trigger phrases that should match this
+   * skill in `skill_search`. Each entry is treated as a keyword for BM25 and
+   * concatenated into the embedding input when {@link embeddingText} is absent.
+   */
+  triggers?: string[];
+  /**
+   * P1-11 — natural-language "when to use" hint surfaced to the agent at
+   * ranking time. Distinct from {@link description} (which is end-user copy)
+   * — intended to be model-readable.
+   */
+  whenToUse?: string;
+  /**
+   * P1-11 — explicit embedding source text. When absent the retrieval layer
+   * falls back to `${name} ${description ?? ""} ${whenToUse ?? ""} ${triggers.join(" ")}`.
+   * Use this when the natural metadata is too short or noisy.
+   */
+  embeddingText?: string;
+  /**
+   * P1-12 stage 1 — eval cases authored alongside the skill. Stage 1 only
+   * validates + persists the contract; stages 2/3 add the runner and
+   * version-transition regression gate.
+   */
+  evalCases?: SkillEvalCase[];
 }
 
 /** Import options */
@@ -134,8 +215,17 @@ export type DeploymentMode = "standalone" | "gateway" | "cloud";
 /** Storage type */
 export type StorageType = "local-fs" | "aliyun-oss";
 
+/** Default tenant id used by single-tenant deployments and as the
+ *  backfill for legacy data without an explicit tenant. The value also
+ *  matches `DEFAULT 'default'` on every `tenant_id` column. */
+export const DEFAULT_TENANT_ID = "default";
+
 /** Request context for permission and session tracking */
 export interface RequestContext {
+  /** P0-3 — tenant boundary. Defaults to {@link DEFAULT_TENANT_ID} for
+   *  single-tenant / anonymous callers; the user table will eventually
+   *  carry a `tenant_id` column that the context builder reads. */
+  tenantId: string;
   userId: string;
   sessionId: string;
   tags: Set<string>;

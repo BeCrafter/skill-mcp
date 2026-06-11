@@ -200,6 +200,64 @@ export const metrics = {
     registers: [registry],
   }),
 
+  // P0-3 — Token-bucket rate limiter denials. Scope distinguishes admin vs
+  // gateway pressure so dashboards can flag a noisy admin user separately
+  // from a gateway-wide spike.
+  rateLimitDenied: new Counter({
+    name: "skill_mcp_rate_limit_denied_total",
+    help: "Total HTTP requests rejected by the token-bucket rate limiter",
+    labelNames: ["scope"], // scope=admin|gateway
+    registers: [registry],
+  }),
+
+  // P1-13.5 — Quota check denials. Distinct from `rateLimitDenied` (a sliding-
+  // window burst protection); a `quota_check_denied_total` increment means
+  // the tenant hit a per-tier limit (daily counter or storage cap).
+  quotaCheckDenied: new Counter({
+    name: "skill_mcp_quota_check_denied_total",
+    help: "Total HTTP requests rejected by the per-tenant quota check",
+    labelNames: ["scope", "dimension"], // scope=admin|gateway, dimension=api_calls|...
+    registers: [registry],
+  }),
+
+  // P1-16 — Webhook outbound metrics (review §5.5.1).
+  // `webhookDeliveryFinal` captures terminal outcomes for dashboards (success
+  // vs dead_letter ratio); `webhookDeliveryRetry` increments when a row is
+  // pushed back into pending for another attempt; `webhookDispatchDuration`
+  // is the per-attempt POST latency histogram (seconds).
+  webhookDeliveryFinal: new Counter({
+    name: "skill_mcp_webhook_delivery_final_total",
+    help: "Total webhook deliveries that reached a terminal status",
+    labelNames: ["outcome"], // outcome=success|dead_letter
+    registers: [registry],
+  }),
+
+  webhookDeliveryRetry: new Counter({
+    name: "skill_mcp_webhook_delivery_retry_total",
+    help: "Total webhook deliveries rescheduled for retry",
+    labelNames: ["event"],
+    registers: [registry],
+  }),
+
+  webhookDispatchDuration: new Histogram({
+    name: "skill_mcp_webhook_dispatch_duration_seconds",
+    help: "Wall-clock time from POST start to HTTP response (or timeout)",
+    labelNames: ["event"],
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+    registers: [registry],
+  }),
+
+  // P1-13 — Usage metering events recorded. `status=ok` on insert success,
+  // `status=error` on DB failure (the request still proceeds — usage write
+  // is fire-and-forget). `event_type` is included so dashboards can split
+  // skill.view vs pipeline.run vs api.call vs storage.write volume.
+  usageEventsRecorded: new Counter({
+    name: "skill_mcp_usage_events_total",
+    help: "Total usage metering events recorded (or attempted)",
+    labelNames: ["event_type", "status"], // status=ok|error
+    registers: [registry],
+  }),
+
   // T-605 — cloud-service responses that fail RemoteSkillProvider's zod
   // schema validation. A non-zero count means the gateway and cloud schemas
   // are drifting; UpstreamError is thrown immediately so callers get a clean

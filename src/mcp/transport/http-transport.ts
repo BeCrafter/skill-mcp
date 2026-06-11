@@ -9,6 +9,7 @@ import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder } from "../../permission/context-builder.js";
 import { attachMcpAuthFromHeaders } from "../../permission/context-builder.js";
 import type { PipelineRunStore } from "../../pipeline/run-store.js";
+import type { UsageMeterService } from "../../services/usage-meter.service.js";
 
 export interface HttpMcpHandlerDeps {
   skillService: SkillService;
@@ -16,6 +17,7 @@ export interface HttpMcpHandlerDeps {
   serverName: string;
   serverVersion: string;
   pipelineRunStore?: PipelineRunStore;
+  usageMeter?: UsageMeterService;
 }
 
 const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -93,7 +95,7 @@ export async function createHttpMcpHandler(
     try {
       if (!httpSessions.has(sessionId)) {
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId, enableJsonResponse: true });
-        const server = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder, deps.pipelineRunStore);
+        const server = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder, deps.pipelineRunStore, deps.usageMeter);
         await server.connect(transport);
         httpSessions.set(sessionId, { transport, server, lastActivity: Date.now() });
         metrics.mcpActiveSessions.inc({ transport: "http" });

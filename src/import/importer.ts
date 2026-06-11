@@ -5,7 +5,8 @@ import type { ICacheProvider } from "../cache/provider.interface.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { SkillFileRepository } from "../db/repositories/skill-file.repository.js";
 import type { SkillVersionRepository } from "../db/repositories/skill-version.repository.js";
-import type { ImportOptions, ImportResult, SkillFileInput, SkillFrontmatter, SkillMeta } from "../types/index.js";
+import type { SkillEvalRepository } from "../db/repositories/skill-eval.repository.js";
+import type { ImportOptions, ImportResult, SkillFileInput, SkillFrontmatter, SkillMeta, SkillRetrievalMeta } from "../types/index.js";
 
 /**
  * better-sqlite3 throws errors with shape `{ code: "SQLITE_CONSTRAINT_UNIQUE", ... }`
@@ -30,10 +31,12 @@ function isUniqueConstraintError(err: unknown): boolean {
   return typeof e.message === "string" && /UNIQUE constraint failed/i.test(e.message);
 }
 import type { DomainEventBus } from "../events/event-bus.js";
+import type { UsageMeterService } from "../services/usage-meter.service.js";
+import { DEFAULT_TENANT_ID } from "../types/index.js";
 import { LocalSourceResolver } from "./local-source.js";
 import { GitSourceResolver } from "./git-source.js";
 import { validateSkillPackage } from "./validator.js";
-import { computeContentHash, slugify, extractFrontmatter, extractDescription, validateSkillMetaFields } from "../utils/manifest.js";
+import { computeContentHash, slugify, extractFrontmatter, extractDescription, validateSkillMetaFields, parseEvalCases } from "../utils/manifest.js";
 import { bumpVersion } from "../db/repositories/skill.repository.js";
 import { isTextFile, getMimeType } from "../utils/security.js";
 import { pMap } from "../utils/concurrency.js";
@@ -41,6 +44,24 @@ import { metrics } from "../telemetry/metrics.js";
 
 const STORAGE_CONCURRENCY = 8;
 const STAGING_ROOT = "__staging__";
+
+/**
+ * P1-11 stage 2a — Project the validated frontmatter retrieval signals into
+ * the persisted JSON envelope. Returns `null` when none of the three optional
+ * fields is populated; the repo treats null and the empty-shape `{}` the
+ * same way (column stays NULL).
+ */
+function buildRetrievalMeta(meta: SkillFrontmatter): SkillRetrievalMeta | null {
+  const triggers = Array.isArray(meta.triggers) ? meta.triggers.filter(t => typeof t === "string" && t.length > 0) : [];
+  const whenToUse = typeof meta.whenToUse === "string" ? meta.whenToUse.trim() : "";
+  const embeddingText = typeof meta.embeddingText === "string" ? meta.embeddingText.trim() : "";
+  if (triggers.length === 0 && !whenToUse && !embeddingText) return null;
+  const out: SkillRetrievalMeta = {};
+  if (triggers.length > 0) out.triggers = triggers;
+  if (whenToUse) out.whenToUse = whenToUse;
+  if (embeddingText) out.embeddingText = embeddingText;
+  return out;
+}
 import {
   DuplicateSkillNameError,
   SecurityError,
@@ -62,6 +83,14 @@ export class SkillImporter {
     private logger: Logger,
     private eventBus?: DomainEventBus,
     private versionRepo?: SkillVersionRepository,
+    private usageMeter?: UsageMeterService,
+    /**
+     * P1-12 stage 2 — optional. When wired, the importer persists the
+     * stage-1-validated `eval_cases:` frontmatter into `skill_eval_cases`
+     * after the skill row + file rows commit. Left unset in tests / contexts
+     * that don't need eval support so we don't have to update every call site.
+     */
+    private evalRepo?: SkillEvalRepository,
   ) {}
 
   async import(source: string, options: ImportOptions): Promise<ImportResult> {
@@ -113,9 +142,20 @@ export class SkillImporter {
       }
       throw new InvalidManifestError(validation.errors.join("; "));
     }
+    // P1-21 — surface manifest_schema deprecation nudges so operators see
+    // them in import logs even when validation otherwise passes.
+    for (const w of validation.warnings) {
+      this.logger.warn({ skill: meta.name, schema: validation.resolvedSchema }, w);
+    }
 
     // 4. Compute content hash
     const contentHash = computeContentHash(skillFiles);
+
+    // P1-11 stage 2a — derive the retrieval-signal envelope from the
+    // (already-validated) frontmatter. Only pass it on if at least one of
+    // the three optional fields is populated; the repo treats empty as null
+    // so legacy rows without these fields stay clean.
+    const retrievalMeta = buildRetrievalMeta(meta);
 
     // 5. Extract description and tags from options or SKILL.md frontmatter
     let description = options.description;
@@ -258,6 +298,7 @@ export class SkillImporter {
           contentHash,
           storagePath,
           status: "published",
+          retrievalMeta,
         });
         skillId = targetSkill.id;
       } else {
@@ -281,6 +322,7 @@ export class SkillImporter {
               storagePath,
               status: "published",
               entryFile: meta.entry ?? "SKILL.md",
+              retrievalMeta,
             });
             skillId = created.id;
             createdSkillId = created.id;
@@ -329,6 +371,16 @@ export class SkillImporter {
           fileSize: file.buffer.length,
           mimeType: getMimeType(file.path),
         })));
+
+        // 6. P1-12 stage 2 — replace persisted eval cases with the validated
+        //    frontmatter view. `replaceAll` semantics: a re-imported skill
+        //    that dropped a case gets that row pruned. Stage 1's caps and
+        //    name-uniqueness checks already ran via validateSkillMetaFields
+        //    above; the repo writes the rows verbatim. If `evalCases` is
+        //    undefined the repo no-ops cleanly (delete-then-empty-loop).
+        if (this.evalRepo) {
+          this.evalRepo.replaceAllForSkill(skillId, meta.evalCases ?? []);
+        }
       }
     } catch (error) {
       // Compensating cleanup. Order matters: roll DB before storage so the
@@ -353,6 +405,7 @@ export class SkillImporter {
             contentHash: preUpdateSnapshot.contentHash,
             storagePath: preUpdateSnapshot.storagePath,
             status: preUpdateSnapshot.status,
+            retrievalMeta: preUpdateSnapshot.retrievalMeta,
           });
         } catch (restoreErr) {
           this.logger.error(
@@ -412,7 +465,26 @@ export class SkillImporter {
       slug,
       visibility: finalSkill?.visibility,
       tags: finalSkill?.tags ?? tags,
+      name: meta.name,
+      version,
+      action,
     });
+
+    // P1-13 — record `storage.write` with `quantity = bytes written`. Counts
+    // raw payload size of the imported files (post-validation, pre-staging),
+    // matching review §9.1 example. The importer is currently tenant-agnostic
+    // (rows default to `default`); when multi-tenant import lands the value
+    // should flow in via ImportOptions.
+    if (this.usageMeter) {
+      const bytes = skillFiles.reduce((acc, f) => acc + f.buffer.byteLength, 0);
+      void this.usageMeter.record({
+        tenantId: DEFAULT_TENANT_ID,
+        eventType: "storage.write",
+        resourceId: slug,
+        quantity: bytes,
+        metadata: { action, fileCount: skillFiles.length },
+      });
+    }
 
     this.logger.info({ slug, name: meta.name, version, action, fileCount: skillFiles.length }, "Skill imported");
 
@@ -458,6 +530,11 @@ export class SkillImporter {
       files: frontmatter["files"] as string[] | undefined,
       tags: frontmatter["tags"] as string[] | undefined,
       category: (frontmatter["category"] as string) ?? undefined,
+      manifestSchema: (frontmatter["manifest_schema"] as string) ?? undefined,
+      triggers: frontmatter["triggers"] as string[] | undefined,
+      whenToUse: (frontmatter["when_to_use"] as string) ?? undefined,
+      embeddingText: (frontmatter["embedding_text"] as string) ?? undefined,
+      evalCases: parseEvalCases(frontmatter["eval_cases"] ?? frontmatter["evalCases"]),
     };
   }
 

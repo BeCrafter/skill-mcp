@@ -370,9 +370,54 @@ We follow [Semantic Versioning](https://semver.org/):
 - **Discussions**: Use GitHub Discussions for general questions
 - **Pull Requests**: Comment on PRs for specific code feedback
 
+## ✍️ Developer Certificate of Origin (DCO)
+
+We use the [Developer Certificate of Origin (DCO)](https://developercertificate.org/) — a lightweight alternative to a CLA. Every commit must be signed off, certifying that you have the right to submit it under the project's open source license.
+
+### How to sign off
+
+Add `-s` (or `--signoff`) to every `git commit`:
+
+```bash
+git commit -s -m "feat: add foo"
+```
+
+This appends a line to your commit message:
+
+```
+Signed-off-by: Random J Developer <random@developer.example.org>
+```
+
+The name and email **must match** your git `user.name` / `user.email` config.
+
+### Why DCO
+
+- **No paperwork**: unlike a CLA, there is nothing for you to sign offline.
+- **Per-commit attestation**: each commit individually certifies the DCO terms (full text at https://developercertificate.org/).
+- **Standard practice**: used by Linux kernel, Docker, GitLab, Kubernetes, and many CNCF projects.
+
+### What if I forget?
+
+If you forget on a commit during a feature branch, amend it before pushing:
+
+```bash
+git commit --amend -s --no-edit
+```
+
+For an entire range of commits already pushed, rebase and add sign-offs:
+
+```bash
+git rebase HEAD~N --signoff   # N = number of commits to fix
+git push --force-with-lease
+```
+
+CI will reject PRs whose commits are not all signed off.
+
 ## 📜 License
 
-By contributing, you agree that your contributions will be licensed under the same license as the project.
+By contributing, you agree that your contributions will be licensed under the project's current license (currently MIT; see [`docs/ADVANCED/LICENSING.md`](./docs/ADVANCED/LICENSING.md) for the planned BUSL-1.1 transition policy).
+
+The DCO sign-off above is your attestation that you have the right to submit your contribution under that license.
 
 ---
 

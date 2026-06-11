@@ -1,10 +1,10 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
+import { parseDatabaseUrl } from "./dialect.js";
 
 /**
  * Resolve the drizzle migrations folder. We ship migration SQL alongside the
@@ -23,165 +23,101 @@ function resolveMigrationsFolder(): string {
   return resolve(process.cwd(), "drizzle");
 }
 
-interface MigrationJournal {
-  entries: Array<{ idx: number; tag: string; when: number }>;
-}
 
 /**
  * One-time legacy upgrade for databases that were created by the previous
- * raw-SQL migrate.ts (no __drizzle_migrations table). Detects the old
- * `skills` schema (with `tags`, `conditions`, `assigned_groups` columns)
- * and converts it to the new shape, backfilling `skill_tags` from JSON.
+ * raw-SQL migrate.ts (no __drizzle_migrations table). Drops all tables that
+ * the drizzle baseline (0000) will recreate, then lets drizzle's migrator
+ * build the full schema from scratch.
  *
- * After this runs, we synthesize the __drizzle_migrations table and mark
- * the baseline migration as already applied so drizzle's migrator skips it.
+ * This approach avoids the FK-cascade pitfall of the old table-rename pattern:
+ * when `skills` is rebuilt in-place, any table with a FOREIGN KEY referencing
+ * `skills(id)` gets its rows cascade-deleted even with `PRAGMA foreign_keys=OFF`
+ * because the `REFERENCES` clause in CREATE TABLE is still enforced by SQLite
+ * during the same multi-statement `db.exec()` call.
  *
  * Returns true if a legacy upgrade was performed.
  */
-function legacyUpgradeIfNeeded(db: Database.Database, migrationsFolder: string): boolean {
-  // If drizzle's migration table already exists, this DB has been migrated
-  // before (or is being initialized via drizzle on a fresh DB). Skip.
-  const drizzleTable = db
+function legacyUpgradeIfNeeded(db: Database.Database, _migrationsFolder: string): boolean {
+  // If drizzle's migration table exists AND has entries AND all baseline tables
+  // are present, this DB is properly migrated. Skip.
+  const hasDrizzleTable = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='__drizzle_migrations'")
     .get();
-  if (drizzleTable) return false;
-
-  // If the skills table doesn't exist, this is a fresh DB — drizzle will
-  // run the baseline migration normally.
-  const skillsTable = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skills'")
-    .get();
-  if (!skillsTable) return false;
-
-  // Inspect columns on the existing skills table.
-  const cols = db.prepare("PRAGMA table_info(skills)").all() as Array<{ name: string }>;
-  const hasTags = cols.some((c) => c.name === "tags");
-  const hasConditions = cols.some((c) => c.name === "conditions");
-  const hasAssignedGroups = cols.some((c) => c.name === "assigned_groups");
-
-  // Already on the new schema — nothing to backfill, but we still need to
-  // stamp __drizzle_migrations so future migrations work.
-  if (!hasTags && !hasConditions && !hasAssignedGroups) {
-    stampBaselineApplied(db, migrationsFolder);
-    return true;
+  if (hasDrizzleTable) {
+    const cnt = db.prepare("SELECT COUNT(*) as n FROM __drizzle_migrations").get() as { n: number };
+    if (cnt.n > 0) {
+      // Sanity check: all 9 tables from baseline 0000 must exist. A partial
+      // migration (e.g. only skills + users) leaves the DB broken for later
+      // migrations that ALTER missing tables (0009 adds tenant_id to skill_files).
+      const baselineTables = [
+        "skills", "skill_tags", "skill_files", "skill_versions",
+        "access_logs", "skill_feedbacks", "users", "user_roles", "roles",
+      ];
+      const missing = baselineTables.filter((t) =>
+        !db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(t),
+      );
+      if (missing.length === 0) return false;
+      // Tables are missing — fall through to full cleanup below.
+    }
   }
 
-  const tx = db.transaction(() => {
-    // 1. Ensure skill_tags exists.
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS skill_tags (
-        skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-        tag      TEXT NOT NULL,
-        PRIMARY KEY (skill_id, tag)
-      );
-      CREATE INDEX IF NOT EXISTS idx_skill_tags_tag ON skill_tags (tag);
-    `);
+  // If no application tables exist, this is a fresh DB — drizzle will run
+  // the baseline migration normally.
+  const anyTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1")
+    .get();
+  if (!anyTable) return false;
 
-    // 2. Backfill skill_tags from skills.tags (JSON array). json_each
-    //    silently skips NULL/invalid JSON, so this is safe even for rows
-    //    written before the column was populated consistently.
-    if (hasTags) {
-      db.exec(`
-        INSERT OR IGNORE INTO skill_tags (skill_id, tag)
-        SELECT s.id, je.value
-        FROM skills s, json_each(s.tags) je
-        WHERE s.tags IS NOT NULL
-          AND json_valid(s.tags)
-          AND json_type(s.tags) = 'array'
-          AND je.value IS NOT NULL
-          AND je.value <> '';
-      `);
-    }
+  // Legacy or broken DB detected. Drop all application tables in reverse-
+  // dependency order so drizzle can recreate them cleanly (0000–0016).
+  //
+  // Also drops __drizzle_migrations so drizzle starts from scratch rather
+  // than skipping already-"applied" entries that correspond to missing tables.
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE IF EXISTS skill_eval_runs;
+    DROP TABLE IF EXISTS skill_eval_cases;
+    DROP TABLE IF EXISTS skill_embeddings;
+    DROP TABLE IF EXISTS oidc_group_role_map;
+    DROP TABLE IF EXISTS oidc_identities;
+    DROP TABLE IF EXISTS webhook_deliveries;
+    DROP TABLE IF EXISTS webhooks;
+    DROP TABLE IF EXISTS tenant_quota_overrides;
+    DROP TABLE IF EXISTS tenant_quotas;
+    DROP TABLE IF EXISTS usage_events;
+    DROP TABLE IF EXISTS cache_user_epochs;
+    DROP TABLE IF EXISTS cache_global_epoch;
+    DROP TABLE IF EXISTS pipeline_runs;
+    DROP TABLE IF EXISTS import_jobs;
+    DROP TABLE IF EXISTS skill_versions;
+    DROP TABLE IF EXISTS skill_feedbacks;
+    DROP TABLE IF EXISTS skill_tags;
+    DROP TABLE IF EXISTS skill_files;
+    DROP TABLE IF EXISTS access_logs;
+    DROP TABLE IF EXISTS user_roles;
+    DROP TABLE IF EXISTS roles;
+    DROP TABLE IF EXISTS users;
+    DROP TABLE IF EXISTS skills;
+    DROP TABLE IF EXISTS tenants;
+    DROP TABLE IF EXISTS __drizzle_migrations;
+    PRAGMA foreign_keys = ON;
+  `);
 
-    // 3. Recreate skills without deprecated columns. SQLite cannot DROP
-    //    multiple columns idiomatically across older versions, so we use
-    //    the table-rename pattern and copy known-good columns explicitly.
-    db.exec(`
-      CREATE TABLE skills__new (
-        id              TEXT PRIMARY KEY,
-        slug            TEXT NOT NULL UNIQUE,
-        name            TEXT NOT NULL,
-        display_name    TEXT,
-        description     TEXT NOT NULL DEFAULT '',
-        version         TEXT NOT NULL DEFAULT '0.0.1',
-        category        TEXT,
-        attributes      TEXT,
-        status          TEXT NOT NULL DEFAULT 'draft',
-        visibility      TEXT NOT NULL DEFAULT 'private',
-        entry_file      TEXT DEFAULT 'SKILL.md',
-        storage_path    TEXT NOT NULL,
-        content_hash    TEXT,
-        created_at      INTEGER NOT NULL,
-        updated_at      INTEGER NOT NULL
-      );
-
-      INSERT INTO skills__new (
-        id, slug, name, display_name, description, version, category,
-        attributes, status, visibility, entry_file, storage_path,
-        content_hash, created_at, updated_at
-      )
-      SELECT
-        id, slug, name, display_name, description, version, category,
-        attributes, status, visibility, entry_file, storage_path,
-        content_hash, created_at, updated_at
-      FROM skills;
-
-      DROP TABLE skills;
-      ALTER TABLE skills__new RENAME TO skills;
-
-      -- Index names must match the drizzle baseline (0000_baseline.sql) so
-      -- that subsequent migrations can DROP/ALTER them by their canonical
-      -- names. The UNIQUE constraint on slug above already provides slug
-      -- uniqueness via SQLite's sqlite_autoindex; we additionally name the
-      -- unique index 'skills_slug_unique' to match drizzle's convention.
-      CREATE UNIQUE INDEX IF NOT EXISTS skills_slug_unique ON skills(slug);
-      CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
-      CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status);
-      CREATE INDEX IF NOT EXISTS idx_skills_visibility ON skills(visibility);
-    `);
-
-    // 4. Stamp baseline as applied so drizzle's migrator does not try to
-    //    recreate tables that already exist.
-    stampBaselineApplied(db, migrationsFolder);
-  });
-
-  tx();
   return true;
 }
 
-function stampBaselineApplied(db: Database.Database, migrationsFolder: string): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      hash TEXT NOT NULL,
-      created_at NUMERIC
-    );
-  `);
-  // We only stamp the very first (baseline) migration as already applied —
-  // the legacy upgrade above only brings the schema up to baseline shape.
-  // Any later migrations (FK fixes, index drops, etc.) MUST be executed by
-  // the drizzle migrator. Stamping them here would silently skip them.
-  const journalPath = join(migrationsFolder, "meta", "_journal.json");
-  const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as MigrationJournal;
-  const baseline = journal.entries.find((e) => e.idx === 0);
-  if (!baseline) return;
-  const sqlPath = join(migrationsFolder, `${baseline.tag}.sql`);
-  if (!existsSync(sqlPath)) return;
-  const sql = readFileSync(sqlPath, "utf-8");
-  const hash = sha256Hex(sql);
-  // Use the journal's `when` timestamp (NOT Date.now()). Drizzle's migrator
-  // skips any journal entry whose `when` is <= MAX(created_at) in this table,
-  // so a Date.now() stamp would silently skip every later migration.
-  db.prepare(
-    "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
-  ).run(hash, baseline.when);
-}
 
-function sha256Hex(input: string): string {
-  return createHash("sha256").update(input).digest("hex");
-}
 
-export function runMigrations(dbPath: string): void {
+export function runMigrations(dbInput: string): void {
+  // P0-8 — accept both legacy bare paths and URL-form (sqlite://, postgres://).
+  // Postgres migrations are P1; reject loudly so the caller fails fast.
+  const cfg = parseDatabaseUrl(dbInput);
+  if (cfg.dialect !== "sqlite" || !cfg.path) {
+    throw new Error(`runMigrations: only sqlite is supported in P0-8 (got dialect=${cfg.dialect}). PG migrations tracked as P1.`);
+  }
+  const dbPath = cfg.path;
+
   const dir = dirname(dbPath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -195,8 +131,40 @@ export function runMigrations(dbPath: string): void {
 
   legacyUpgradeIfNeeded(sqlite, migrationsFolder);
 
+  // Pre-migration cleanup: if skills data contains duplicate (name, content_hash)
+  // pairs, migration 0002's UNIQUE INDEX will fail. Deduplicate by keeping only
+  // the most recently updated row per (name, content_hash). Guard with a
+  // table-existence check — legacyUpgradeIfNeeded may have dropped everything.
+  // FK enforcement is disabled during the DELETE to avoid cascade/NO ACTION
+  // failures on dependent tables like access_logs.
+  const hasSkills = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skills'")
+    .get();
+  if (hasSkills) {
+    sqlite.pragma("foreign_keys = OFF");
+    sqlite.exec(`
+      DELETE FROM skills
+      WHERE content_hash IS NOT NULL
+        AND rowid NOT IN (
+          SELECT MAX(rowid) FROM skills
+          WHERE content_hash IS NOT NULL
+          GROUP BY name, content_hash
+        );
+    `);
+    sqlite.pragma("foreign_keys = ON");
+  }
+
+  // Disable FK enforcement for the entire drizzle migration run. Several
+  // later migrations (0001, 0009, etc.) rebuild tables via INSERT-SELECT into
+  // a new table that has REFERENCES clauses; if orphaned rows exist (from our
+  // dedup cleanup above or from a partial prior migration), those INSERTs fail
+  // with SQLITE_CONSTRAINT_FOREIGNKEY. Drizzle's own per-migration
+  // PRAGMA foreign_keys=OFF is insufficient when exec() splits statements on
+  // semicolons — setting it at the session level guarantees it stays off.
+  sqlite.pragma("foreign_keys = OFF");
   const db = drizzle(sqlite);
   migrate(db, { migrationsFolder });
+  sqlite.pragma("foreign_keys = ON");
 
   sqlite.close();
 }

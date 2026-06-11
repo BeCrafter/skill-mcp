@@ -2,6 +2,7 @@ import { z } from "zod";
 import { toMcpError } from "../../utils/errors.js";
 import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder, McpExtra } from "../../permission/context-builder.js";
+import type { UsageMeterService } from "../../services/usage-meter.service.js";
 import { parsePipeline } from "../../pipeline/parser.js";
 import { PipelineExecutor } from "../../pipeline/executor.js";
 import { PipelineRunStore } from "../../pipeline/run-store.js";
@@ -53,6 +54,7 @@ export function createSkillPipelineTool(
   skillService: SkillService,
   contextBuilder?: ContextBuilder,
   runStore?: PipelineRunStore,
+  usageMeter?: UsageMeterService,
 ) {
   const store = runStore ?? fallbackRunStore;
   return {
@@ -78,7 +80,7 @@ export function createSkillPipelineTool(
         const requestContext = contextBuilder ? await contextBuilder(extra ?? {}) : undefined;
         if (params.resume) {
           // Resume path: Agent provides execution results for stages
-          const executor = new PipelineExecutor(skillService, store);
+          const executor = new PipelineExecutor(skillService, store, undefined, usageMeter);
           const result = await executor.resume(params.resume.run_id, params.resume.stage_outputs, requestContext);
           return {
             content: [
@@ -91,7 +93,7 @@ export function createSkillPipelineTool(
         } else if (params.pipeline) {
           // New run path: Start a new pipeline execution
           const pipelineDef = parsePipeline(params.pipeline);
-          const executor = new PipelineExecutor(skillService, store);
+          const executor = new PipelineExecutor(skillService, store, undefined, usageMeter);
           const result = await executor.start(pipelineDef, params.inputs ?? {}, requestContext);
           return {
             content: [

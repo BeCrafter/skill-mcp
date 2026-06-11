@@ -2,16 +2,21 @@ import { eq, and, sql, inArray, type SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDB } from "../connection.js";
 import { skills, skillTags } from "../schema.js";
-import type { SkillMeta, SkillMetaInput, SkillStatus, VersionBump } from "../../types/index.js";
+import type { SkillMeta, SkillMetaInput, SkillRetrievalMeta, SkillStatus, VersionBump } from "../../types/index.js";
 import { metrics } from "../../telemetry/metrics.js";
 import { getLogger } from "../../utils/logger.js";
+import { withSpanSync } from "../../telemetry/spans.js";
 
 const REPO = "skill";
 
 function timed<T>(method: string, fn: () => T): T {
+  // P0-6 — `db.query` span (§17.6) wraps the existing prom-client timer so
+  // every method already routed through `timed()` gets a trace span without
+  // touching individual call sites. Sync variant because better-sqlite3 is
+  // synchronous; the OTel API allows nesting inside an active async parent.
   const end = metrics.dbQueryDuration.startTimer({ repo: REPO, method });
   try {
-    const result = fn();
+    const result = withSpanSync("db.query", { attributes: { "db.repo": REPO, "db.method": method } }, fn);
     end({ status: "ok" });
     return result;
   } catch (err) {
@@ -42,6 +47,46 @@ function parseAttributes(value: string | null, skillId: string): Record<string, 
     getLogger().warn({ err, skillId, column: "attributes" }, "skills.attributes JSON parse failed");
     return {};
   }
+}
+
+/**
+ * P1-11 stage 2a — Hydrate the `skills.retrieval_meta` JSON envelope.
+ * Mirrors {@link parseAttributes}: corrupt JSON or non-object payloads coerce
+ * to `{}` and bump `skillRowJsonParseErrors{column="retrieval_meta"}` so an
+ * operator can spot persistent corruption. NULL stays as `null` (legacy
+ * rows from before stage 2a) so callers can distinguish "never set" from
+ * "set to empty".
+ */
+function parseRetrievalMeta(value: string | null, skillId: string): SkillRetrievalMeta | null {
+  if (value === null || value === undefined) return null;
+  if (value === "") return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as SkillRetrievalMeta;
+    }
+    metrics.skillRowJsonParseErrors.inc({ column: "retrieval_meta" });
+    getLogger().warn({ skillId, column: "retrieval_meta" }, "skills.retrieval_meta parsed to non-object; coercing to {}");
+    return {};
+  } catch (err) {
+    metrics.skillRowJsonParseErrors.inc({ column: "retrieval_meta" });
+    getLogger().warn({ err, skillId, column: "retrieval_meta" }, "skills.retrieval_meta JSON parse failed");
+    return {};
+  }
+}
+
+/**
+ * Serialise the retrieval-signal envelope. Returns `null` when the input is
+ * either nullish or has no populated fields — the column accepts NULL and
+ * we don't want to write `"{}"` strings that consumers would have to special-case.
+ */
+function serializeRetrievalMeta(value: SkillRetrievalMeta | null | undefined): string | null {
+  if (!value) return null;
+  const hasTriggers = Array.isArray(value.triggers) && value.triggers.length > 0;
+  const hasWhenToUse = typeof value.whenToUse === "string" && value.whenToUse.length > 0;
+  const hasEmbeddingText = typeof value.embeddingText === "string" && value.embeddingText.length > 0;
+  if (!hasTriggers && !hasWhenToUse && !hasEmbeddingText) return null;
+  return JSON.stringify(value);
 }
 
 function toJson(value: unknown): string {
@@ -167,6 +212,7 @@ export class SkillRepository {
         version: input.version ?? "0.0.1",
         category: input.category ?? null,
         attributes: toJson(input.attributes ?? {}),
+        retrievalMeta: serializeRetrievalMeta(input.retrievalMeta),
         status: input.status ?? "draft",
         visibility: input.visibility ?? "private",
         entryFile: input.entryFile ?? "SKILL.md",
@@ -193,6 +239,9 @@ export class SkillRepository {
     if (input.version !== undefined) updateData.version = input.version;
     if (input.category !== undefined) updateData.category = input.category;
     if (input.attributes !== undefined) updateData.attributes = toJson(input.attributes);
+    if (input.retrievalMeta !== undefined) {
+      updateData.retrievalMeta = serializeRetrievalMeta(input.retrievalMeta);
+    }
     if (input.status !== undefined) updateData.status = input.status;
     if (input.visibility !== undefined) updateData.visibility = input.visibility;
     if (input.entryFile !== undefined) updateData.entryFile = input.entryFile;
@@ -271,6 +320,7 @@ export class SkillRepository {
       category: row.category,
       tags,
       attributes: parseAttributes(row.attributes, row.id),
+      retrievalMeta: parseRetrievalMeta(row.retrievalMeta, row.id),
       status: row.status as SkillStatus,
       visibility: row.visibility as SkillMeta["visibility"],
       entryFile: row.entryFile ?? "SKILL.md",

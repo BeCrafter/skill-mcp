@@ -5,6 +5,9 @@ import type { RequestContext } from "../types/index.js";
 import { DAGScheduler } from "./dag.js";
 import { ExecutionContext } from "./context.js";
 import type { PipelineRunStore, PipelineRun } from "./run-store.js";
+import { withSpan } from "../telemetry/spans.js";
+import type { UsageMeterService } from "../services/usage-meter.service.js";
+import { DEFAULT_TENANT_ID } from "../types/index.js";
 
 export class PipelineExecutor {
   // T-709 — per-runId mutex. resume() does check-then-act on completedStages
@@ -17,9 +20,46 @@ export class PipelineExecutor {
     private skillService: SkillService,
     private runStore?: PipelineRunStore,
     private eventBus?: DomainEventBus,
+    private usageMeter?: UsageMeterService,
   ) {}
 
+  // P1-13 — emit one `pipeline.run` usage event per terminal pipeline outcome
+  // (single-shot success/partial, two-phase final completion). `quantity` is
+  // the count of stages actually executed so quota / billing aggregations
+  // bill on real work rather than pipeline-definition size.
+  private recordPipelineRun(
+    pipelineName: string,
+    stageCount: number,
+    status: "success" | "partial",
+    requestContext?: RequestContext,
+  ): void {
+    if (!this.usageMeter) return;
+    void this.usageMeter.record({
+      tenantId: requestContext?.tenantId ?? DEFAULT_TENANT_ID,
+      userId: requestContext?.userId,
+      eventType: "pipeline.run",
+      resourceId: pipelineName,
+      quantity: Math.max(1, stageCount),
+      metadata: { status },
+    });
+  }
+
   async execute(
+    pipeline: PipelineDefinition,
+    inputs: Record<string, unknown>,
+    requestContext?: RequestContext,
+  ): Promise<PipelineResult> {
+    // P0-6 — `pipeline.{name}` root span (§17.6). Single-shot execute path
+    // (no run store) — useful for trace tools that visualize the entire DAG
+    // top to bottom.
+    return withSpan(
+      `pipeline.${pipeline.name}`,
+      { ctx: requestContext ?? null, attributes: { "pipeline.name": pipeline.name, "pipeline.stage_count": Object.keys(pipeline.stages).length } },
+      () => this._executeImpl(pipeline, inputs, requestContext),
+    );
+  }
+
+  private async _executeImpl(
     pipeline: PipelineDefinition,
     inputs: Record<string, unknown>,
     requestContext?: RequestContext,
@@ -40,27 +80,35 @@ export class PipelineExecutor {
     const results: StageResult[] = [];
     const startTime = Date.now();
 
+    let batchIndex = 0;
     for (const batch of dag.getBatches()) {
-      // Execute stages in parallel within a batch
-      const batchResults = await Promise.allSettled(
-        batch.map(stageName => this.executeStage(stageName, pipeline.stages[stageName], context, requestContext)),
-      );
+      // P0-6 — `pipeline.batch` span groups the parallel stage spans.
+      const currentBatchIndex = batchIndex++;
+      await withSpan(
+        "pipeline.batch",
+        { ctx: requestContext ?? null, attributes: { "pipeline.batch.index": currentBatchIndex, "pipeline.batch.stage_count": batch.length } },
+        async () => {
+          const batchResults = await Promise.allSettled(
+            batch.map(stageName => this.executeStage(stageName, pipeline.stages[stageName], context, requestContext)),
+          );
 
-      for (let i = 0; i < batch.length; i++) {
-        const result = batchResults[i];
-        if (result.status === "fulfilled") {
-          context.setStageOutputs(batch[i], result.value.outputs);
-          results.push(result.value);
-        } else {
-          results.push({
-            stage: batch[i],
-            status: "failure",
-            outputs: {},
-            duration_ms: 0,
-            error: result.reason?.message ?? "Unknown error",
-          });
-        }
-      }
+          for (let i = 0; i < batch.length; i++) {
+            const result = batchResults[i];
+            if (result.status === "fulfilled") {
+              context.setStageOutputs(batch[i], result.value.outputs);
+              results.push(result.value);
+            } else {
+              results.push({
+                stage: batch[i],
+                status: "failure",
+                outputs: {},
+                duration_ms: 0,
+                error: result.reason?.message ?? "Unknown error",
+              });
+            }
+          }
+        },
+      );
 
       // If any stage in this batch failed, stop execution
       const hasFailures = results.filter(r => r.status === "failure").length > 0;
@@ -72,16 +120,47 @@ export class PipelineExecutor {
     const allSuccess = results.every(r => r.status === "success");
     const totalDuration = Date.now() - startTime;
 
-    return {
-      name: pipeline.name,
-      status: allSuccess ? "success" : "partial",
-      stages: results,
-      output: context.resolveOutputs(pipeline.output),
-      total_duration_ms: totalDuration,
-    };
+    // P0-6 — `pipeline.persist` span captures the final result resolution.
+    const status: "success" | "partial" = allSuccess ? "success" : "partial";
+    const finalResult = await withSpan(
+      "pipeline.persist",
+      { ctx: requestContext ?? null, attributes: { "pipeline.name": pipeline.name, "pipeline.status": status } },
+      async () => ({
+        name: pipeline.name,
+        status,
+        stages: results,
+        output: context.resolveOutputs(pipeline.output),
+        total_duration_ms: totalDuration,
+      }),
+    );
+    // P1-13 — quantity counts the stages that actually ran (success or
+    // failure), matching review §9.1 example where pipeline.run carries the
+    // stage count rather than 1.
+    this.recordPipelineRun(pipeline.name, results.length, status, requestContext);
+    this.eventBus?.publish({
+      type: "pipeline:completed",
+      tenantId: requestContext?.tenantId ?? DEFAULT_TENANT_ID,
+      pipelineName: pipeline.name,
+      status,
+      stageCount: results.length,
+    });
+    return finalResult;
   }
 
   private async executeStage(
+    name: string,
+    stage: StageDefinition,
+    context: ExecutionContext,
+    requestContext?: RequestContext,
+  ): Promise<StageResult> {
+    return withSpan(
+      "pipeline.stage",
+      { ctx: requestContext ?? null, attributes: { "pipeline.stage.id": name, "pipeline.stage.skill": stage.skill } },
+      () => this._executeStageImpl(name, stage, context, requestContext),
+    );
+  }
+
+  private async _executeStageImpl(
     name: string,
     stage: StageDefinition,
     context: ExecutionContext,
@@ -138,7 +217,12 @@ export class PipelineExecutor {
     }
     this.validateInputs(pipeline, inputs);
     const runId = this.runStore.createRun(pipeline, inputs);
-    return this.executeBatch(runId, requestContext);
+    // P0-6 — root span uses runId (review §17.6 spec: `pipeline.{runId}`).
+    return withSpan(
+      `pipeline.${runId}`,
+      { ctx: requestContext ?? null, attributes: { "pipeline.run_id": runId, "pipeline.name": pipeline.name } },
+      () => this.executeBatch(runId, requestContext),
+    );
   }
 
   async resume(
@@ -184,10 +268,19 @@ export class PipelineExecutor {
       throw new Error(`Pipeline run "${runId}" not found or expired`);
     }
 
-    // Store outputs in context
+    // P0-6 — `pipeline.stage.persist` span (§17.6) wraps the per-stage result
+    // commit on resume. We emit one span per persisted stage so traces show
+    // both how many stage results arrived in this resume call and how long
+    // the persist itself took.
     for (const [stageName, outputs] of Object.entries(stageOutputs)) {
-      this.runStore?.completeStage(runId, stageName, outputs);
-      run.context.setStageOutputs(stageName, outputs);
+      await withSpan(
+        "pipeline.stage.persist",
+        { ctx: requestContext ?? null, attributes: { "pipeline.run_id": runId, "pipeline.stage.id": stageName } },
+        async () => {
+          this.runStore?.completeStage(runId, stageName, outputs);
+          run.context.setStageOutputs(stageName, outputs);
+        },
+      );
     }
 
     // Check if all stages in current batch are completed
@@ -202,15 +295,35 @@ export class PipelineExecutor {
     // Advance to next batch
     const nextBatch = this.runStore?.advanceBatch(runId);
     if (!nextBatch) {
-      // Pipeline complete
-      const output = run.context.resolveExpressions(run.pipeline.output ?? {});
-      return {
-        name: run.pipeline.name,
-        status: "success" as const,
-        stages: this.buildStageResults(run),
-        output: output as Record<string, unknown>,
-        total_duration_ms: Date.now() - run.createdAt,
-      };
+      // P0-6 — `pipeline.persist` span for the two-phase completion path.
+      const finalResult = await withSpan(
+        "pipeline.persist",
+        { ctx: requestContext ?? null, attributes: { "pipeline.run_id": runId, "pipeline.name": run.pipeline.name, "pipeline.status": "success" } },
+        async () => {
+          const output = run.context.resolveExpressions(run.pipeline.output ?? {});
+          return {
+            name: run.pipeline.name,
+            status: "success" as const,
+            stages: this.buildStageResults(run),
+            output: output as Record<string, unknown>,
+            total_duration_ms: Date.now() - run.createdAt,
+          };
+        },
+      );
+      // P1-13 — meter the two-phase pipeline at terminal completion. Use the
+      // count of successfully completed stages rather than the pipeline's
+      // declared stage count: a partial run that finishes via early exit
+      // should bill for what actually ran.
+      this.recordPipelineRun(run.pipeline.name, run.completedStages.size, "success", requestContext);
+      this.eventBus?.publish({
+        type: "pipeline:completed",
+        tenantId: requestContext?.tenantId ?? DEFAULT_TENANT_ID,
+        runId,
+        pipelineName: run.pipeline.name,
+        status: "success",
+        stageCount: run.completedStages.size,
+      });
+      return finalResult;
     }
 
     return this.executeBatch(runId, requestContext);
@@ -221,6 +334,19 @@ export class PipelineExecutor {
     if (!run) throw new Error(`Pipeline run "${runId}" not found`);
 
     const batch = run.batches[run.currentBatchIndex];
+    return withSpan(
+      "pipeline.batch",
+      { ctx: requestContext ?? null, attributes: { "pipeline.run_id": runId, "pipeline.batch.index": run.currentBatchIndex, "pipeline.batch.stage_count": batch.length } },
+      () => this._executeBatchImpl(runId, run, batch, requestContext),
+    );
+  }
+
+  private async _executeBatchImpl(
+    runId: string,
+    run: PipelineRun,
+    batch: string[],
+    requestContext?: RequestContext,
+  ): Promise<PipelineResponse> {
     // T-703 — stages within a single batch are dependency-free by construction
     // (DAGScheduler guarantee), so resolve their skill entries in parallel
     // instead of awaiting one at a time. Latency now scales with the slowest

@@ -12,7 +12,12 @@ function setup(): { db: DrizzleDB; repo: UserRepository } {
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE users (
     id TEXT PRIMARY KEY, name TEXT, token TEXT NOT NULL UNIQUE,
-    status TEXT DEFAULT 'active', created_at INTEGER, updated_at INTEGER
+    status TEXT DEFAULT 'active',
+    token_expires_at INTEGER,
+    previous_token TEXT,
+    previous_token_expires_at INTEGER,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    created_at INTEGER, updated_at INTEGER
   )`);
   return { db, repo: new UserRepository(db) };
 }
@@ -96,5 +101,66 @@ describe("UserRepository", () => {
   it("token UNIQUE constraint rejects duplicate hashes (collision detection)", async () => {
     await ctx.repo.create({ token: "shared" });
     await expect(ctx.repo.create({ token: "shared" })).rejects.toThrow(/UNIQUE/);
+  });
+
+  describe("token expiration + rotation (P0-4)", () => {
+    it("create accepts tokenExpiresAt and persists it", async () => {
+      const future = Date.now() + 10_000;
+      const u = await ctx.repo.create({ name: "x", token: "t-1", tokenExpiresAt: future });
+      expect(u.tokenExpiresAt).toBe(future);
+    });
+
+    it("findByToken returns null for an expired primary token", async () => {
+      const past = Date.now() - 1;
+      await ctx.repo.create({ name: "x", token: "t-expired", tokenExpiresAt: past });
+      expect(await ctx.repo.findByToken("t-expired")).toBeNull();
+    });
+
+    it("rotateToken moves old hash into previous slot with a grace expiry", async () => {
+      const u = await ctx.repo.create({ name: "x", token: "old-hash" });
+      const rotated = await ctx.repo.rotateToken(u.id, "new-hash", { graceMs: 60_000 });
+      expect(rotated?.token).toBe("new-hash");
+      expect(rotated?.previousToken).toBe("old-hash");
+      expect(rotated?.previousTokenExpiresAt).toBeGreaterThan(Date.now());
+    });
+
+    it("findByToken accepts BOTH old and new tokens during the grace window", async () => {
+      const u = await ctx.repo.create({ name: "x", token: "old-hash" });
+      await ctx.repo.rotateToken(u.id, "new-hash", { graceMs: 60_000 });
+      const viaNew = await ctx.repo.findByToken("new-hash");
+      const viaOld = await ctx.repo.findByToken("old-hash");
+      expect(viaNew?.id).toBe(u.id);
+      expect(viaOld?.id).toBe(u.id);
+    });
+
+    it("findByToken rejects the previous token after the grace window passes", async () => {
+      const u = await ctx.repo.create({ name: "x", token: "old-hash" });
+      await ctx.repo.rotateToken(u.id, "new-hash", { graceMs: 0 });
+      const viaOld = await ctx.repo.findByToken("old-hash");
+      expect(viaOld).toBeNull();
+      const viaNew = await ctx.repo.findByToken("new-hash");
+      expect(viaNew?.id).toBe(u.id);
+    });
+
+    it("clearPreviousToken nukes the grace slot immediately", async () => {
+      const u = await ctx.repo.create({ name: "x", token: "old-hash" });
+      await ctx.repo.rotateToken(u.id, "new-hash", { graceMs: 60_000 });
+      await ctx.repo.clearPreviousToken(u.id);
+      expect(await ctx.repo.findByToken("old-hash")).toBeNull();
+      const after = await ctx.repo.findById(u.id);
+      expect(after?.previousToken).toBeNull();
+      expect(after?.previousTokenExpiresAt).toBeNull();
+    });
+
+    it("rotateToken returns null for a missing user", async () => {
+      expect(await ctx.repo.rotateToken("nope", "new-hash")).toBeNull();
+    });
+
+    it("rotateToken honors per-rotation tokenExpiresAt for the new token", async () => {
+      const future = Date.now() + 5_000;
+      const u = await ctx.repo.create({ name: "x", token: "old-hash" });
+      const rotated = await ctx.repo.rotateToken(u.id, "new-hash", { tokenExpiresAt: future });
+      expect(rotated?.tokenExpiresAt).toBe(future);
+    });
   });
 });

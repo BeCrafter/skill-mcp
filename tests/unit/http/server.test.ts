@@ -161,6 +161,46 @@ describe("createRequestHandler", () => {
     expect(capture().statusCode).toBe(200);
   });
 
+  // P0-2 — OpenAPI spec + Swagger UI mounted on the server (no auth required).
+  it("GET /api/v1/openapi.json returns the OpenAPI 3.1 document anonymously", async () => {
+    const handler = createRequestHandler({
+      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      adminRouter, gatewayRouter,
+    });
+    const { res, capture } = makeRes();
+    await handler(makeReq("GET", "/api/v1/openapi.json"), res);
+    const out = capture();
+    expect(out.statusCode).toBe(200);
+    const doc = JSON.parse(out.body);
+    expect(doc.openapi).toBe("3.1.0");
+    expect(doc.paths["/admin/skills/{slug}/publish"]).toBeTruthy();
+  });
+
+  it("GET /api/openapi.json (unprefixed) also serves the spec", async () => {
+    const handler = createRequestHandler({
+      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      adminRouter, gatewayRouter,
+    });
+    const { res, capture } = makeRes();
+    await handler(makeReq("GET", "/api/openapi.json"), res);
+    const out = capture();
+    expect(out.statusCode).toBe(200);
+    expect(JSON.parse(out.body).openapi).toBe("3.1.0");
+  });
+
+  it("GET /api/v1/docs serves the Swagger UI HTML page", async () => {
+    const handler = createRequestHandler({
+      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      adminRouter, gatewayRouter,
+    });
+    const { res, capture } = makeRes();
+    await handler(makeReq("GET", "/api/v1/docs"), res);
+    const out = capture();
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toMatch(/swagger-ui-bundle\.js/);
+    expect(out.body).toContain("/api/v1/openapi.json");
+  });
+
   it("/api/gateway/health bypasses gateway auth (used by LB probes)", async () => {
     gatewayRouter.get("/api/gateway/health", async (ctx) => {
       ctx.res.writeHead(200, { "Content-Type": "application/json" });

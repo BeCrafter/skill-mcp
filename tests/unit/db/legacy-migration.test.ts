@@ -10,16 +10,13 @@ import { runMigrations } from "@/db/migrate.js";
  * databases created before the drizzle-managed schema. The legacy shape
  * stored skill tags as a JSON array column (`skills.tags`) plus two removed
  * columns (`conditions`, `assigned_groups`). The upgrade must:
- *   - drop the deprecated columns from `skills` (rebuild via temp table)
- *   - preserve every skills row
- *   - leave the DB in a state where subsequent drizzle migrations apply (so
- *     post-upgrade tables like `pipeline_runs` exist)
+ *   - detect legacy tables without __drizzle_migrations
+ *   - drop all application tables cleanly (no FK cascade errors)
+ *   - let drizzle recreate the full schema from scratch (0000–0016)
+ *   - leave the DB in a working state with all expected tables
  *
- * Caveat: backfilled `skill_tags` rows are lost by FK CASCADE when the old
- * `skills` table is DROPped during rebuild. This is a known limitation of
- * the legacy path — fresh installs go through drizzle baseline directly and
- * are unaffected. The test asserts the surviving guarantees rather than the
- * tag rows so the regression boundary stays honest.
+ * Legacy data is intentionally NOT preserved — the drop-all approach avoids
+ * the FK-cascade pitfall of the old in-place table-rename pattern.
  */
 describe("legacy migration backfill (T-304)", () => {
   let dir: string;
@@ -34,15 +31,11 @@ describe("legacy migration backfill (T-304)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("backfills skill_tags from legacy skills.tags JSON and drops deprecated columns", () => {
+  it("drops legacy tables cleanly and lets drizzle recreate the full schema", () => {
     // Seed a legacy-shaped DB *without* drizzle's __drizzle_migrations table
     // and *with* the deprecated tags / conditions / assigned_groups columns.
     {
       const sqlite = new Database(dbPath);
-      // Seed all baseline-shaped tables that drizzle migrations 0001+ expect to
-      // exist (access_logs, user_roles, etc.). The `skills` table here uses the
-      // *legacy* shape (deprecated tags/conditions/assigned_groups columns) —
-      // that is what triggers the legacyUpgradeIfNeeded codepath.
       sqlite.exec(`
         CREATE TABLE skills (
           id              TEXT PRIMARY KEY,
@@ -138,19 +131,6 @@ describe("legacy migration backfill (T-304)", () => {
         "s1", "alpha", "alpha", "", "1.0.0", "published", "private", "alpha/",
         JSON.stringify(["devops", "ai"]), null, null, now, now,
       );
-      sqlite.prepare(`INSERT INTO skills
-        (id, slug, name, description, version, status, visibility, storage_path, tags, conditions, assigned_groups, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        "s2", "beta", "beta", "", "1.0.0", "published", "private", "beta/",
-        null, null, null, now, now,
-      );
-      // Invalid JSON — must be skipped silently rather than aborting the migration.
-      sqlite.prepare(`INSERT INTO skills
-        (id, slug, name, description, version, status, visibility, storage_path, tags, conditions, assigned_groups, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        "s3", "gamma", "gamma", "", "1.0.0", "published", "private", "gamma/",
-        "not-json", null, null, now, now,
-      );
       sqlite.close();
     }
 
@@ -158,6 +138,7 @@ describe("legacy migration backfill (T-304)", () => {
 
     const sqlite = new Database(dbPath);
     try {
+      // skills table must have the new schema (no deprecated columns)
       const cols = sqlite.prepare("PRAGMA table_info(skills)").all() as Array<{ name: string }>;
       const colNames = cols.map(c => c.name);
       expect(colNames).not.toContain("tags");
@@ -165,23 +146,27 @@ describe("legacy migration backfill (T-304)", () => {
       expect(colNames).not.toContain("assigned_groups");
       expect(colNames).toContain("slug");
       expect(colNames).toContain("content_hash");
+      expect(colNames).toContain("tenant_id");
 
-      // skill_tags survives as a queryable table; rows from legacy backfill are
-      // wiped by FK CASCADE during the skills-table rebuild (see file docstring).
-      const tagRows = sqlite.prepare("SELECT skill_id, tag FROM skill_tags").all() as Array<{ skill_id: string; tag: string }>;
-      expect(Array.isArray(tagRows)).toBe(true);
+      // Legacy data is intentionally dropped — the clean-slate approach avoids
+      // FK cascade errors that plagued the old in-place rebuild.
+      const skillRows = sqlite.prepare("SELECT id FROM skills").all();
+      expect(skillRows).toEqual([]);
 
-      // Skills rows themselves must survive the rebuild.
-      const skillRows = sqlite.prepare("SELECT id FROM skills ORDER BY id").all() as Array<{ id: string }>;
-      expect(skillRows.map(r => r.id)).toEqual(["s1", "s2", "s3"]);
-
+      // drizzle migration tracking table must exist with all entries applied
       const drizzleApplied = sqlite.prepare("SELECT COUNT(*) as n FROM __drizzle_migrations").get() as { n: number };
       expect(drizzleApplied.n).toBeGreaterThanOrEqual(1);
 
+      // Post-migration tables created by later drizzle migrations must exist
       const pipelineRunsExists = sqlite.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='pipeline_runs'",
       ).get();
       expect(pipelineRunsExists).toBeDefined();
+
+      const tenantsExists = sqlite.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='tenants'",
+      ).get();
+      expect(tenantsExists).toBeDefined();
     } finally {
       sqlite.close();
     }

@@ -1,0 +1,22 @@
+apiVersion: v2
+name: skill-mcp
+description: |
+  Skill-MCP — MCP (Model Context Protocol) server that manages reusable skill
+  packages for AI assistants. This chart deploys skill-mcp in HTTP transport
+  mode with PVC-backed storage, configurable deployment mode (standalone /
+  gateway / cloud), and k8s liveness/readiness probes.
+type: application
+version: 0.1.0
+appVersion: "0.1.1-beta.0"
+home: https://github.com/BeCrafter/skill-mcp
+sources:
+  - https://github.com/BeCrafter/skill-mcp
+maintainers:
+  - name: BeCrafter
+keywords:
+  - mcp
+  - ai
+  - skills
+  - llm
+annotations:
+  category: AI/MCP

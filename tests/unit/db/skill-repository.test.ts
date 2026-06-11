@@ -10,9 +10,11 @@ function createTestTables(db: DrizzleDB): void {
   const statements = [
     `CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+      tenant_id TEXT NOT NULL DEFAULT 'default',
       display_name TEXT, description TEXT NOT NULL DEFAULT '',
       version TEXT NOT NULL DEFAULT '0.0.1', category TEXT DEFAULT NULL,
-      attributes TEXT, status TEXT NOT NULL DEFAULT 'draft',
+      attributes TEXT, retrieval_meta TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
       visibility TEXT NOT NULL DEFAULT 'private', entry_file TEXT DEFAULT 'SKILL.md',
       storage_path TEXT NOT NULL, content_hash TEXT,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
@@ -354,6 +356,104 @@ describe("SkillRepository", () => {
     const hydrated = await repo.findById(created.id);
     expect(hydrated!.attributes).toEqual({});
     expect(Array.isArray(hydrated!.attributes)).toBe(false);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // P1-11 stage 2a — retrieval-signal round-trip
+  // ──────────────────────────────────────────────────────────────────────
+
+  it("P1-11: round-trips retrieval_meta (triggers / whenToUse / embeddingText) through create + findBySlug", async () => {
+    await repo.create({
+      slug: "retrieval-rt", name: "retrieval-rt",
+      storagePath: "skills/retrieval-rt/",
+      retrievalMeta: {
+        triggers: ["search files", "find regex"],
+        whenToUse: "Use when the user wants to grep recursively.",
+        embeddingText: "ripgrep wrapper; recursive directory pattern search",
+      },
+    });
+
+    const found = await repo.findBySlug("retrieval-rt");
+    expect(found!.retrievalMeta).toEqual({
+      triggers: ["search files", "find regex"],
+      whenToUse: "Use when the user wants to grep recursively.",
+      embeddingText: "ripgrep wrapper; recursive directory pattern search",
+    });
+  });
+
+  it("P1-11: legacy rows (no retrieval_meta written) hydrate as null, not {}", async () => {
+    // create() with retrievalMeta omitted should leave the column NULL — that
+    // 'never written' state must be distinguishable from 'written empty {}'.
+    await repo.create({
+      slug: "legacy-row", name: "legacy-row",
+      storagePath: "skills/legacy-row/",
+    });
+    const found = await repo.findBySlug("legacy-row");
+    expect(found!.retrievalMeta).toBeNull();
+  });
+
+  it("P1-11: passing retrievalMeta with all empty fields is treated as null (column stays NULL)", async () => {
+    await repo.create({
+      slug: "empty-rm", name: "empty-rm",
+      storagePath: "skills/empty-rm/",
+      retrievalMeta: { triggers: [], whenToUse: "", embeddingText: "" },
+    });
+    const found = await repo.findBySlug("empty-rm");
+    expect(found!.retrievalMeta).toBeNull();
+  });
+
+  it("P1-11: update() can attach retrieval_meta to an existing row", async () => {
+    const created = await repo.create({
+      slug: "rm-update", name: "rm-update",
+      storagePath: "skills/rm-update/",
+    });
+    await repo.update(created.id, {
+      retrievalMeta: { triggers: ["a", "b"], whenToUse: "later" },
+    });
+    const after = await repo.findById(created.id);
+    expect(after!.retrievalMeta).toEqual({ triggers: ["a", "b"], whenToUse: "later" });
+  });
+
+  it("P1-11: update() with retrievalMeta=null clears the column", async () => {
+    const created = await repo.create({
+      slug: "rm-clear", name: "rm-clear",
+      storagePath: "skills/rm-clear/",
+      retrievalMeta: { triggers: ["x"] },
+    });
+    expect((await repo.findById(created.id))!.retrievalMeta).toEqual({ triggers: ["x"] });
+
+    await repo.update(created.id, { retrievalMeta: null });
+    expect((await repo.findById(created.id))!.retrievalMeta).toBeNull();
+  });
+
+  it("P1-11: corrupt retrieval_meta JSON coerces to {} and bumps the parse-error counter", async () => {
+    const { metrics } = await import("../../../src/telemetry/metrics.js");
+    const created = await repo.create({
+      slug: "corrupt-rm", name: "corrupt-rm",
+      storagePath: "skills/corrupt-rm/",
+    });
+    const sqlite = (repo as unknown as { db: { $client: { exec(s: string): void } } }).db.$client;
+    sqlite.exec(`UPDATE skills SET retrieval_meta = 'not-json{' WHERE id = '${created.id}'`);
+
+    metrics.skillRowJsonParseErrors.reset();
+    const hydrated = await repo.findById(created.id);
+    expect(hydrated!.retrievalMeta).toEqual({});
+
+    const text = await (await import("../../../src/telemetry/metrics.js")).registry.metrics();
+    expect(text).toMatch(/skill_mcp_skill_row_json_parse_errors_total\{column="retrieval_meta"\}\s+1/);
+  });
+
+  it("P1-11: a JSON array in retrieval_meta coerces to {} (consumers expect Record-shaped data)", async () => {
+    const created = await repo.create({
+      slug: "array-rm", name: "array-rm",
+      storagePath: "skills/array-rm/",
+    });
+    const sqlite = (repo as unknown as { db: { $client: { exec(s: string): void } } }).db.$client;
+    sqlite.exec(`UPDATE skills SET retrieval_meta = '[1,2,3]' WHERE id = '${created.id}'`);
+
+    const hydrated = await repo.findById(created.id);
+    expect(hydrated!.retrievalMeta).toEqual({});
+    expect(Array.isArray(hydrated!.retrievalMeta)).toBe(false);
   });
 });
 

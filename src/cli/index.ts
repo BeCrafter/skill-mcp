@@ -11,8 +11,11 @@ import { versionsAction } from "./commands/versions-cmd.js";
 import { rollbackAction } from "./commands/rollback-cmd.js";
 import { lintAction } from "./commands/lint-cmd.js";
 import { pipelineValidateAction, pipelineGraphAction, pipelineRunAction } from "./commands/pipeline-cmd.js";
-import { userListAction, userCreateAction, userGetAction, userDeleteAction, userAssignRolesAction } from "./commands/user-cmd.js";
+import { userListAction, userCreateAction, userGetAction, userDeleteAction, userAssignRolesAction, userRotateTokenAction } from "./commands/user-cmd.js";
 import { roleListAction, roleCreateAction, roleGetAction, roleUpdateAction, roleDeleteAction } from "./commands/role-cmd.js";
+import { migrateCheckAction } from "./commands/migrate-cmd.js";
+import { manifestMigrateAction } from "./commands/manifest-migrate-cmd.js";
+import { evalListAction, evalRunAction, evalResultsAction } from "./commands/eval-cmd.js";
 
 export async function createCli(): Promise<Command> {
   const config = getConfig();
@@ -144,6 +147,32 @@ export async function createCli(): Promise<Command> {
     });
 
   // =========================================================
+  // Migration tools (P0-8 — SQLite → Postgres readiness)
+  // =========================================================
+  program
+    .command("migrate:check")
+    .description("Scan source/target DATABASE_URL for dialect-migration risks (read-only, P0-8)")
+    .option("--target <url>", "Target dialect URL (e.g. postgres://...). Defaults to DATABASE_URL or current source")
+    .action(async (opts) => {
+      await migrateCheckAction({ targetUrl: opts.target as string | undefined });
+    });
+
+  // =========================================================
+  // Manifest schema migration (P1-21 — review §14.5)
+  // =========================================================
+  program
+    .command("manifest:migrate <dir>")
+    .description("Scan skill packages for missing manifest_schema and migrate (review §14.5)")
+    .option("--apply", "Rewrite SKILL.md files in place (default: dry-run)")
+    .option("--patch", "Emit a unified diff to stdout instead (suitable for `git apply`)")
+    .action(async (dir, opts) => {
+      await manifestMigrateAction(dir, {
+        apply: opts.apply as boolean | undefined,
+        patch: opts.patch as boolean | undefined,
+      });
+    });
+
+  // =========================================================
   // Pipeline management commands
   // =========================================================
   const pipelineCmd = program
@@ -179,6 +208,31 @@ export async function createCli(): Promise<Command> {
     });
 
   // =========================================================
+  // P1-12 stage 2 — Eval framework (case persistence + runner)
+  // =========================================================
+  const evalCmd = program
+    .command("eval")
+    .description("Run skill eval cases (P1-12 stage 2)");
+
+  evalCmd
+    .command("list <slug>")
+    .description("List persisted eval cases for a skill")
+    .action(async (slug) => { await evalListAction(slug); });
+
+  evalCmd
+    .command("run <slug>")
+    .description("Run every eval case for a skill against the stub provider, persist results")
+    .action(async (slug) => { await evalRunAction(slug); });
+
+  evalCmd
+    .command("results <slug>")
+    .description("Show recent eval runs for a skill")
+    .option("--limit <n>", "Max rows to display (default 20)", "20")
+    .action(async (slug, opts) => {
+      await evalResultsAction(slug, { limit: parseInt(opts.limit as string, 10) });
+    });
+
+  // =========================================================
   // User management commands
   // =========================================================
   const userCmd = program
@@ -195,10 +249,24 @@ export async function createCli(): Promise<Command> {
     .description("Create a new user")
     .option("--name <name>", "User name")
     .option("--role-ids <ids>", "Comma-separated role IDs to assign")
+    .option("--ttl <duration>", "Token time-to-live (e.g. 30d, 12h, 45m, 3600s). Omit for non-expiring tokens.")
     .action(async (opts) => {
       await userCreateAction({
         name: opts.name as string | undefined,
         roleIds: opts.roleIds ? (opts.roleIds as string).split(",").map((s: string) => s.trim()) : undefined,
+        ttl: opts.ttl as string | undefined,
+      });
+    });
+
+  userCmd
+    .command("rotate-token <userId>")
+    .description("Rotate a user's token. Old token remains valid for the grace window (default 7d).")
+    .option("--ttl <duration>", "New token time-to-live (e.g. 30d). Omit for non-expiring.")
+    .option("--grace <duration>", "Old token grace window (default 7d).")
+    .action(async (userId, opts) => {
+      await userRotateTokenAction(userId, {
+        ttl: opts.ttl as string | undefined,
+        grace: opts.grace as string | undefined,
       });
     });
 

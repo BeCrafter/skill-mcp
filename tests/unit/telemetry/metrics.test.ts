@@ -38,12 +38,12 @@ describe("T-303 metrics", () => {
   });
 
   it("permissionDenials increments per denied skill, labeled by visibility", async () => {
-    const ctx: RequestContext = { userId: "u1", sessionId: "s1", tags: new Set(), isAuthenticated: false };
+    const ctx: RequestContext = { tenantId: "default", userId: "u1", sessionId: "s1", tags: new Set(), isAuthenticated: false };
     const filter = new TagPermissionFilter(ctx);
     const skills: SkillMeta[] = [
-      { id: "1", slug: "a", name: "a", version: "1.0.0", description: "", tags: [], visibility: "private", status: "active", category: "", attributes: {}, contentHash: "", storagePath: "", storageBackend: "local-fs", createdAt: 0, updatedAt: 0 } as never,
-      { id: "2", slug: "b", name: "b", version: "1.0.0", description: "", tags: [], visibility: "internal", status: "active", category: "", attributes: {}, contentHash: "", storagePath: "", storageBackend: "local-fs", createdAt: 0, updatedAt: 0 } as never,
-      { id: "3", slug: "c", name: "c", version: "1.0.0", description: "", tags: [], visibility: "public", status: "active", category: "", attributes: {}, contentHash: "", storagePath: "", storageBackend: "local-fs", createdAt: 0, updatedAt: 0 } as never,
+      { id: "1", slug: "a", name: "a", version: "1.0.0", description: "", tags: [], visibility: "private", status: "published", category: "", attributes: {}, contentHash: "", storagePath: "", storageBackend: "local-fs", createdAt: 0, updatedAt: 0 } as never,
+      { id: "2", slug: "b", name: "b", version: "1.0.0", description: "", tags: [], visibility: "internal", status: "published", category: "", attributes: {}, contentHash: "", storagePath: "", storageBackend: "local-fs", createdAt: 0, updatedAt: 0 } as never,
+      { id: "3", slug: "c", name: "c", version: "1.0.0", description: "", tags: [], visibility: "public", status: "published", category: "", attributes: {}, contentHash: "", storagePath: "", storageBackend: "local-fs", createdAt: 0, updatedAt: 0 } as never,
     ];
     const allowed = await filter.filter(skills);
     expect(allowed.map(s => s.slug)).toEqual(["c"]);

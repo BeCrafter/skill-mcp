@@ -82,6 +82,30 @@ export const configSchema = z.object({
     hstsEnabled: false,
   }),
 
+  rateLimit: z.object({
+    /**
+     * P0-3 — Master switch. When false the middleware is not mounted and
+     * neither admin nor gateway routes are throttled. Default true (secure-
+     * by-default); operators with their own upstream throttling (nginx,
+     * envoy, ALB) can opt out.
+     */
+    enabled: z.boolean().default(true),
+    /** Token bucket capacity (burst size). */
+    adminCapacity: z.number().int().positive().default(60),
+    /** Tokens added per second to each admin bucket. */
+    adminRefillPerSec: z.number().positive().default(10),
+    /** Token bucket capacity for gateway routes. */
+    gatewayCapacity: z.number().int().positive().default(120),
+    /** Tokens added per second to each gateway bucket. */
+    gatewayRefillPerSec: z.number().positive().default(20),
+  }).default({
+    enabled: true,
+    adminCapacity: 60,
+    adminRefillPerSec: 10,
+    gatewayCapacity: 120,
+    gatewayRefillPerSec: 20,
+  }),
+
   auth: z.object({
     stdioToken: z.string().optional(),
     /**
@@ -101,6 +125,25 @@ export const configSchema = z.object({
      * scrapers; logged at startup like adminAuthOptional.
      */
     metricsAuthOptional: z.boolean().default(false),
+    /**
+     * P1-14 stage 1 — OIDC SSO. When present, the HTTP auth middleware will
+     * try OIDC JWT verification before falling back to opaque-token lookup.
+     * Absent (default) → SSO disabled, behaviour identical to pre-P1-14.
+     * `audience` may be a single string or an allow-list (Auth0/Okta often
+     * issue tokens whose `aud` is the API identifier *and* the client_id).
+     * `userClaim`/`groupsClaim` let providers with non-standard claim names
+     * (e.g. Microsoft `oid`, Keycloak `preferred_username`) map cleanly.
+     */
+    oidc: z.object({
+      issuer: z.string().url(),
+      audience: z.union([z.string(), z.array(z.string()).nonempty()]),
+      jwksUri: z.string().url(),
+      userClaim: z.string().default("sub"),
+      groupsClaim: z.string().default("groups"),
+      clockSkewSec: z.number().int().nonnegative().default(60),
+      jwksTtlMs: z.number().int().positive().default(600_000),
+      allowedAlgorithms: z.array(z.string()).nonempty().default(["RS256"]),
+    }).optional(),
   }).default({}),
 });
 

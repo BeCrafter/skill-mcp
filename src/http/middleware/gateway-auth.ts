@@ -3,12 +3,17 @@ import type { HttpContext } from "../context.js";
 import type { UserRepository } from "../../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
 import type { RequestContext } from "../../types/index.js";
-import { extractBearerToken, buildRequestContextFromHttp } from "../../permission/context-builder.js";
+import {
+  extractBearerToken,
+  buildRequestContextFromHttp,
+  type OidcContextOptions,
+} from "../../permission/context-builder.js";
 import { json } from "../helpers.js";
 
 export interface GatewayAuthDeps {
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
+  oidc?: OidcContextOptions;
 }
 
 /**
@@ -43,6 +48,7 @@ export async function enforceGatewayAuth(
     sessionId,
     deps.userRepo,
     deps.userRoleRepo,
+    deps.oidc,
   );
 
   if (!requestContext.isAuthenticated) {
