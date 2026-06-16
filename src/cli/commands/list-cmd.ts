@@ -2,19 +2,9 @@ import { getConfig } from "../../config/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
-import { c, badge, truncate, sep, warn } from "../ui.js";
+import { c, badge, truncate, table, section, warn } from "../ui.js";
 
 type SkillRow = { slug: string; name: string; version: string; status: string; description: string; category: string | null; tags: string[] };
-
-function printSkillRow(s: SkillRow, slugWidth: number): void {
-  const nameTag = s.name !== s.slug ? `  ${c.dim("[" + s.name + "]")}` : "";
-  console.log(`  ${c.boldCyan(s.slug.padEnd(slugWidth))}  ${c.dim(("v" + s.version).padEnd(9))}  ${badge(s.status)}${nameTag}`);
-  if (s.description) console.log(`  ${c.dim(truncate(s.description))}`);
-  const extras: string[] = [];
-  if (s.category) extras.push(`category: ${s.category}`);
-  if (Array.isArray(s.tags) && s.tags.length) extras.push(`tags: ${s.tags.join(", ")}`);
-  if (extras.length) console.log(`  ${c.dim(extras.join("  ·  "))}`);
-}
 
 export async function listAction(options: { name?: string; tags?: string }): Promise<void> {
   const config = getConfig();
@@ -32,13 +22,43 @@ export async function listAction(options: { name?: string; tags?: string }): Pro
     return;
   }
 
+  console.log(section("Skills", skills.length));
+  console.log();
+
+  // Build interleaved rows: skill row + optional description row
+  const tableRows: Array<Record<string, unknown>> = [];
   const slugWidth = Math.min(Math.max(...skills.map(s => s.slug.length), 16), 36);
 
-  console.log(`\n  ${c.bold(String(skills.length))} ${skills.length === 1 ? "skill" : "skills"}\n`);
-  console.log(`  ${sep(slugWidth + 34)}\n`);
-
-  for (const s of skills) {
-    printSkillRow(s as SkillRow, slugWidth);
-    console.log();
+  for (const s of skills as SkillRow[]) {
+    // Main row
+    tableRows.push({
+      slug: c.boldCyan(s.slug),
+      version: c.dim("v" + s.version),
+      status: badge(s.status),
+      name: s.name !== s.slug ? c.dim("[" + s.name + "]") : "",
+    });
+    // Description / meta row (empty slug to indent under)
+    const meta: string[] = [];
+    if (s.description) meta.push(truncate(s.description, 48));
+    if (s.category) meta.push(`category: ${s.category}`);
+    if (Array.isArray(s.tags) && s.tags.length) meta.push(`tags: ${s.tags.join(", ")}`);
+    if (meta.length) {
+      const metaText = truncate(meta.join("  ·  "), 52);
+      tableRows.push({
+        slug: "",
+        version: "",
+        status: "",
+        name: c.dim(metaText),
+      });
+    }
   }
+
+  console.log(table(tableRows, [
+    { key: "slug", header: "SLUG", width: slugWidth },
+    { key: "version", header: "VERSION", width: 10 },
+    { key: "status", header: "STATUS", width: 16 },
+    { key: "name", header: "DETAILS", width: 42 },
+  ]));
+
+  console.log();
 }

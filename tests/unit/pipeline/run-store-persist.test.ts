@@ -34,12 +34,12 @@ describe("PipelineRunStore + DB persistence (T-203)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("persists a run and rehydrates it after the in-memory cache is dropped", () => {
+  it("persists a run and rehydrates it after the in-memory cache is dropped", async () => {
     // Phase 1: create run + complete first stage with a DB-backed store.
     {
       const db = getDatabase(dbPath);
       const store = new PipelineRunStore(new PipelineRunRepository(db));
-      const runId = store.createRun(pipeline, { url: "http://example.com" });
+      const runId = await store.createRun(pipeline, { url: "http://example.com" });
       store.completeStage(runId, "fetch", { content: "fetched-data" });
       // Simulate process death: close DB connection without removing the row.
       closeDatabase();
@@ -61,12 +61,12 @@ describe("PipelineRunStore + DB persistence (T-203)", () => {
     }
   });
 
-  it("persists batch advancement and final completion status", () => {
+  it("persists batch advancement and final completion status", async () => {
     const db = getDatabase(dbPath);
     const repo = new PipelineRunRepository(db);
     const store = new PipelineRunStore(repo);
 
-    const runId = store.createRun(pipeline, { url: "http://example.com" });
+    const runId = await store.createRun(pipeline, { url: "http://example.com" });
     store.completeStage(runId, "fetch", { content: "x" });
     store.advanceBatch(runId);
     store.completeStage(runId, "process", { result: "done" });
@@ -79,19 +79,19 @@ describe("PipelineRunStore + DB persistence (T-203)", () => {
     expect(record!.finishedAt).not.toBeNull();
   });
 
-  it("removeRun deletes the DB row", () => {
+  it("removeRun deletes the DB row", async () => {
     const db = getDatabase(dbPath);
     const repo = new PipelineRunRepository(db);
     const store = new PipelineRunStore(repo);
 
-    const runId = store.createRun(pipeline, { url: "http://example.com" });
+    const runId = await store.createRun(pipeline, { url: "http://example.com" });
     expect(repo.findById(runId)).not.toBeNull();
 
     store.removeRun(runId);
     expect(repo.findById(runId)).toBeNull();
   });
 
-  it("memory-pressure eviction keeps the DB row so getRun can rehydrate", () => {
+  it("memory-pressure eviction keeps the DB row so getRun can rehydrate", async () => {
     // Regression: enforceMaxRuns previously called repo.delete on the evicted
     // run, which defeated T-203 durability — a resume after eviction would
     // 404 even though the run was within TTL. Eviction must be cache-only.
@@ -99,9 +99,9 @@ describe("PipelineRunStore + DB persistence (T-203)", () => {
     const repo = new PipelineRunRepository(db);
     const store = new PipelineRunStore(repo, { maxRuns: 2 });
 
-    const oldest = store.createRun(pipeline, { url: "http://a" });
-    store.createRun(pipeline, { url: "http://b" });
-    store.createRun(pipeline, { url: "http://c" });
+    const oldest = await store.createRun(pipeline, { url: "http://a" });
+    await store.createRun(pipeline, { url: "http://b" });
+    await store.createRun(pipeline, { url: "http://c" });
 
     // The oldest run was evicted from the in-memory cache, but its DB row
     // must still exist so a future getRun() can rehydrate it.
@@ -111,14 +111,14 @@ describe("PipelineRunStore + DB persistence (T-203)", () => {
     expect(hydrated!.runId).toBe(oldest);
   });
 
-  it("TTL expiry deletes from DB on next createRun and getRun returns null", () => {
+  it("TTL expiry deletes from DB on next createRun and getRun returns null", async () => {
     vi.useFakeTimers();
     try {
       const db = getDatabase(dbPath);
       const repo = new PipelineRunRepository(db);
       const store = new PipelineRunStore(repo);
 
-      const runId = store.createRun(pipeline, { url: "http://example.com" });
+      const runId = await store.createRun(pipeline, { url: "http://example.com" });
       vi.advanceTimersByTime(31 * 60 * 1000);
 
       // Drop in-memory cache to force DB hydration path.

@@ -1,5 +1,5 @@
 import { eq, and, sql, inArray, type SQL } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { generateId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { skills, skillTags } from "../schema.js";
 import type { SkillMeta, SkillMetaInput, SkillRetrievalMeta, SkillStatus, VersionBump } from "../../types/index.js";
@@ -199,7 +199,7 @@ export class SkillRepository {
 
   async create(input: SkillMetaInput): Promise<SkillMeta> {
     const now = Date.now();
-    const id = randomUUID();
+    const id = await generateUniqueId(() => generateId("skl_"), async (id) => !!(await this.findById(id)));
     const tags = input.tags ?? [];
 
     this.db.transaction((tx) => {

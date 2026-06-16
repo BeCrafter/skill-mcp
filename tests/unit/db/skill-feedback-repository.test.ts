@@ -48,7 +48,7 @@ describe("SkillFeedbackRepository", () => {
       outcome: "success",
       context: "ctx", agentComment: "good",
     });
-    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(id).toMatch(/^[a-z0-9]{21}$/);
     const rows = await ctx.repo.findBySlug("demo");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({

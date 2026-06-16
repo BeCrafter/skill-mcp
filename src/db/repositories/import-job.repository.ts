@@ -1,5 +1,5 @@
 import { eq, asc } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { generateId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { importJobs } from "../schema.js";
 import type { ImportOptions, ImportResult } from "../../types/index.js";
@@ -35,8 +35,8 @@ export interface ImportJobCreate {
 export class ImportJobRepository {
   constructor(private db: DrizzleDB) {}
 
-  create(input: ImportJobCreate): ImportJobEntity {
-    const id = randomUUID();
+  async create(input: ImportJobCreate): Promise<ImportJobEntity> {
+    const id = await generateUniqueId(() => generateId("job_"), async (id) => !!(await this.findById(id)));
     const now = Date.now();
     this.db.insert(importJobs).values({
       id,

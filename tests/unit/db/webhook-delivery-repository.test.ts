@@ -36,29 +36,29 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
   let s: ReturnType<typeof setup>;
   beforeEach(() => { s = setup(); });
 
-  it("enqueue creates a pending row with next_retry_at = now", () => {
-    const d = s.repo.enqueue({
+  it("enqueue creates a pending row with next_retry_at = now", async () => {
+    const d = await s.repo.enqueue({
       webhookId: "w1", tenantId: "default", eventType: "skill.published",
       payload: '{"x":1}', now: 100,
     });
     expect(d.status).toBe("pending");
     expect(d.attempt).toBe(0);
     expect(d.nextRetryAt).toBe(100);
-    expect(d.deliveryId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(d.deliveryId).toMatch(/^dlv_[a-z0-9]{16}$/);
   });
 
-  it("enqueue accepts an explicit deliveryId (test fixtures)", () => {
-    const d = s.repo.enqueue({
+  it("enqueue accepts an explicit deliveryId (test fixtures)", async () => {
+    const d = await s.repo.enqueue({
       webhookId: "w1", tenantId: "default", eventType: "skill.published",
       payload: "{}", deliveryId: "fixed-uuid",
     });
     expect(d.deliveryId).toBe("fixed-uuid");
   });
 
-  it("listDue picks rows where status=pending AND next_retry_at <= now", () => {
-    const a = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 10 });
-    const b = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 50 });
-    const c = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+  it("listDue picks rows where status=pending AND next_retry_at <= now", async () => {
+    const a = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 10 });
+    const b = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 50 });
+    const c = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
     // mark c success — must not appear
     s.repo.recordAttempt({ id: c.id, attempt: 1, status: "success", now: 100 });
 
@@ -66,10 +66,10 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(due.map(d => d.id).sort()).toEqual([a.id, b.id].sort());
   });
 
-  it("listDue orders by next_retry_at asc and respects limit", () => {
-    const a = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
-    const b = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 10 });
-    s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 200 });
+  it("listDue orders by next_retry_at asc and respects limit", async () => {
+    const a = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+    const b = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 10 });
+    await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 200 });
 
     const due = s.repo.listDue(150, 2);
     expect(due).toHaveLength(2);
@@ -77,8 +77,8 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(due[1].id).toBe(a.id);
   });
 
-  it("recordAttempt success clears nextRetryAt and stamps completedAt", () => {
-    const d = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+  it("recordAttempt success clears nextRetryAt and stamps completedAt", async () => {
+    const d = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
     const updated = s.repo.recordAttempt({
       id: d.id, attempt: 1, status: "success", responseStatus: 200, now: 150,
     });
@@ -90,8 +90,8 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(updated?.lastAttemptedAt).toBe(150);
   });
 
-  it("recordAttempt pending updates next_retry_at without clearing", () => {
-    const d = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+  it("recordAttempt pending updates next_retry_at without clearing", async () => {
+    const d = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
     const updated = s.repo.recordAttempt({
       id: d.id, attempt: 1, status: "pending", responseStatus: 503,
       errorMessage: "upstream 503", nextRetryAt: 200, now: 150,
@@ -102,8 +102,8 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(updated?.completedAt).toBeNull();
   });
 
-  it("recordAttempt dead_letter clears retry timer and stamps completedAt", () => {
-    const d = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+  it("recordAttempt dead_letter clears retry timer and stamps completedAt", async () => {
+    const d = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
     const updated = s.repo.recordAttempt({
       id: d.id, attempt: 8, status: "dead_letter", errorMessage: "exhausted", now: 999,
     });
@@ -112,8 +112,8 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(updated?.completedAt).toBe(999);
   });
 
-  it("recordAttempt preserves firstAttemptedAt across multiple attempts", () => {
-    const d = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+  it("recordAttempt preserves firstAttemptedAt across multiple attempts", async () => {
+    const d = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
     s.repo.recordAttempt({ id: d.id, attempt: 1, status: "pending", nextRetryAt: 200, now: 110 });
     const second = s.repo.recordAttempt({ id: d.id, attempt: 2, status: "pending", nextRetryAt: 400, now: 220 });
     expect(second?.firstAttemptedAt).toBe(110);
@@ -124,8 +124,8 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(s.repo.recordAttempt({ id: "nope", attempt: 1, status: "success" })).toBeNull();
   });
 
-  it("reschedule flips dead_letter back to pending", () => {
-    const d = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+  it("reschedule flips dead_letter back to pending", async () => {
+    const d = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
     s.repo.recordAttempt({ id: d.id, attempt: 8, status: "dead_letter", now: 999 });
     const replayed = s.repo.reschedule(d.id, 5000);
     expect(replayed?.status).toBe("pending");
@@ -138,11 +138,11 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(s.repo.reschedule("nope")).toBeNull();
   });
 
-  it("listByWebhook orders newest first and respects limit", () => {
+  it("listByWebhook orders newest first and respects limit", async () => {
     const w = "w1";
-    const a = s.repo.enqueue({ webhookId: w, tenantId: "t", eventType: "e", payload: "{}", now: 100 });
-    const b = s.repo.enqueue({ webhookId: w, tenantId: "t", eventType: "e", payload: "{}", now: 200 });
-    s.repo.enqueue({ webhookId: w, tenantId: "t", eventType: "e", payload: "{}", now: 300 });
+    const a = await s.repo.enqueue({ webhookId: w, tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+    const b = await s.repo.enqueue({ webhookId: w, tenantId: "t", eventType: "e", payload: "{}", now: 200 });
+    await s.repo.enqueue({ webhookId: w, tenantId: "t", eventType: "e", payload: "{}", now: 300 });
     const out = s.repo.listByWebhook(w, 2);
     expect(out).toHaveLength(2);
     // Two of these have created_at = 300/200 (the third) and 200/100 (b/a)
@@ -152,16 +152,16 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(out.find(x => x.id === b.id)).toBeDefined();
   });
 
-  it("listByTenant scopes by tenant_id", () => {
-    s.repo.enqueue({ webhookId: "w1", tenantId: "a", eventType: "e", payload: "{}", now: 1 });
-    s.repo.enqueue({ webhookId: "w2", tenantId: "b", eventType: "e", payload: "{}", now: 2 });
+  it("listByTenant scopes by tenant_id", async () => {
+    await s.repo.enqueue({ webhookId: "w1", tenantId: "a", eventType: "e", payload: "{}", now: 1 });
+    await s.repo.enqueue({ webhookId: "w2", tenantId: "b", eventType: "e", payload: "{}", now: 2 });
     expect(s.repo.listByTenant("a")).toHaveLength(1);
     expect(s.repo.listByTenant("b")).toHaveLength(1);
     expect(s.repo.listByTenant("c")).toHaveLength(0);
   });
 
-  it("delete removes a row and returns true", () => {
-    const d = s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
+  it("delete removes a row and returns true", async () => {
+    const d = await s.repo.enqueue({ webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}", now: 100 });
     expect(s.repo.delete(d.id)).toBe(true);
     expect(s.repo.findById(d.id)).toBeNull();
   });
@@ -170,16 +170,16 @@ describe("WebhookDeliveryRepository (P1-16)", () => {
     expect(s.repo.delete("nope")).toBe(false);
   });
 
-  it("unique deliveryId index rejects duplicates", () => {
-    s.repo.enqueue({
+  it("unique deliveryId index rejects duplicates", async () => {
+    await s.repo.enqueue({
       webhookId: "w1", tenantId: "t", eventType: "e", payload: "{}",
       deliveryId: "dup-id", now: 100,
     });
-    expect(() =>
-      s.repo.enqueue({
+    await expect(async () =>
+      await s.repo.enqueue({
         webhookId: "w2", tenantId: "t", eventType: "e", payload: "{}",
         deliveryId: "dup-id", now: 100,
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });

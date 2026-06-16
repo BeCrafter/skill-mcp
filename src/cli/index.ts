@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { getConfig } from "../config/index.js";
+import { banner, c } from "./ui.js";
 import { serveAction } from "./commands/serve-cmd.js";
 import { importAction } from "./commands/import-cmd.js";
 import { listAction } from "./commands/list-cmd.js";
@@ -19,15 +20,33 @@ import { evalListAction, evalRunAction, evalResultsAction } from "./commands/eva
 
 export async function createCli(): Promise<Command> {
   const config = getConfig();
-
   const program = new Command()
     .name("skill-mcp")
     .description("Cloud Skill File System & MCP Permission Gateway")
-    .version(config.app.version);
+    .version(config.app.version, "-v, --version")
+    .addHelpText("before", `\n${banner("skill-mcp", config.app.version, "Cloud Skill File System & MCP Permission Gateway")}\n`)
+    .addHelpText("after", `\n  ${c.dim("Examples:")}\n\n    ${c.dim("$")}  skill-mcp serve --port 3001\n    ${c.dim("$")}  skill-mcp list\n    ${c.dim("$")}  skill-mcp info my-skill\n    ${c.dim("$")}  skill-mcp import ./my-skill\n`)
+    .configureHelp({
+      styleTitle:       (str: string) => c.bold(str),
+      styleSubcommandText:  (str: string) => c.bold(str),
+      styleOptionText:      (str: string) => c.cyan(str),
+      styleDescriptionText: (str: string) => c.dim(str),
+      styleCommandText:     (str: string) => c.bold(str),
+      styleArgumentText:    (str: string) => c.yellow(str),
+    })
+    .configureOutput({
+      outputError: (str: string, write: (str: string) => void) => {
+        // Strip Commander's "error: " prefix and wrap with our formatting
+        const msg = str.replace(/^error:\s*/i, "").replace(/\n$/, "").trim();
+        if (msg) {
+          write(`\n  ${c.boldRed("✗")}  ${msg}\n\n`);
+        }
+      },
+    });
 
   program
     .command("serve")
-    .description("Start MCP Server")
+    .description("Start MCP server (stdio, SSE, or HTTP transport)")
     .option("--transport <type>", "Transport type: stdio|sse|http", config.transport.type)
     .option("--port <number>", "HTTP port (for sse/http)", String(config.transport.port))
     .option("--host <host>", "HTTP host", config.transport.host)
@@ -45,7 +64,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("import <source>")
-    .description("Import a skill package from local path or Git repo")
+    .description("Import skill from local path, npm package, or Git repo")
     .option("--category <category>", "Server-side category")
     .option("--tags <tags>", "Server-side tags (comma-separated)")
     .option("--description <desc>", "Server-side description for index")
@@ -73,8 +92,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("list")
-    .description("List all skills")
-    .option("--name <name>", "Filter by skill name")
+    .description("List all skills with status and metadata")
     .option("--tags <tags>", "Filter by tags")
     .action(async (opts) => {
       await listAction(opts);
@@ -82,14 +100,14 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("info <slug>")
-    .description("Show skill details by slug")
+    .description("Show detailed skill information (metadata, files, status)")
     .action(async (slug) => {
       await infoAction(slug);
     });
 
   program
     .command("search")
-    .description("Search skills by name")
+    .description("Search skills by name or keyword")
     .requiredOption("--name <name>", "Skill name to search")
     .action(async (opts) => {
       await searchAction(opts.name);
@@ -97,7 +115,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("remove <slug>")
-    .description("Remove a skill")
+    .description("Remove a skill and its stored files")
     .option("--force", "Skip confirmation")
     .action(async (slug, opts) => {
       await removeAction(slug, opts);
@@ -105,7 +123,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("update <slug>")
-    .description("Update skill server-side metadata")
+    .description("Update skill metadata (category, tags, description)")
     .option("--category <category>", "Update category")
     .option("--tags <tags>", "Update tags (comma-separated)")
     .option("--description <desc>", "Update description")
@@ -121,7 +139,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("versions <slug>")
-    .description("Show skill version history")
+    .description("Show version history for a skill")
     .option("--show <version>", "Show details for a specific version")
     .action(async (slug, opts) => {
       await versionsAction(slug, { show: opts.show as string | undefined });
@@ -129,7 +147,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("rollback <slug>")
-    .description("Rollback skill to a previous version")
+    .description("Roll back skill to a previous version")
     .requiredOption("--to <version>", "Target version to rollback to")
     .option("--bump <type>", "Version bump type: major|minor|patch", "patch")
     .action(async (slug, opts) => {
@@ -141,7 +159,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("lint <path>")
-    .description("Lint a skill package directory")
+    .description("Validate skill package structure and content")
     .action(async (path) => {
       await lintAction(path);
     });
@@ -151,8 +169,7 @@ export async function createCli(): Promise<Command> {
   // =========================================================
   program
     .command("migrate:check")
-    .description("Scan source/target DATABASE_URL for dialect-migration risks (read-only, P0-8)")
-    .option("--target <url>", "Target dialect URL (e.g. postgres://...). Defaults to DATABASE_URL or current source")
+    .description("Check database compatibility for SQLite → Postgres migration")
     .action(async (opts) => {
       await migrateCheckAction({ targetUrl: opts.target as string | undefined });
     });
@@ -162,9 +179,7 @@ export async function createCli(): Promise<Command> {
   // =========================================================
   program
     .command("manifest:migrate <dir>")
-    .description("Scan skill packages for missing manifest_schema and migrate (review §14.5)")
-    .option("--apply", "Rewrite SKILL.md files in place (default: dry-run)")
-    .option("--patch", "Emit a unified diff to stdout instead (suitable for `git apply`)")
+    .description("Add manifest_schema field to skill packages missing it")
     .action(async (dir, opts) => {
       await manifestMigrateAction(dir, {
         apply: opts.apply as boolean | undefined,
@@ -177,7 +192,7 @@ export async function createCli(): Promise<Command> {
   // =========================================================
   const pipelineCmd = program
     .command("pipeline")
-    .description("Manage skill pipelines (DAG orchestration)");
+    .description("Manage skill pipelines (DAG-based orchestration)");
 
   pipelineCmd
     .command("validate <yaml-path>")
@@ -212,7 +227,7 @@ export async function createCli(): Promise<Command> {
   // =========================================================
   const evalCmd = program
     .command("eval")
-    .description("Run skill eval cases (P1-12 stage 2)");
+    .description("Run and manage skill evaluation cases")
 
   evalCmd
     .command("list <slug>")
@@ -232,12 +247,10 @@ export async function createCli(): Promise<Command> {
       await evalResultsAction(slug, { limit: parseInt(opts.limit as string, 10) });
     });
 
-  // =========================================================
-  // User management commands
-  // =========================================================
+  // ── User management ────────────────────────────────────────────────
   const userCmd = program
     .command("user")
-    .description("Manage users");
+    .description("Manage users, tokens, and role assignments");
 
   userCmd
     .command("list")
@@ -289,12 +302,10 @@ export async function createCli(): Promise<Command> {
       await userAssignRolesAction(userId, roleIds);
     });
 
-  // =========================================================
-  // Role management commands
-  // =========================================================
+  // ── Role management ────────────────────────────────────────────────
   const roleCmd = program
     .command("role")
-    .description("Manage roles");
+    .description("Manage roles and permission tags");
 
   roleCmd
     .command("list")

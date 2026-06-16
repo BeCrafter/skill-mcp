@@ -101,7 +101,7 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
     const data = await readJsonBody<PostWebhookBody>(ctx.req);
     if (typeof data.url !== "string") throw new BadRequestError("url is required");
     const tenantId = data.tenant_id ?? DEFAULT_TENANT_ID;
-    const w = webhookService.create({
+    const w = await webhookService.create({
       tenantId,
       url: data.url,
       eventTypes: data.event_types,

@@ -55,7 +55,7 @@ export function registerAdminImportJobRoutes(router: Router, deps: AppDependenci
     }>(ctx.req);
     if (!data.source) throw new BadRequestError("source is required");
 
-    const job = importJobRepo.create({
+    const job = await importJobRepo.create({
       source: data.source,
       options: {
         category: data.category,

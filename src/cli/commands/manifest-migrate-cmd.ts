@@ -26,7 +26,7 @@ import { join, relative } from "node:path";
 import { CURRENT_MANIFEST_SCHEMA } from "../../utils/manifest.js";
 import { classifyManifestSchema } from "../../import/validator.js";
 import { extractFrontmatter } from "../../utils/manifest.js";
-import { c } from "../ui.js";
+import { c, fail, ok, warn, hint, kv, section } from "../ui.js";
 
 export interface ManifestMigrateOptions {
   apply?: boolean;
@@ -205,23 +205,23 @@ export function scanPackages(rootDir: string): PackageScan[] {
 export async function manifestMigrateAction(dir: string, opts: ManifestMigrateOptions): Promise<void> {
   const root = dir;
   if (!existsSync(root)) {
-    console.error(c.red(`Directory not found: ${root}`));
+    fail(`Directory not found: ${root}`, "Provide a valid directory path containing skill packages");
     process.exit(1);
   }
   if (!statSync(root).isDirectory()) {
-    console.error(c.red(`Not a directory: ${root}`));
+    fail(`Not a directory: ${root}`, "The path must point to a directory, not a file");
     process.exit(1);
   }
 
   const scans = scanPackages(root);
   const missing = scans.filter(s => s.status === "missing");
-  const ok = scans.filter(s => s.status === "ok");
+  const alreadyOk = scans.filter(s => s.status === "ok");
   const errors = scans.filter(s => s.status === "invalid" || s.status === "unsupported-major" || s.status === "unparseable");
 
   if (opts.patch) {
     // Patch mode: emit unified diff only, suitable for `git apply`
     if (missing.length === 0) {
-      console.error(c.dim("# no packages need migration"));
+      warn("No packages need migration");
       return;
     }
     for (const m of missing) {
@@ -230,34 +230,38 @@ export async function manifestMigrateAction(dir: string, opts: ManifestMigrateOp
     return;
   }
 
-  console.log(`\nScanning: ${root}`);
-  console.log(`Found ${scans.length} skill package(s)\n`);
+  console.log(section("manifest migration"));
+  console.log(kv("directory", root));
+  console.log(kv("packages", String(scans.length)));
+  console.log();
 
-  if (ok.length > 0) {
-    console.log(c.green(`✓ ${ok.length} package(s) already on schema "${CURRENT_MANIFEST_SCHEMA}"`));
+  if (alreadyOk.length > 0) {
+    console.log(`  ${c.dim("✓")}  ${alreadyOk.length} package(s) already on schema "${CURRENT_MANIFEST_SCHEMA}"`);
   }
   if (errors.length > 0) {
-    console.log(c.red(`✗ ${errors.length} package(s) have schema errors:`));
+    console.log(`  ${c.red("✗")}  ${errors.length} package(s) have schema errors:`);
     for (const e of errors) {
-      console.log(`  - ${e.relPath}: ${e.reason}`);
+      console.log(`    ${c.dim("•")}  ${e.relPath}: ${e.reason}`);
     }
   }
   if (missing.length === 0) {
     if (errors.length > 0) {
       process.exit(1);
     }
-    console.log(c.green("\n✨ All packages already declare manifest_schema — nothing to do.\n"));
+    ok("All packages already declare manifest_schema");
     return;
   }
 
-  console.log(c.yellow(`\n${missing.length} package(s) missing manifest_schema:`));
+  console.log();
+  console.log(`  ${c.yellow("⚡")}  ${missing.length} package(s) missing manifest_schema:`);
   for (const m of missing) {
-    console.log(`  + ${m.relPath} → "${CURRENT_MANIFEST_SCHEMA}"`);
+    console.log(`    ${c.dim("→")}  ${m.relPath}  ${c.dim("→")}  "${CURRENT_MANIFEST_SCHEMA}"`);
   }
 
   if (!opts.apply) {
-    console.log(c.dim(`\nDry-run only. Re-run with --apply to rewrite ${missing.length} file(s),`));
-    console.log(c.dim(`or with --patch to emit a unified diff to stdout (e.g. \`skill-mcp manifest:migrate ${root} --patch | git apply\`).\n`));
+    console.log();
+    hint(`Re-run with --apply to rewrite ${missing.length} file(s)`);
+    hint(`Or with --patch to emit a unified diff: skill-mcp manifest:migrate ${root} --patch | git apply`);
     if (errors.length > 0) {
       process.exit(1);
     }
@@ -271,10 +275,10 @@ export async function manifestMigrateAction(dir: string, opts: ManifestMigrateOp
       writeFileSync(m.filePath, m.newContent!, "utf-8");
       applied++;
     } catch (err) {
-      console.error(c.red(`Failed to write ${m.relPath}: ${(err as Error).message}`));
+      fail(`Failed to write ${m.relPath}: ${(err as Error).message}`);
     }
   }
-  console.log(c.green(`\n✓ Migrated ${applied}/${missing.length} package(s).\n`));
+  ok(`Migrated ${applied}/${missing.length} package(s)`);
   if (errors.length > 0 || applied < missing.length) {
     process.exit(1);
   }

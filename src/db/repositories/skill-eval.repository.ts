@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateId, generateUniqueId } from "../../utils/id.js";
 import { and, desc, eq } from "drizzle-orm";
 import type { DrizzleDB } from "../connection.js";
 import { skillEvalCases, skillEvalRuns } from "../schema.js";
@@ -84,7 +84,7 @@ export class SkillEvalRepository {
         if (c.expectedOutputContains && c.expectedOutputContains.length > 0) envelope.expectedOutputContains = c.expectedOutputContains;
         if (c.expectedOutputNotContains && c.expectedOutputNotContains.length > 0) envelope.expectedOutputNotContains = c.expectedOutputNotContains;
         tx.insert(skillEvalCases).values({
-          id: randomUUID(),
+          id: generateId("evl_"),
           skillId,
           caseName: c.name,
           input: c.input,
@@ -118,8 +118,11 @@ export class SkillEvalRepository {
     return this.db.select().from(skillEvalCases).where(eq(skillEvalCases.skillId, skillId)).all().length;
   }
 
-  appendRun(input: AppendEvalRunInput): SkillEvalRunRow {
-    const id = randomUUID();
+  async appendRun(input: AppendEvalRunInput): Promise<SkillEvalRunRow> {
+    const id = await generateUniqueId(() => generateId("evl_"), async (id) => {
+      const row = this.db.select({ id: skillEvalRuns.id }).from(skillEvalRuns).where(eq(skillEvalRuns.id, id)).get();
+      return !!row;
+    });
     const now = Date.now();
     const toolsJson = input.toolsUsed && input.toolsUsed.length > 0 ? JSON.stringify(input.toolsUsed) : null;
     this.db.insert(skillEvalRuns).values({

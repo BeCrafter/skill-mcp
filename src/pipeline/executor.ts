@@ -216,7 +216,7 @@ export class PipelineExecutor {
       throw new Error("PipelineRunStore required for two-phase execution");
     }
     this.validateInputs(pipeline, inputs);
-    const runId = this.runStore.createRun(pipeline, inputs);
+    const runId = await this.runStore.createRun(pipeline, inputs);
     // P0-6 — root span uses runId (review §17.6 spec: `pipeline.{runId}`).
     return withSpan(
       `pipeline.${runId}`,

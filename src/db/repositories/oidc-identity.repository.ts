@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { oidcIdentities } from "../schema.js";
 import { withSpan } from "../../telemetry/spans.js";
@@ -55,7 +55,10 @@ export class OidcIdentityRepository {
     subject: string;
     userId: string;
   }): Promise<OidcIdentityEntity> {
-    const id = randomUUID();
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: oidcIdentities.id }).from(oidcIdentities).where(eq(oidcIdentities.id, id)).get();
+      return !!row;
+    });
     const now = Date.now();
     this.db
       .insert(oidcIdentities)

@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import { generateId, generateUniqueId } from "../utils/id.js";
 import type { PipelineDefinition } from "./types.js";
 import { ExecutionContext } from "./context.js";
 import { DAGScheduler } from "./dag.js";
@@ -45,8 +45,12 @@ export class PipelineRunStore {
     this.maxRuns = options?.maxRuns ?? 10000;
   }
 
-  createRun(pipeline: PipelineDefinition, inputs: Record<string, unknown>): string {
-    const runId = crypto.randomUUID();
+  async createRun(pipeline: PipelineDefinition, inputs: Record<string, unknown>): Promise<string> {
+    const runId = await generateUniqueId(() => generateId("run_"), async (id) => {
+      if (this.runs.has(id)) return true;
+      if (!this.repo) return false;
+      return !!(await this.repo.findById(id));
+    });
     const dag = new DAGScheduler(pipeline.stages);
     const batches = dag.getBatches();
     const startedAt = Date.now();

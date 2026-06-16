@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { accessLogs } from "../schema.js";
 import type { AccessLogEntry } from "../../types/index.js";
@@ -9,8 +9,12 @@ export class AccessLogRepository {
   constructor(private db: DrizzleDB) {}
 
   async create(entry: Omit<AccessLogEntry, "id" | "createdAt">): Promise<void> {
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: accessLogs.id }).from(accessLogs).where(eq(accessLogs.id, id)).get();
+      return !!row;
+    });
     this.db.insert(accessLogs).values({
-      id: randomUUID(),
+      id,
       skillId: entry.skillId,
       skillSlug: entry.skillSlug,
       action: entry.action,

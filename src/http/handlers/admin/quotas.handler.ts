@@ -135,7 +135,7 @@ export function registerAdminQuotaRoutes(router: Router, deps: AppDependencies):
     const tenantId = requireTenantId(ctx.params.tenantId);
     // ensureSeeded so a freshly bootstrapped admin call doesn't 404 — the
     // QuotaService also auto-seeds on first hot-path check, mirror that here.
-    const row = repo.ensureSeeded(tenantId, "free");
+    const row = await repo.ensureSeeded(tenantId, "free");
     json(ctx.res, 200, { success: true, data: quotaToJson(row) });
   });
 
@@ -158,7 +158,7 @@ export function registerAdminQuotaRoutes(router: Router, deps: AppDependencies):
       notes: data.notes == null ? null : String(data.notes).slice(0, 1024),
     };
     const existing = repo.findCurrent(tenantId);
-    const updated = existing ? repo.changeTier(next) : repo.create(next);
+    const updated = existing ? await repo.changeTier(next) : await repo.create(next);
     quotaService.invalidate(tenantId);
     json(ctx.res, 200, { success: true, data: quotaToJson(updated) });
   });
@@ -195,7 +195,7 @@ export function registerAdminQuotaRoutes(router: Router, deps: AppDependencies):
       }
       expiresAt = Math.floor(data.expires_at);
     }
-    const row = repo.createOverride({
+    const row = await repo.createOverride({
       tenantId,
       fieldName,
       overrideValue,

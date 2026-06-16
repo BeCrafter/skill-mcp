@@ -42,23 +42,23 @@ describe("UsageEventRepository (P1-13)", () => {
   });
 
   describe("create", () => {
-    it("inserts and returns the entity with computed hour_bucket", () => {
+    it("inserts and returns the entity with computed hour_bucket", async () => {
       const t = Date.UTC(2026, 4, 28, 13);
-      const entity = ctx.repo.create({
+      const entity = await ctx.repo.create({
         tenantId: "default",
         eventType: "skill.view",
         resourceId: "demo-skill",
         createdAt: t,
       });
-      expect(entity.id).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(entity.id).toMatch(/^[a-z0-9]{21}$/i);
       expect(entity.hourBucket).toBe("2026-05-28T13");
       expect(entity.quantity).toBe(1);
       expect(entity.metadata).toBeNull();
     });
 
-    it("serialises metadata to JSON and parses it back on list", () => {
+    it("serialises metadata to JSON and parses it back on list", async () => {
       const t = Date.UTC(2026, 4, 28, 13);
-      ctx.repo.create({
+      await ctx.repo.create({
         tenantId: "default",
         eventType: "pipeline.run",
         resourceId: "p1",
@@ -152,18 +152,18 @@ describe("UsageEventRepository (P1-13)", () => {
   });
 
   describe("list", () => {
-    it("orders by created_at desc and respects limit", () => {
-      ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 1000, resourceId: "old" });
-      ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 2000, resourceId: "mid" });
-      ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 3000, resourceId: "new" });
+    it("orders by created_at desc and respects limit", async () => {
+      await ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 1000, resourceId: "old" });
+      await ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 2000, resourceId: "mid" });
+      await ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 3000, resourceId: "new" });
       const events = ctx.repo.list({ tenantId: "default", limit: 2 });
       expect(events).toHaveLength(2);
       expect(events[0].resourceId).toBe("new");
       expect(events[1].resourceId).toBe("mid");
     });
 
-    it("clamps limit to [1, 10000]", () => {
-      ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 1 });
+    it("clamps limit to [1, 10000]", async () => {
+      await ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 1 });
       expect(ctx.repo.list({ tenantId: "default", limit: 0 })).toHaveLength(1);
       expect(ctx.repo.list({ tenantId: "default", limit: -5 })).toHaveLength(1);
     });
@@ -188,10 +188,10 @@ describe("UsageEventRepository (P1-13)", () => {
   });
 
   describe("deleteOlderThan", () => {
-    it("deletes rows with created_at < cutoff", () => {
-      ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 100 });
-      ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 500 });
-      ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 1000 });
+    it("deletes rows with created_at < cutoff", async () => {
+      await ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 100 });
+      await ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 500 });
+      await ctx.repo.create({ tenantId: "default", eventType: "api.call", createdAt: 1000 });
       const deleted = ctx.repo.deleteOlderThan(600);
       expect(deleted).toBe(2);
       const remaining = ctx.repo.list({ tenantId: "default" });

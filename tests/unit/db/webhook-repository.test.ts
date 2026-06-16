@@ -29,8 +29,8 @@ describe("WebhookRepository (P1-16)", () => {
   let s: ReturnType<typeof setup>;
   beforeEach(() => { s = setup(); });
 
-  it("create generates a 64-char hex secret when none supplied", () => {
-    const w = s.repo.create({
+  it("create generates a 64-char hex secret when none supplied", async () => {
+    const w = await s.repo.create({
       tenantId: "default",
       url: "https://example.com/hook",
       eventTypes: ["skill.published"],
@@ -40,8 +40,8 @@ describe("WebhookRepository (P1-16)", () => {
     expect(w.eventTypes).toEqual(["skill.published"]);
   });
 
-  it("create accepts an explicit secret (test fixtures)", () => {
-    const w = s.repo.create({
+  it("create accepts an explicit secret (test fixtures)", async () => {
+    const w = await s.repo.create({
       tenantId: "default",
       url: "https://example.com/hook",
       eventTypes: ["pipeline.completed"],
@@ -50,8 +50,8 @@ describe("WebhookRepository (P1-16)", () => {
     expect(w.secret).toBe("deadbeef");
   });
 
-  it("findById round-trips event_types JSON", () => {
-    const created = s.repo.create({
+  it("findById round-trips event_types JSON", async () => {
+    const created = await s.repo.create({
       tenantId: "default",
       url: "https://example.com/hook",
       eventTypes: ["skill.published", "skill.deprecated"],
@@ -64,19 +64,19 @@ describe("WebhookRepository (P1-16)", () => {
     expect(s.repo.findById("nope")).toBeNull();
   });
 
-  it("listByTenant scopes by tenant_id", () => {
-    s.repo.create({ tenantId: "a", url: "https://example.com/1", eventTypes: ["skill.published"] });
-    s.repo.create({ tenantId: "a", url: "https://example.com/2", eventTypes: ["skill.published"] });
-    s.repo.create({ tenantId: "b", url: "https://example.com/3", eventTypes: ["skill.published"] });
+  it("listByTenant scopes by tenant_id", async () => {
+    await s.repo.create({ tenantId: "a", url: "https://example.com/1", eventTypes: ["skill.published"] });
+    await s.repo.create({ tenantId: "a", url: "https://example.com/2", eventTypes: ["skill.published"] });
+    await s.repo.create({ tenantId: "b", url: "https://example.com/3", eventTypes: ["skill.published"] });
     expect(s.repo.listByTenant("a")).toHaveLength(2);
     expect(s.repo.listByTenant("b")).toHaveLength(1);
     expect(s.repo.listByTenant("c")).toHaveLength(0);
   });
 
-  it("listEnabledForEvent filters by enabled flag and subscribed event", () => {
-    const w1 = s.repo.create({ tenantId: "default", url: "https://example.com/1", eventTypes: ["skill.published"] });
-    s.repo.create({ tenantId: "default", url: "https://example.com/2", eventTypes: ["pipeline.completed"] });
-    const w3 = s.repo.create({ tenantId: "default", url: "https://example.com/3", eventTypes: ["skill.published", "skill.deprecated"] });
+  it("listEnabledForEvent filters by enabled flag and subscribed event", async () => {
+    const w1 = await s.repo.create({ tenantId: "default", url: "https://example.com/1", eventTypes: ["skill.published"] });
+    await s.repo.create({ tenantId: "default", url: "https://example.com/2", eventTypes: ["pipeline.completed"] });
+    const w3 = await s.repo.create({ tenantId: "default", url: "https://example.com/3", eventTypes: ["skill.published", "skill.deprecated"] });
     s.repo.update(w3.id, { enabled: false });
 
     const matched = s.repo.listEnabledForEvent("default", "skill.published");
@@ -84,7 +84,7 @@ describe("WebhookRepository (P1-16)", () => {
   });
 
   it("update is partial — unspecified fields stay", async () => {
-    const w = s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"], description: "orig" });
+    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"], description: "orig" });
     // Wait 2ms so updated_at differs
     await new Promise(r => setTimeout(r, 2));
     const updated = s.repo.update(w.id, { url: "https://new.example.com" });
@@ -93,8 +93,8 @@ describe("WebhookRepository (P1-16)", () => {
     expect(updated!.updatedAt).toBeGreaterThan(w.updatedAt);
   });
 
-  it("update can disable a webhook", () => {
-    const w = s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
+  it("update can disable a webhook", async () => {
+    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
     const updated = s.repo.update(w.id, { enabled: false });
     expect(updated?.enabled).toBe(false);
   });
@@ -103,8 +103,8 @@ describe("WebhookRepository (P1-16)", () => {
     expect(s.repo.update("nope", { enabled: false })).toBeNull();
   });
 
-  it("rotateSecret produces a fresh 64-char hex secret and stamps secretRotatedAt", () => {
-    const w = s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
+  it("rotateSecret produces a fresh 64-char hex secret and stamps secretRotatedAt", async () => {
+    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
     const rotated = s.repo.rotateSecret(w.id);
     expect(rotated?.secret).toMatch(/^[0-9a-f]{64}$/);
     expect(rotated?.secret).not.toBe(w.secret);
@@ -115,8 +115,8 @@ describe("WebhookRepository (P1-16)", () => {
     expect(s.repo.rotateSecret("nope")).toBeNull();
   });
 
-  it("delete removes the row and returns true", () => {
-    const w = s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
+  it("delete removes the row and returns true", async () => {
+    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
     expect(s.repo.delete(w.id)).toBe(true);
     expect(s.repo.findById(w.id)).toBeNull();
   });

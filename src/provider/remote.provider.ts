@@ -3,6 +3,7 @@ import type { ISkillProvider } from "./interface.js";
 import type { SkillMeta, SkillFileContent, FileInfo } from "../types/index.js";
 import type { ICacheProvider } from "../cache/provider.interface.js";
 import { validateFilePath } from "../utils/security.js";
+import { isLegacyUuid } from "../utils/id.js";
 import { SkillNotFoundError, UpstreamError } from "../utils/errors.js";
 import { getLogger } from "../utils/logger.js";
 import { metrics } from "../telemetry/metrics.js";
@@ -344,8 +345,8 @@ export class RemoteSkillProvider implements ISkillProvider {
   }
 
   private async resolveSkill(identifier: string): Promise<SkillMeta | null> {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
-    if (isUuid) {
+    const isId = identifier.startsWith("skl_") || isLegacyUuid(identifier);
+    if (isId) {
       const byId = await this.getSkillMetaById(identifier);
       if (byId) return byId;
     }

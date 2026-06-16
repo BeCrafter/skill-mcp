@@ -40,8 +40,8 @@ describe("SkillVersionRepository", () => {
   let ctx: ReturnType<typeof setup>;
   beforeEach(() => { ctx = setup(); });
 
-  it("create returns the row with all defaults filled", () => {
-    const v = ctx.repo.create({
+  it("create returns the row with all defaults filled", async () => {
+    const v = await ctx.repo.create({
       skillId: "skill-1", version: "1.0.0",
       contentHash: "h-1", storagePath: "demo/",
       fileCount: 3,
@@ -52,8 +52,8 @@ describe("SkillVersionRepository", () => {
     expect(typeof v.createdAt).toBe("number");
   });
 
-  it("create persists optional fields when provided", () => {
-    const v = ctx.repo.create({
+  it("create persists optional fields when provided", async () => {
+    const v = await ctx.repo.create({
       skillId: "skill-1", version: "2.0.0",
       contentHash: "h-2", storagePath: "demo/",
       fileCount: 5, entryFile: "INDEX.md",
@@ -65,46 +65,46 @@ describe("SkillVersionRepository", () => {
   });
 
   it("findBySkillId returns versions newest-first", async () => {
-    ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
+    await ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
     await new Promise(r => setTimeout(r, 5));
-    ctx.repo.create({ skillId: "skill-1", version: "1.1.0", contentHash: "b", storagePath: "x", fileCount: 1 });
+    await ctx.repo.create({ skillId: "skill-1", version: "1.1.0", contentHash: "b", storagePath: "x", fileCount: 1 });
     await new Promise(r => setTimeout(r, 5));
-    ctx.repo.create({ skillId: "skill-1", version: "2.0.0", contentHash: "c", storagePath: "x", fileCount: 1 });
+    await ctx.repo.create({ skillId: "skill-1", version: "2.0.0", contentHash: "c", storagePath: "x", fileCount: 1 });
     const rows = ctx.repo.findBySkillId("skill-1");
     expect(rows.map(r => r.version)).toEqual(["2.0.0", "1.1.0", "1.0.0"]);
   });
 
-  it("findBySkillId honors limit", () => {
+  it("findBySkillId honors limit", async () => {
     for (let i = 0; i < 5; i++) {
-      ctx.repo.create({ skillId: "skill-1", version: `1.0.${i}`, contentHash: `h${i}`, storagePath: "x", fileCount: 1 });
+      await ctx.repo.create({ skillId: "skill-1", version: `1.0.${i}`, contentHash: `h${i}`, storagePath: "x", fileCount: 1 });
     }
     expect(ctx.repo.findBySkillId("skill-1", 2)).toHaveLength(2);
   });
 
-  it("findByVersion locates exact match (rollback path)", () => {
-    ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "h-old", storagePath: "x", fileCount: 1 });
-    ctx.repo.create({ skillId: "skill-1", version: "1.1.0", contentHash: "h-new", storagePath: "x", fileCount: 1 });
+  it("findByVersion locates exact match (rollback path)", async () => {
+    await ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "h-old", storagePath: "x", fileCount: 1 });
+    await ctx.repo.create({ skillId: "skill-1", version: "1.1.0", contentHash: "h-new", storagePath: "x", fileCount: 1 });
     const hit = ctx.repo.findByVersion("skill-1", "1.0.0");
     expect(hit?.contentHash).toBe("h-old");
     expect(ctx.repo.findByVersion("skill-1", "9.9.9")).toBeNull();
     expect(ctx.repo.findByVersion("missing-skill", "1.0.0")).toBeNull();
   });
 
-  it("count counts only the targeted skill", () => {
+  it("count counts only the targeted skill", async () => {
     // Add a second skill so we can prove the WHERE clause isolates rows.
     const sqlite = (ctx.repo as unknown as { db: { $client: Database.Database } }).db.$client;
     sqlite.prepare(`INSERT INTO skills (id, slug, name, storage_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run("skill-2", "other", "other", "other/", Date.now(), Date.now());
-    ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
-    ctx.repo.create({ skillId: "skill-1", version: "1.0.1", contentHash: "b", storagePath: "x", fileCount: 1 });
-    ctx.repo.create({ skillId: "skill-2", version: "1.0.0", contentHash: "c", storagePath: "y", fileCount: 1 });
+    await ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
+    await ctx.repo.create({ skillId: "skill-1", version: "1.0.1", contentHash: "b", storagePath: "x", fileCount: 1 });
+    await ctx.repo.create({ skillId: "skill-2", version: "1.0.0", contentHash: "c", storagePath: "y", fileCount: 1 });
     expect(ctx.repo.count("skill-1")).toBe(2);
     expect(ctx.repo.count("skill-2")).toBe(1);
   });
 
   it("deleteOldVersions keeps newest N and reports deletion count", async () => {
     for (let i = 0; i < 5; i++) {
-      ctx.repo.create({ skillId: "skill-1", version: `1.0.${i}`, contentHash: `h${i}`, storagePath: "x", fileCount: 1 });
+      await ctx.repo.create({ skillId: "skill-1", version: `1.0.${i}`, contentHash: `h${i}`, storagePath: "x", fileCount: 1 });
       await new Promise(r => setTimeout(r, 2));
     }
     const deleted = ctx.repo.deleteOldVersions("skill-1", 2);
@@ -113,14 +113,14 @@ describe("SkillVersionRepository", () => {
     expect(remaining.map(r => r.version)).toEqual(["1.0.4", "1.0.3"]);
   });
 
-  it("deleteOldVersions is a no-op when within the keep limit", () => {
-    ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
+  it("deleteOldVersions is a no-op when within the keep limit", async () => {
+    await ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
     expect(ctx.repo.deleteOldVersions("skill-1", 5)).toBe(0);
     expect(ctx.repo.count("skill-1")).toBe(1);
   });
 
-  it("cascades on parent skill delete", () => {
-    ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
+  it("cascades on parent skill delete", async () => {
+    await ctx.repo.create({ skillId: "skill-1", version: "1.0.0", contentHash: "a", storagePath: "x", fileCount: 1 });
     const sqlite = (ctx.repo as unknown as { db: { $client: Database.Database } }).db.$client;
     sqlite.prepare(`DELETE FROM skills WHERE id = ?`).run("skill-1");
     expect(ctx.repo.count("skill-1")).toBe(0);

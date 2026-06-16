@@ -1,5 +1,5 @@
 import { and, eq, lte, asc, desc } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { generateId, shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { webhookDeliveries } from "../schema.js";
 
@@ -65,9 +65,9 @@ export class WebhookDeliveryRepository {
    * Insert a fresh `pending` row. `next_retry_at = now` so the worker picks
    * it up on the very next poll. Returns the row.
    */
-  enqueue(input: EnqueueDeliveryInput): WebhookDeliveryEntity {
-    const id = randomUUID();
-    const deliveryId = input.deliveryId ?? randomUUID();
+  async enqueue(input: EnqueueDeliveryInput): Promise<WebhookDeliveryEntity> {
+    const id = await generateUniqueId(() => shortId(), async (id) => !!(await this.findById(id)));
+    const deliveryId = input.deliveryId ?? await generateUniqueId(() => generateId("dlv_"), async (id) => !!(await this.findById(id)));
     const now = input.now ?? Date.now();
     this.db.insert(webhookDeliveries).values({
       id,

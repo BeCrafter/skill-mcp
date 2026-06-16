@@ -140,7 +140,7 @@ describe("SkillImporter T-202 idempotency", () => {
     expect(storage.moveDir).not.toHaveBeenCalled();
     // Staging is still cleaned up.
     expect(storage.deleteDir).toHaveBeenCalledWith(
-      expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/),
+      expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/),
     );
   });
 

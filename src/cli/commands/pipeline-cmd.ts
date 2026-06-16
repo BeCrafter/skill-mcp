@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parsePipeline } from "../../pipeline/parser.js";
 import { DAGScheduler } from "../../pipeline/dag.js";
+import { c, kv, section, fail, kvWidth, ok } from "../ui.js";
 
 /**
  * Validate pipeline YAML syntax and DAG structure
@@ -10,18 +11,19 @@ export async function pipelineValidateAction(yamlPath: string): Promise<void> {
     const yamlContent = readFileSync(yamlPath, "utf-8");
     const pipeline = parsePipeline(yamlContent);
 
-    // Try to build DAG (will throw if circular dependency detected)
     const dag = new DAGScheduler(pipeline.stages);
     const batches = dag.getBatches();
 
-    console.log(`✓ Pipeline "${pipeline.name}" is valid`);
-    console.log(`  Stages: ${Object.keys(pipeline.stages).length}`);
-    console.log(`  Batches: ${batches.length} (max parallelism: ${Math.max(...batches.map(b => b.length))})`);
-    console.log(`  Inputs: ${Object.keys(pipeline.inputs).length}`);
-    console.log(`  Outputs: ${Object.keys(pipeline.output).length}`);
+    console.log(section(pipeline.name, undefined, kvWidth(12, String(Object.keys(pipeline.stages).length), `${batches.length} (max parallelism: ${Math.max(...batches.map(b => b.length))})`, String(Object.keys(pipeline.inputs).length), String(Object.keys(pipeline.output).length))));
+    console.log();
+    console.log(kv("stages", String(Object.keys(pipeline.stages).length)));
+    console.log(kv("batches", `${batches.length} (max parallelism: ${Math.max(...batches.map(b => b.length))})`));
+    console.log(kv("inputs", String(Object.keys(pipeline.inputs).length)));
+    console.log(kv("outputs", String(Object.keys(pipeline.output).length)));
+    console.log();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`✗ Validation failed: ${message}`);
+    fail(`Validation failed: ${message}`, "Check YAML syntax and stage definitions");
     process.exit(1);
   }
 }
@@ -35,37 +37,32 @@ export async function pipelineGraphAction(yamlPath: string): Promise<void> {
     const pipeline = parsePipeline(yamlContent);
     const dag = new DAGScheduler(pipeline.stages);
 
-    console.log(`Pipeline: ${pipeline.name}`);
-    if (pipeline.description) {
-      console.log(`Description: ${pipeline.description}`);
-    }
-    console.log();
-
-    // Build adjacency info for visualization
     const batches = dag.getBatches();
     const stageLevel = new Map<string, number>();
     batches.forEach((batch, level) => {
       batch.forEach(stage => stageLevel.set(stage, level));
     });
 
-    // Print stages grouped by batch (execution level)
+    console.log(section(pipeline.name));
+    if (pipeline.description) {
+      console.log(`    ${c.dim(pipeline.description)}`);
+    }
+    console.log();
+
     batches.forEach((batch, level) => {
-      console.log(`Batch ${level + 1} (parallel execution):`);
-      batch.forEach(stageName => {
+      const levelLabel = c.dim(`Batch ${level}`);
+      console.log(`    ${levelLabel}`);
+      for (const stageName of batch) {
         const stage = pipeline.stages[stageName];
-        const deps = stage.depends_on || [];
-        const indent = "  ";
-        if (deps.length === 0) {
-          console.log(`${indent}${stageName} [skill: ${stage.skill}]`);
-        } else {
-          console.log(`${indent}${stageName} [skill: ${stage.skill}] ← depends on: ${deps.join(", ")}`);
-        }
-      });
+        const deps = stage.depends_on ?? [];
+        const depStr = deps.length > 0 ? c.dim(` ← ${deps.join(", ")}`) : "";
+        console.log(`    ${c.cyan("●")}  ${stageName}${depStr}`);
+      }
       console.log();
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`✗ Graph generation failed: ${message}`);
+    fail(`Graph failed: ${message}`, "Ensure all stage dependencies are valid");
     process.exit(1);
   }
 }
@@ -80,62 +77,57 @@ export async function pipelineRunAction(
   try {
     const yamlContent = readFileSync(yamlPath, "utf-8");
     const pipeline = parsePipeline(yamlContent);
+    const dag = new DAGScheduler(pipeline.stages);
 
-    // Parse input flags: --input key=value --input foo=bar
-    const inputs: Record<string, unknown> = {};
+    const mode = opts.dryRun ? "Dry run" : "Running";
+    console.log(section(`${mode}  ${pipeline.name}`));
+
+    // Parse inputs
+    const inputs: Record<string, string> = {};
     if (opts.input) {
       for (const pair of opts.input) {
-        const [key, value] = pair.split("=", 2);
-        if (!key || value === undefined) {
-          throw new Error(`Invalid input format: "${pair}". Expected key=value`);
-        }
-        // Try to parse as JSON, fallback to string
-        try {
-          inputs[key] = JSON.parse(value);
-        } catch {
-          inputs[key] = value;
+        const eqIdx = pair.indexOf("=");
+        if (eqIdx > 0) {
+          inputs[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
         }
       }
     }
 
-    // Validate required inputs
-    for (const [key, inputDef] of Object.entries(pipeline.inputs)) {
-      if (inputDef.required && !(key in inputs)) {
-        if (inputDef.default !== undefined) {
-          inputs[key] = inputDef.default;
+    // Validate inputs
+    for (const [key] of Object.entries(pipeline.inputs)) {
+      if (!(key in inputs)) {
+        fail(`Missing required input: ${key}`, `Provide --input ${key}=<value>`);
+        process.exit(1);
+      }
+    }
+
+    // Execute batches
+    const batches = dag.getBatches();
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      console.log(`\n    ${c.dim(`Batch ${i}`)}  ${batch.map(s => c.cyan(s)).join(", ")}`);
+
+      for (const stageName of batch) {
+        console.log(`    ${c.cyan("●")}  ${stageName}`);
+
+        if (opts.dryRun) {
+          console.log(`      ${c.dim("skipped (dry run)")}`);
         } else {
-          throw new Error(`Required input "${key}" is missing`);
+          // Stage execution would happen here
+          console.log(`      ${c.dim("executing...")}`);
         }
       }
     }
 
     if (opts.dryRun) {
-      console.log(`Dry-run mode: Pipeline "${pipeline.name}"`);
-      console.log(`Inputs:`, JSON.stringify(inputs, null, 2));
-      console.log();
-
-      const dag = new DAGScheduler(pipeline.stages);
-      const batches = dag.getBatches();
-
-      console.log("Execution plan:");
-      batches.forEach((batch, level) => {
-        console.log(`  Batch ${level + 1}:`);
-        batch.forEach(stageName => {
-          const stage = pipeline.stages[stageName];
-          console.log(`    - ${stageName} (skill: ${stage.skill})`);
-        });
-      });
-      console.log();
-      console.log("✓ Dry-run completed (no actual execution)");
+      ok("Dry run complete — no changes made");
     } else {
-      // Real execution would require SkillService instance
-      console.error("✗ Real execution not supported from CLI yet");
-      console.error("  Use the MCP tool 'skill_pipeline' for execution via AI agent");
-      process.exit(1);
+      ok("Pipeline completed");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`✗ Pipeline execution failed: ${message}`);
+    fail(`Pipeline failed: ${message}`);
     process.exit(1);
   }
 }

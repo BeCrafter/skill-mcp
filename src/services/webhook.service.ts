@@ -121,7 +121,7 @@ export class WebhookService {
 
   // --- CRUD ---------------------------------------------------------------
 
-  create(input: { tenantId: string; url: string; eventTypes: unknown; description?: string | null }): WebhookEntity {
+  async create(input: { tenantId: string; url: string; eventTypes: unknown; description?: string | null }): Promise<WebhookEntity> {
     this.validateUrl(input.url);
     const eventTypes = this.validateEventTypes(input.eventTypes);
     const payload: CreateWebhookInput = {
@@ -130,7 +130,7 @@ export class WebhookService {
       eventTypes,
       description: input.description ?? null,
     };
-    return this.webhookRepo.create(payload);
+    return await this.webhookRepo.create(payload);
   }
 
   update(id: string, patch: { url?: string; eventTypes?: unknown; enabled?: boolean; description?: string | null }): WebhookEntity {
@@ -177,11 +177,11 @@ export class WebhookService {
    *
    * Returns the IDs of enqueued delivery rows (mostly useful for tests).
    */
-  publishEvent(
+  async publishEvent(
     eventType: WebhookEventType,
     tenantId: string,
     data: Record<string, unknown>,
-  ): string[] {
+  ): Promise<string[]> {
     try {
       const subscriptions = this.webhookRepo.listEnabledForEvent(tenantId, eventType);
       if (subscriptions.length === 0) return [];
@@ -197,7 +197,7 @@ export class WebhookService {
           data,
         };
         try {
-          const delivery = this.deliveryRepo.enqueue({
+          const delivery = await this.deliveryRepo.enqueue({
             webhookId: sub.id,
             tenantId,
             eventType,

@@ -50,6 +50,7 @@
     "commander": "^13.1.0",
     "drizzle-orm": "^0.39.3",
     "js-yaml": "^4.1.1",
+    "nanoid": "^5.1.11",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "prom-client": "^15.1.3",

@@ -3,7 +3,7 @@ import { rm, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { shortId } from "../utils/id.js";
 import type { SkillFileInput } from "../types/index.js";
 import { parseSkillMeta, validateSkillMeta, readSkillFiles } from "../utils/manifest.js";
 import { getLogger } from "../utils/logger.js";
@@ -40,7 +40,7 @@ export class GitSourceResolver {
     validateRepoUrl(repoUrl);
     if (options?.branch) validateBranch(options.branch);
 
-    const tmpDir = join(tmpdir(), `skill-import-${randomUUID()}`);
+    const tmpDir = join(tmpdir(), `skill-import-${shortId()}`);
 
     try {
       const git = simpleGit();

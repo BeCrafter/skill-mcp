@@ -106,7 +106,7 @@ describe("SkillImporter staging-commit rollback", () => {
     expect(fileRepo.replaceAll).not.toHaveBeenCalled();
     // staging cleanup attempted
     expect(storage.deleteDir).toHaveBeenCalledWith(
-      expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/),
+      expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/),
     );
   });
 
@@ -132,7 +132,7 @@ describe("SkillImporter staging-commit rollback", () => {
     expect(storage.deleteDir).not.toHaveBeenCalledWith("demo/");
     // Staging cleanup still runs.
     expect(storage.deleteDir).toHaveBeenCalledWith(
-      expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/),
+      expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/),
     );
   });
 
@@ -257,14 +257,14 @@ describe("SkillImporter staging-commit rollback", () => {
     expect(putCalls.length).toBeGreaterThan(0);
     expect(putCalls.every(([path]) => (path as string).startsWith("__staging__/"))).toBe(true);
     expect(storage.moveDir).toHaveBeenCalledWith(
-      expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/),
+      expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/),
       "demo/",
     );
     expect(skillRepo.create).toHaveBeenCalled();
     expect(fileRepo.replaceAll).toHaveBeenCalledWith("new-skill-id", expect.any(Array));
     // staging cleanup
     expect(storage.deleteDir).toHaveBeenCalledWith(
-      expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/),
+      expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/),
     );
   });
 });

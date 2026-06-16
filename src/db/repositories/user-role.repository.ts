@@ -1,5 +1,5 @@
 import { eq, inArray } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { userRoles, roles } from "../schema.js";
 import { getLogger } from "../../utils/logger.js";
@@ -90,7 +90,7 @@ export class UserRoleRepository {
       tx.delete(userRoles).where(eq(userRoles.userId, userId)).run();
       if (unique.length === 0) return;
       tx.insert(userRoles).values(
-        unique.map(roleId => ({ id: randomUUID(), userId, roleId, createdAt: now })),
+        unique.map(roleId => ({ id: shortId(), userId, roleId, createdAt: now })),
       ).run();
     });
   }

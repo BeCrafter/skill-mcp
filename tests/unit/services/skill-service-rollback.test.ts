@@ -210,7 +210,7 @@ describe("SkillService.rollbackToVersion", () => {
     const restorePuts = putMock.mock.calls.filter(([p]) => p === "demo/SKILL.md" || p === "demo/ref.md");
     expect(restorePuts.length).toBeGreaterThan(0);
     // Staging always cleaned.
-    expect(storage.deleteDir).toHaveBeenCalledWith(expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/));
+    expect(storage.deleteDir).toHaveBeenCalledWith(expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/));
   });
 
   it("DB update failure rolls back live storage from snapshot and does not poison cache", async () => {
@@ -239,7 +239,7 @@ describe("SkillService.rollbackToVersion", () => {
 
     // Cache must NOT be invalidated when the rollback failed.
     expect(cache.clearByPrefix).not.toHaveBeenCalled();
-    expect(storage.deleteDir).toHaveBeenCalledWith(expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/));
+    expect(storage.deleteDir).toHaveBeenCalledWith(expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/));
   });
 
   it("uses an isolated staging directory and cleans it up on the happy path", async () => {
@@ -266,8 +266,8 @@ describe("SkillService.rollbackToVersion", () => {
       .map(c => c[0] as string)
       .filter(p => p.startsWith("__staging__/"));
     expect(stagingPuts.length).toBeGreaterThan(0);
-    expect(stagingPuts.every(p => /^__staging__\/[0-9a-f-]+\//.test(p))).toBe(true);
-    expect(storage.deleteDir).toHaveBeenCalledWith(expect.stringMatching(/^__staging__\/[0-9a-f-]+\/$/));
+    expect(stagingPuts.every(p => /^__staging__\/[a-z0-9]+\//.test(p))).toBe(true);
+    expect(storage.deleteDir).toHaveBeenCalledWith(expect.stringMatching(/^__staging__\/[a-z0-9]+\/$/));
   });
 
   it("T-723: deletes live files absent from the target version before restoring", async () => {

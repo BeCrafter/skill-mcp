@@ -50,72 +50,72 @@ function setup(opts: { overrides?: QuotaOverrideEntity[]; quota?: Partial<Tenant
 
 describe("QuotaService (P1-13.5)", () => {
   describe("resolveTenant", () => {
-    it("auto-seeds via ensureSeeded(free) on first access", () => {
+    it("auto-seeds via ensureSeeded(free) on first access", async () => {
       const { svc, ensureSeeded } = setup();
-      svc.resolveTenant("default");
+      await svc.resolveTenant("default");
       expect(ensureSeeded).toHaveBeenCalledWith("default", "free");
     });
 
-    it("caches lookups for the TTL window (no second repo call)", () => {
+    it("caches lookups for the TTL window (no second repo call)", async () => {
       const { svc, ensureSeeded } = setup();
-      svc.resolveTenant("default", 1000);
-      svc.resolveTenant("default", 1500);
+      await svc.resolveTenant("default", 1000);
+      await svc.resolveTenant("default", 1500);
       expect(ensureSeeded).toHaveBeenCalledTimes(1);
     });
 
-    it("invalidate() drops the cache so the next call hits the repo again", () => {
+    it("invalidate() drops the cache so the next call hits the repo again", async () => {
       const { svc, ensureSeeded } = setup();
-      svc.resolveTenant("default", 1000);
+      await svc.resolveTenant("default", 1000);
       svc.invalidate("default");
-      svc.resolveTenant("default", 1500);
+      await svc.resolveTenant("default", 1500);
       expect(ensureSeeded).toHaveBeenCalledTimes(2);
     });
 
-    it("re-reads after the TTL expires", () => {
+    it("re-reads after the TTL expires", async () => {
       const { svc, ensureSeeded } = setup();
-      svc.resolveTenant("default", 0);
-      svc.resolveTenant("default", 10_000);
+      await svc.resolveTenant("default", 0);
+      await svc.resolveTenant("default", 10_000);
       expect(ensureSeeded).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("resolveLimit", () => {
-    it("returns the tier value when no override matches the field", () => {
+    it("returns the tier value when no override matches the field", async () => {
       const { svc } = setup();
-      const r = svc.resolveLimit("default", "max_skills");
+      const r = await svc.resolveLimit("default", "max_skills");
       expect(r.value).toBe(DEFAULT_TIER_LIMITS.free.maxSkills);
       expect(r.source).toBe("tier");
     });
 
-    it("returns the override value when one matches", () => {
+    it("returns the override value when one matches", async () => {
       const ov: QuotaOverrideEntity = {
         id: "o1", tenantId: "default", fieldName: "max_skills",
         overrideValue: 9999, reason: "VIP", grantedBy: "a",
         grantedAt: 0, expiresAt: null,
       };
       const { svc } = setup({ overrides: [ov] });
-      const r = svc.resolveLimit("default", "max_skills");
+      const r = await svc.resolveLimit("default", "max_skills");
       expect(r.value).toBe(9999);
       expect(r.source).toBe("override");
       expect(r.override?.id).toBe("o1");
     });
 
-    it("ignores overrides that target a different field", () => {
+    it("ignores overrides that target a different field", async () => {
       const ov: QuotaOverrideEntity = {
         id: "o1", tenantId: "default", fieldName: "max_users",
         overrideValue: 9999, reason: "x", grantedBy: "a",
         grantedAt: 0, expiresAt: null,
       };
       const { svc } = setup({ overrides: [ov] });
-      const r = svc.resolveLimit("default", "max_skills");
+      const r = await svc.resolveLimit("default", "max_skills");
       expect(r.source).toBe("tier");
     });
   });
 
   describe("check", () => {
-    it("ok when projected (used+increment) ≤ limit", () => {
+    it("ok when projected (used+increment) ≤ limit", async () => {
       const { svc } = setup({ usage: 100 });
-      const r = svc.check({ tenantId: "default", dimension: "api_calls", increment: 1 });
+      const r = await svc.check({ tenantId: "default", dimension: "api_calls", increment: 1 });
       expect(r.ok).toBe(true);
       expect(r.used).toBe(100);
       expect(r.limit).toBe(DEFAULT_TIER_LIMITS.free.maxApiCallsPerDay);
@@ -123,30 +123,30 @@ describe("QuotaService (P1-13.5)", () => {
       expect(r.source).toBe("tier");
     });
 
-    it("not-ok when projected > limit", () => {
+    it("not-ok when projected > limit", async () => {
       const { svc } = setup({ usage: DEFAULT_TIER_LIMITS.free.maxApiCallsPerDay });
-      const r = svc.check({ tenantId: "default", dimension: "api_calls", increment: 1 });
+      const r = await svc.check({ tenantId: "default", dimension: "api_calls", increment: 1 });
       expect(r.ok).toBe(false);
       expect(r.remaining).toBe(0);
     });
 
-    it("right at the limit (used == limit, increment 0) is ok", () => {
+    it("right at the limit (used == limit, increment 0) is ok", async () => {
       const { svc } = setup({ usage: DEFAULT_TIER_LIMITS.free.maxApiCallsPerDay });
-      const r = svc.check({ tenantId: "default", dimension: "api_calls", increment: 0 });
+      const r = await svc.check({ tenantId: "default", dimension: "api_calls", increment: 0 });
       expect(r.ok).toBe(true);
     });
 
-    it("default increment is 1", () => {
+    it("default increment is 1", async () => {
       const { svc } = setup({ usage: DEFAULT_TIER_LIMITS.free.maxApiCallsPerDay - 1 });
-      expect(svc.check({ tenantId: "default", dimension: "api_calls" }).ok).toBe(true);
+      expect((await svc.check({ tenantId: "default", dimension: "api_calls" })).ok).toBe(true);
       const { svc: svc2 } = setup({ usage: DEFAULT_TIER_LIMITS.free.maxApiCallsPerDay });
-      expect(svc2.check({ tenantId: "default", dimension: "api_calls" }).ok).toBe(false);
+      expect((await svc2.check({ tenantId: "default", dimension: "api_calls" })).ok).toBe(false);
     });
 
-    it("queries usage_events with the UTC day window for daily dimensions", () => {
+    it("queries usage_events with the UTC day window for daily dimensions", async () => {
       const { svc, sumQuantity } = setup();
       const noon = Date.UTC(2026, 4, 28, 12, 0, 0);
-      svc.check({ tenantId: "default", dimension: "api_calls", now: noon });
+      await svc.check({ tenantId: "default", dimension: "api_calls", now: noon });
       expect(sumQuantity).toHaveBeenCalledWith(expect.objectContaining({
         tenantId: "default",
         eventType: "api.call",
@@ -155,47 +155,47 @@ describe("QuotaService (P1-13.5)", () => {
       }));
     });
 
-    it("storage_bytes dimension reads storage.write events", () => {
+    it("storage_bytes dimension reads storage.write events", async () => {
       const { svc, sumQuantity } = setup({ usage: 1024 });
-      const r = svc.check({ tenantId: "default", dimension: "storage_bytes", increment: 100 });
+      const r = await svc.check({ tenantId: "default", dimension: "storage_bytes", increment: 100 });
       expect(sumQuantity).toHaveBeenCalledWith(expect.objectContaining({ eventType: "storage.write" }));
       expect(r.used).toBe(1024);
     });
 
-    it("users / skills dimensions report used=0 (point-in-time counts deferred)", () => {
+    it("users / skills dimensions report used=0 (point-in-time counts deferred)", async () => {
       const { svc, sumQuantity } = setup();
-      const r = svc.check({ tenantId: "default", dimension: "skills", increment: 1 });
+      const r = await svc.check({ tenantId: "default", dimension: "skills", increment: 1 });
       expect(r.used).toBe(0);
       expect(sumQuantity).not.toHaveBeenCalled();
     });
 
-    it("FAIL-OPEN — when ensureSeeded throws, returns ok with source=unknown", () => {
+    it("FAIL-OPEN — when ensureSeeded throws, returns ok with source=unknown", async () => {
       const ensureSeeded = vi.fn().mockImplementation(() => { throw new Error("db down"); });
       const quotaRepo = { ensureSeeded, listActiveOverrides: vi.fn() } as unknown as TenantQuotaRepository;
       const usageMeter = { sumQuantity: vi.fn() } as unknown as UsageMeterService;
       const logger = fakeLogger();
       const svc = new QuotaService(quotaRepo, usageMeter, logger);
-      const r = svc.check({ tenantId: "default", dimension: "api_calls" });
+      const r = await svc.check({ tenantId: "default", dimension: "api_calls" });
       expect(r.ok).toBe(true);
       expect(r.source).toBe("unknown");
       expect(r.limit).toBe(Number.POSITIVE_INFINITY);
       expect(logger.warn).toHaveBeenCalled();
     });
 
-    it("blank tenantId falls back to DEFAULT_TENANT_ID", () => {
+    it("blank tenantId falls back to DEFAULT_TENANT_ID", async () => {
       const { svc, ensureSeeded } = setup();
-      svc.check({ tenantId: "", dimension: "api_calls" });
+      await svc.check({ tenantId: "", dimension: "api_calls" });
       expect(ensureSeeded).toHaveBeenCalledWith("default", "free");
     });
 
-    it("override winning bumps the limit so a previously-blocked request now passes", () => {
+    it("override winning bumps the limit so a previously-blocked request now passes", async () => {
       const ov: QuotaOverrideEntity = {
         id: "o1", tenantId: "default", fieldName: "max_api_calls_per_day",
         overrideValue: 50_000, reason: "burst", grantedBy: "a",
         grantedAt: 0, expiresAt: null,
       };
       const { svc } = setup({ overrides: [ov], usage: DEFAULT_TIER_LIMITS.free.maxApiCallsPerDay + 100 });
-      const r = svc.check({ tenantId: "default", dimension: "api_calls", increment: 1 });
+      const r = await svc.check({ tenantId: "default", dimension: "api_calls", increment: 1 });
       expect(r.ok).toBe(true);
       expect(r.limit).toBe(50_000);
       expect(r.source).toBe("override");

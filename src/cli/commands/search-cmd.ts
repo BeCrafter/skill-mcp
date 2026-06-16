@@ -2,7 +2,7 @@ import { getConfig } from "../../config/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
-import { c, badge, truncate, sep, warn } from "../ui.js";
+import { c, badge, truncate, table, section, warn } from "../ui.js";
 
 export async function searchAction(name: string): Promise<void> {
   const config = getConfig();
@@ -18,15 +18,24 @@ export async function searchAction(name: string): Promise<void> {
     return;
   }
 
+  console.log(section(`Results for "${name}"`, results.length));
+  console.log();
+
   const slugWidth = Math.min(Math.max(...results.map(s => s.slug.length), 16), 36);
 
-  console.log(`\n  ${c.bold(String(results.length))} ${results.length === 1 ? "skill" : "skills"} matching ${c.boldCyan(name)}\n`);
-  console.log(`  ${sep(slugWidth + 34)}\n`);
+  const rows = results.map(s => ({
+    slug: c.boldCyan(s.slug),
+    version: c.dim("v" + s.version),
+    status: badge(s.status),
+    desc: s.description ? c.dim(truncate(s.description, 50)) : "",
+  }));
 
-  for (const s of results) {
-    const nameTag = s.name !== s.slug ? `  ${c.dim("[" + s.name + "]")}` : "";
-    console.log(`  ${c.boldCyan(s.slug.padEnd(slugWidth))}  ${c.dim(("v" + s.version).padEnd(9))}  ${badge(s.status)}${nameTag}`);
-    if (s.description) console.log(`  ${c.dim(truncate(s.description))}`);
-    console.log();
-  }
+  console.log(table(rows, [
+    { key: "slug", header: "SLUG", width: slugWidth },
+    { key: "version", header: "VERSION", width: 10 },
+    { key: "status", header: "STATUS", width: 16 },
+    { key: "desc", header: "DESCRIPTION", width: 52 },
+  ]));
+
+  console.log();
 }

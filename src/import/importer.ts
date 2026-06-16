@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import { randomUUID } from "node:crypto";
+import { shortId } from "../utils/id.js";
 import type { IStorageProvider } from "../storage/provider.interface.js";
 import type { ICacheProvider } from "../cache/provider.interface.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
@@ -253,7 +253,7 @@ export class SkillImporter {
       ? bumpVersion(targetSkill.version, options.versionBump)
       : (meta.version ?? "1.0.0");
 
-    const importId = randomUUID();
+    const importId = shortId();
     const stagingPath = `${STAGING_ROOT}/${importId}/`;
     const baseSlug = slug;
 

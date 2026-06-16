@@ -17,14 +17,14 @@ describe("PipelineRunStore maxRuns (T-710)", () => {
     output: {},
   };
 
-  it("evicts oldest runs when count exceeds maxRuns", () => {
+  it("evicts oldest runs when count exceeds maxRuns", async () => {
     const store = new PipelineRunStore(undefined, { maxRuns: 3 });
     const ids = [
-      store.createRun(pipeline, {}),
-      store.createRun(pipeline, {}),
-      store.createRun(pipeline, {}),
-      store.createRun(pipeline, {}),
-      store.createRun(pipeline, {}),
+      await store.createRun(pipeline, {}),
+      await store.createRun(pipeline, {}),
+      await store.createRun(pipeline, {}),
+      await store.createRun(pipeline, {}),
+      await store.createRun(pipeline, {}),
     ];
 
     expect(store.getRun(ids[0])).toBeNull();
@@ -34,10 +34,10 @@ describe("PipelineRunStore maxRuns (T-710)", () => {
     expect(store.getRun(ids[4])).not.toBeNull();
   });
 
-  it("defaults to a generous maxRuns and does not evict in normal usage", () => {
+  it("defaults to a generous maxRuns and does not evict in normal usage", async () => {
     const store = new PipelineRunStore();
     const ids: string[] = [];
-    for (let i = 0; i < 50; i++) ids.push(store.createRun(pipeline, {}));
+    for (let i = 0; i < 50; i++) ids.push(await store.createRun(pipeline, {}));
     for (const id of ids) expect(store.getRun(id)).not.toBeNull();
   });
 });

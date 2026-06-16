@@ -5,7 +5,7 @@ import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { LocalFileSystemProvider } from "../../storage/local-fs.provider.js";
 import { CompositeCacheProvider } from "../../cache/composite.provider.js";
-import { c, detail, ok, fail, warn } from "../ui.js";
+import { c, kv, fail, warn, section, kvWidth } from "../ui.js";
 
 export async function removeAction(slug: string, options: { force?: boolean }): Promise<void> {
   const config = getConfig();
@@ -16,7 +16,7 @@ export async function removeAction(slug: string, options: { force?: boolean }): 
 
   const skill = await repo.findBySlug(slug);
   if (!skill) {
-    fail(`Skill not found: ${slug}`);
+    fail(`Skill not found: ${slug}`, "Use `skill-mcp list` to see available skills");
     process.exit(1);
   }
 
@@ -41,7 +41,10 @@ export async function removeAction(slug: string, options: { force?: boolean }): 
   await cache.clearByPrefix(`skill:entry:${slug}`);
   await cache.clearByPrefix(`skill:file:${slug}`);
 
-  ok(`${c.bold("Removed")}  ${c.boldCyan(slug)}  ${c.dim("v" + skill.version)}`);
-  console.log(detail("storage", skill.storagePath));
+  console.log(section("removed", undefined, kvWidth(12, slug, "v" + skill.version, skill.storagePath)));
+  console.log();
+  console.log(kv("slug", c.boldCyan(slug)));
+  console.log(kv("version", c.dim("v" + skill.version)));
+  console.log(kv("storage", skill.storagePath));
   console.log();
 }

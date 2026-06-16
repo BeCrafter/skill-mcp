@@ -55,12 +55,12 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
   }
 
   it("transitions a flapping endpoint through pending(7) → dead_letter after 8 attempts", async () => {
-    const wh = webhookService.create({
+    const wh = await webhookService.create({
       tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["skill.published"],
     });
-    const ids = webhookService.publishEvent("skill.published", TENANT, { skill: "test" });
+    const ids = await webhookService.publishEvent("skill.published", TENANT, { skill: "test" });
     expect(ids).toHaveLength(1);
     const deliveryId = ids[0];
 
@@ -106,12 +106,12 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
   });
 
   it("dead-letters immediately on a 4xx (permanent failure, no retry)", async () => {
-    webhookService.create({
+    await webhookService.create({
       tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["skill.published"],
     });
-    const [deliveryId] = webhookService.publishEvent("skill.published", TENANT, { skill: "test" });
+    const [deliveryId] = await webhookService.publishEvent("skill.published", TENANT, { skill: "test" });
 
     const now = Date.now() + 10;
     const { fetchImpl, calls } = makeFetch(404);
@@ -133,12 +133,12 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
   });
 
   it("succeeds on first 2xx and stamps completed_at", async () => {
-    webhookService.create({
+    await webhookService.create({
       tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["pipeline.completed"],
     });
-    const [deliveryId] = webhookService.publishEvent("pipeline.completed", TENANT, { runId: "r1" });
+    const [deliveryId] = await webhookService.publishEvent("pipeline.completed", TENANT, { runId: "r1" });
 
     const now = Date.now() + 10;
     const { fetchImpl } = makeFetch(200, "ok");
@@ -163,17 +163,17 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
 
   it("dispatchDue fans out across multiple webhook subscriptions and isolates per-row failures", async () => {
     // Two subscriptions, both subscribed to the same event.
-    webhookService.create({
+    await webhookService.create({
       tenantId: TENANT,
       url: "http://localhost:9991/ok",
       eventTypes: ["skill.published"],
     });
-    webhookService.create({
+    await webhookService.create({
       tenantId: TENANT,
       url: "http://localhost:9992/fail",
       eventTypes: ["skill.published"],
     });
-    const ids = webhookService.publishEvent("skill.published", TENANT, { x: 1 });
+    const ids = await webhookService.publishEvent("skill.published", TENANT, { x: 1 });
     expect(ids).toHaveLength(2);
 
     const now = Date.now() + 10;
@@ -195,12 +195,12 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
   });
 
   it("emits HMAC signature and X-Skill-MCP-Delivery-Id headers verifiable with the stored secret", async () => {
-    const wh = webhookService.create({
+    const wh = await webhookService.create({
       tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["skill.published"],
     });
-    webhookService.publishEvent("skill.published", TENANT, { hello: "world" });
+    await webhookService.publishEvent("skill.published", TENANT, { hello: "world" });
 
     const now = Date.now() + 10;
     let captured: { headers: Record<string, string>; body: string } | null = null;
@@ -221,7 +221,7 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
     const sig = c.headers["X-Skill-MCP-Signature"];
     const did = c.headers["X-Skill-MCP-Delivery-Id"];
     expect(sig).toMatch(/^t=\d+,v1=[a-f0-9]{64}$/);
-    expect(did).toMatch(/^[0-9a-f-]{36}$/);
+    expect(did).toMatch(/^dlv_[a-z0-9]{16}$/);
     // Verify signature using the public WebhookService API (re-uses stored secret).
     expect(webhookService.verifySignature(wh.secret, c.body, sig, now)).toBe(true);
   });

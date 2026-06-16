@@ -201,9 +201,9 @@ describe("SkillEvalRepository", () => {
   describe("appendRun + findRunsBySkillVersion", () => {
     it("appends rows and reads them DESC by createdAt", async () => {
       const id = await makeSkill("s");
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "pass", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "pass", runner: "echo" });
       await new Promise((r) => setTimeout(r, 5));
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c2", status: "fail", runner: "echo", failureReason: "x" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c2", status: "fail", runner: "echo", failureReason: "x" });
       const runs = repo.findRunsBySkillVersion(id, "1.0.0");
       expect(runs).toHaveLength(2);
       // DESC: latest first; c2 was last appended → first row.
@@ -213,8 +213,8 @@ describe("SkillEvalRepository", () => {
 
     it("filters by skillVersion", async () => {
       const id = await makeSkill("s");
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "pass", runner: "echo" });
-      repo.appendRun({ skillId: id, skillVersion: "1.1.0", caseName: "c1", status: "fail", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "pass", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.1.0", caseName: "c1", status: "fail", runner: "echo" });
       expect(repo.findRunsBySkillVersion(id, "1.0.0")).toHaveLength(1);
       expect(repo.findRunsBySkillVersion(id, "1.1.0")).toHaveLength(1);
       expect(repo.findRunsBySkillVersion(id, "9.9.9")).toHaveLength(0);
@@ -222,7 +222,7 @@ describe("SkillEvalRepository", () => {
 
     it("preserves toolsUsed JSON round-trip", async () => {
       const id = await makeSkill("s");
-      repo.appendRun({
+      await repo.appendRun({
         skillId: id, skillVersion: "1.0.0", caseName: "c", status: "pass", runner: "echo",
         toolsUsed: ["alpha", "beta"], output: "out", latencyMs: 42,
       });
@@ -234,7 +234,7 @@ describe("SkillEvalRepository", () => {
 
     it("toolsUsed defaults to [] when not provided", async () => {
       const id = await makeSkill("s");
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c", status: "pass", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c", status: "pass", runner: "echo" });
       const runs = repo.findRunsBySkillVersion(id, "1.0.0");
       expect(runs[0].toolsUsed).toEqual([]);
     });
@@ -243,11 +243,11 @@ describe("SkillEvalRepository", () => {
   describe("findLatestRunStatusByCase (stage 3 input)", () => {
     it("returns the latest status per case_name", async () => {
       const id = await makeSkill("s");
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "fail", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "fail", runner: "echo" });
       // small delay so createdAt diverges
       await new Promise((r) => setTimeout(r, 5));
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "pass", runner: "echo" });
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c2", status: "error", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c1", status: "pass", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c2", status: "error", runner: "echo" });
       const map = repo.findLatestRunStatusByCase(id, "1.0.0");
       expect(map.size).toBe(2);
       expect(map.get("c1")).toBe("pass");
@@ -265,7 +265,7 @@ describe("SkillEvalRepository", () => {
     it("limits and orders DESC", async () => {
       const id = await makeSkill("s");
       for (let i = 0; i < 5; i++) {
-        repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: `c${i}`, status: "pass", runner: "echo" });
+        await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: `c${i}`, status: "pass", runner: "echo" });
         await new Promise((r) => setTimeout(r, 2));
       }
       const runs = repo.findRecentRuns(id, 3);
@@ -278,7 +278,7 @@ describe("SkillEvalRepository", () => {
     it("removes cases AND runs when skill is deleted", async () => {
       const id = await makeSkill("s");
       repo.replaceAllForSkill(id, [{ name: "c", input: "i", expectedTools: ["t"] }]);
-      repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c", status: "pass", runner: "echo" });
+      await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c", status: "pass", runner: "echo" });
       expect(repo.countCasesBySkillId(id)).toBe(1);
       expect(repo.findRecentRuns(id, 10)).toHaveLength(1);
 

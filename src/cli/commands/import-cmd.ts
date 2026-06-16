@@ -12,7 +12,7 @@ import { DomainEventBus } from "../../events/event-bus.js";
 import { setupCacheSubscribers } from "../../events/cache-subscriber.js";
 import { CacheEpochManager } from "../../cache/cache-epochs.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
-import { c, badge, detail, ok, fail, infoBox } from "../ui.js";
+import { c, badge, ok, fail, hint, kv } from "../ui.js";
 import { DuplicateSkillNameError } from "../../utils/errors.js";
 import type { ImportOptions } from "../../types/index.js";
 
@@ -43,24 +43,18 @@ export async function importAction(
   try {
     const r = await importer.import(source, options);
     const verb = r.action === "created" ? "Created" : "Updated";
-    ok(`${c.bold(verb)}  ${c.boldCyan(r.slug)}  ${c.dim("v" + r.version)}  ${c.dim("·")}  ${c.dim(r.fileCount + " files")}`);
-    console.log(detail("id",     r.id));
-    if (r.action === "created") console.log(detail("slug",   r.slug));
-    if (r.category)             console.log(detail("category", r.category));
-    if (Array.isArray(r.tags) && r.tags.length)  console.log(detail("tags", r.tags.join(", ")));
-    console.log(detail("status", badge("published")));
-    console.log();
+    ok(`${c.bold(verb)}  ${c.boldCyan(r.slug)}  ${c.dim("v" + r.version)}  ${c.dim("·")}  ${c.dim(r.fileCount + " files")}`, [
+      { key: "id",     value: r.id },
+      ...(r.action === "created" ? [{ key: "slug", value: r.slug }] : []),
+      ...(r.category ? [{ key: "category", value: r.category }] : []),
+      ...(Array.isArray(r.tags) && r.tags.length ? [{ key: "tags", value: r.tags.join(", ") }] : []),
+      { key: "status", value: badge("published") },
+    ]);
   } catch (error: unknown) {
     if (error instanceof DuplicateSkillNameError) {
-      console.error(`\n  ${c.boldRed("✗")}  ${c.bold("Duplicate skill found")}\n`);
-      infoBox(
-        `Skill "${c.bold(error.skillName)}" already exists`,
-        error.existing.map(s => ({ key: s.slug, value: `v${s.version}` }))
-      );
-      console.error(`\n     ${c.dim("Options:")}\n`);
-      console.error(`     ${c.cyan("--overwrite")}      Replace the first existing version`);
-      console.error(`     ${c.cyan("--id <id>")}       Update a specific version by ID`);
-      console.error(`     ${c.cyan("--allow-duplicate")}  Create as new variant with auto-generated slug\n`);
+      fail(`Duplicate skill found: "${error.skillName}" already exists`);
+      for (const s of error.existing) console.log(kv(s.slug, `v${s.version}`));
+      hint(`Use ${c.cyan("--overwrite")} to replace, or ${c.cyan("--allow-duplicate")} to create a new variant`);
       process.exit(1);
     } else if (error instanceof Error) {
       fail(error.message);

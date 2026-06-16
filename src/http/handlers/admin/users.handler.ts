@@ -1,4 +1,5 @@
-import { randomUUID, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
+import { generateToken } from "../../../utils/id.js";
 import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
 import { json, readJsonBody } from "../../helpers.js";
@@ -44,7 +45,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
   router.post("/api/admin/users", async (ctx) => {
     const data = await readJsonBody<{ name?: string; role_ids?: string[]; token_expires_at?: number | null; expires_in?: number | null }>(ctx.req);
     const tokenExpiresAt = parseExpiry(data);
-    const token = `sk-live-${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    const token = generateToken();
     const hash = createHash("sha256").update(token).digest("hex");
     const user = await userRepo.create({ name: data.name, token: hash, tokenExpiresAt });
     if (data.role_ids?.length) {
@@ -74,7 +75,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
       }
       graceMs = Math.floor(data.grace_seconds * 1000);
     }
-    const token = `sk-live-${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    const token = generateToken();
     const hash = createHash("sha256").update(token).digest("hex");
     const updated = await userRepo.rotateToken(userId, hash, { graceMs, tokenExpiresAt });
     if (!updated) throw new UserNotFoundError();

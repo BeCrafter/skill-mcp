@@ -1,5 +1,5 @@
 import { eq, or } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { generateId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { users } from "../schema.js";
 import { withSpan } from "../../telemetry/spans.js";
@@ -80,7 +80,7 @@ export class UserRepository {
 
   async create(input: { name?: string; token: string; tokenExpiresAt?: number | null }): Promise<UserEntity> {
     const now = Date.now();
-    const id = randomUUID();
+    const id = await generateUniqueId(() => generateId("usr_"), async (id) => !!(await this.findById(id)));
     this.db.insert(users).values({
       id,
       name: input.name ?? null,

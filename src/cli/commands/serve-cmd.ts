@@ -48,6 +48,7 @@ import { WebhookService } from "../../services/webhook.service.js";
 import { WebhookDispatcher } from "../../services/webhook-dispatcher.js";
 import { WebhookWorker } from "../../services/webhook-worker.js";
 import { getLogger } from "../../utils/logger.js";
+import { c, banner, kv, section, kvWidth } from "../ui.js";
 
 const logger = getLogger();
 
@@ -265,6 +266,9 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   const importWorker = new BackgroundImportWorker(importJobRepo, importer, logger);
   importWorker.start();
   webhookWorker.start();
+  // ── Startup banner ────────────────────────────────────────────────
+  console.log(banner(config.app.name, config.app.version));
+  console.log();
 
   // Start based on transport
   let stdioMcpServer: Awaited<ReturnType<typeof createMcpServer>> | null = null;
@@ -321,6 +325,18 @@ export async function serveAction(options: ServeOptions): Promise<void> {
     await new Promise<void>((resolve) => {
       httpServer!.listen(options.port, options.host, () => resolve());
     });
+
+    // Show startup summary to operator
+    console.log();
+    console.log(section("listening", undefined, kvWidth(12, options.mode, options.transport, String(options.port), options.host)));
+    console.log();
+    console.log(kv("mode", options.mode));
+    console.log(kv("transport", options.transport));
+    console.log(kv("port", String(options.port)));
+    console.log(kv("host", options.host));
+    console.log();
+    console.log(`  ${c.boldGreen("✓")}  ${c.bold("Ready")}`);
+    console.log();
 
     logger.info(
       { transport: options.transport, port: options.port, host: options.host, mode: options.mode },

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateId, generateUniqueId } from "../../utils/id.js";
 import { skillVersions } from "../schema.js";
 import { eq, and, desc } from "drizzle-orm";
 import type { DrizzleDB } from "../connection.js";
@@ -34,8 +34,11 @@ export class SkillVersionRepository {
     this.db = database;
   }
 
-  create(input: CreateSkillVersionInput): SkillVersion {
-    const id = randomUUID();
+  async create(input: CreateSkillVersionInput): Promise<SkillVersion> {
+    const id = await generateUniqueId(() => generateId("ver_"), async (id) => {
+      const row = this.db.select({ id: skillVersions.id }).from(skillVersions).where(eq(skillVersions.id, id)).get();
+      return !!row;
+    });
     const now = Date.now();
 
     this.db.insert(skillVersions).values({

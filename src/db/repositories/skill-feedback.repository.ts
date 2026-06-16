@@ -1,5 +1,5 @@
 import { and, eq, gte, sql } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { skillFeedbacks } from "../schema.js";
 
@@ -19,7 +19,10 @@ export class SkillFeedbackRepository {
   constructor(private db: DrizzleDB) {}
 
   async create(entry: Omit<SkillFeedbackEntry, "id" | "createdAt">): Promise<string> {
-    const id = randomUUID();
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: skillFeedbacks.id }).from(skillFeedbacks).where(eq(skillFeedbacks.id, id)).get();
+      return !!row;
+    });
     this.db.insert(skillFeedbacks).values({
       id,
       skillId: entry.skillId,

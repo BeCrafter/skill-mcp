@@ -3,7 +3,7 @@ import { runMigrations } from "../../db/migrate.js";
 import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { SkillVersionRepository } from "../../db/repositories/skill-version.repository.js";
-import { c, kv, sep, warn, fail, fmtDate } from "../ui.js";
+import { c, kv, warn, fail, fmtDate, table, section } from "../ui.js";
 
 export async function versionsAction(slug: string, options: { show?: string }): Promise<void> {
   const config = getConfig();
@@ -16,7 +16,7 @@ export async function versionsAction(slug: string, options: { show?: string }): 
   try {
     const skill = await skillRepo.findBySlug(slug);
     if (!skill) {
-      fail(`Skill not found: ${slug}`);
+      fail(`Skill not found: ${slug}`, "Use `skill-mcp list` to see available skills");
       process.exit(1);
     }
 
@@ -25,12 +25,14 @@ export async function versionsAction(slug: string, options: { show?: string }): 
     if (options.show) {
       const v = versionRepo.findByVersion(skill.id, options.show);
       if (!v) {
-        fail(`Version ${options.show} not found`);
+        fail(`Version ${options.show} not found`, "Use `skill-mcp versions " + slug + "` to see available versions");
         process.exit(1);
       }
-      console.log(`\n  ${c.boldCyan(slug)}  ${c.dim("v" + v.version)}\n  ${sep(52)}\n`);
-      console.log(kv("hash",    v.contentHash.slice(0, 16) + "…"));
-      console.log(kv("files",   String(v.fileCount)));
+
+      console.log(section(`${slug} v${v.version}`));
+      console.log();
+      console.log(kv("hash", v.contentHash.slice(0, 16) + "…"));
+      console.log(kv("files", String(v.fileCount)));
       console.log(kv("storage", v.storagePath));
       console.log(kv("created", fmtDate(v.createdAt)));
       if (v.changeSummary) console.log(kv("summary", v.changeSummary));
@@ -43,26 +45,29 @@ export async function versionsAction(slug: string, options: { show?: string }): 
       return;
     }
 
-    console.log(`\n  ${c.bold("Version history")}  ${c.dim("·")}  ${c.boldCyan(slug)}\n`);
+    console.log(section("Version history", versions.length));
+    console.log();
 
-    const COL = { ver: 10, hash: 10, files: 6, date: 18 };
-    const header =
-      `  ${c.dim("VERSION".padEnd(COL.ver))}` +
-      `  ${c.dim("HASH".padEnd(COL.hash))}` +
-      `  ${c.dim("FILES".padStart(COL.files))}` +
-      `  ${c.dim("CREATED")}`;
-    console.log(header);
-    console.log(`  ${sep(COL.ver + COL.hash + COL.files + COL.date + 6)}`);
+    const rows = versions.map(v => ({
+      version: v.version + (v.version === skill.version ? " ●" : ""),
+      hash: v.contentHash.slice(7, 15),
+      files: String(v.fileCount),
+      created: fmtDate(v.createdAt),
+      current: v.version === skill.version,
+    }));
 
-    for (const v of versions) {
-      const isCurrent = v.version === skill.version;
-      const verCol = (v.version + (isCurrent ? " ●" : "  ")).padEnd(COL.ver);
-      const hashCol = v.contentHash.slice(7, 15).padEnd(COL.hash);
-      const filesCol = String(v.fileCount).padStart(COL.files);
-      const dateCol = fmtDate(v.createdAt);
-      const row = `  ${verCol}  ${hashCol}  ${filesCol}  ${dateCol}`;
-      console.log(isCurrent ? c.bold(row) : row);
-    }
+    console.log(table(rows.map(r => ({
+      ...r,
+      version: r.current ? c.bold(r.version) : r.version,
+      hash: c.dim(r.hash),
+      files: c.dim(r.files),
+      created: c.dim(r.created),
+    })), [
+      { key: "version", header: "VERSION", width: 12 },
+      { key: "hash", header: "HASH", width: 10 },
+      { key: "files", header: "FILES", width: 6, align: "right" },
+      { key: "created", header: "CREATED", width: 18 },
+    ]));
 
     console.log(`\n  ${c.dim("● current version")}\n`);
   } catch (error: unknown) {

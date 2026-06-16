@@ -1,5 +1,5 @@
 import { and, eq, gte, lte, lt, desc, sql } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { usageEvents } from "../schema.js";
 
@@ -91,8 +91,11 @@ export class UsageEventRepository {
    * `UsageMeterService.record()` which wraps this in a `setImmediate` +
    * try/catch.
    */
-  create(input: UsageEventCreate): UsageEventEntity {
-    const id = randomUUID();
+  async create(input: UsageEventCreate): Promise<UsageEventEntity> {
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: usageEvents.id }).from(usageEvents).where(eq(usageEvents.id, id)).get();
+      return !!row;
+    });
     const createdAt = input.createdAt ?? Date.now();
     const hourBucket = hourBucketOf(createdAt);
     const quantity = input.quantity ?? 1;
@@ -129,7 +132,7 @@ export class UsageEventRepository {
     const rows = inputs.map(input => {
       const createdAt = input.createdAt ?? Date.now();
       return {
-        id: randomUUID(),
+        id: shortId(),
         tenantId: input.tenantId,
         userId: input.userId ?? null,
         eventType: input.eventType,

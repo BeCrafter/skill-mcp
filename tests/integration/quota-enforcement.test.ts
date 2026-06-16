@@ -101,8 +101,8 @@ describe("Integration: Quota enforcement (I-08, review §16.4)", () => {
 
   it("denies the request that would breach the limit and returns the documented 429 envelope", async () => {
     // Override free tier api_calls down to 3 so the test runs in milliseconds.
-    quotaRepo.ensureSeeded(TENANT, "free");
-    quotaRepo.changeTier({
+    await quotaRepo.ensureSeeded(TENANT, "free");
+    await quotaRepo.changeTier({
       tenantId: TENANT,
       tier: "free",
       ...DEFAULT_TIER_LIMITS.free,
@@ -135,8 +135,8 @@ describe("Integration: Quota enforcement (I-08, review §16.4)", () => {
   });
 
   it("invalidate(tenantId) makes a tier bump visible on the very next check (no 5s wait)", async () => {
-    quotaRepo.ensureSeeded(TENANT, "free");
-    quotaRepo.changeTier({
+    await quotaRepo.ensureSeeded(TENANT, "free");
+    await quotaRepo.changeTier({
       tenantId: TENANT,
       tier: "free",
       ...DEFAULT_TIER_LIMITS.free,
@@ -154,7 +154,7 @@ describe("Integration: Quota enforcement (I-08, review §16.4)", () => {
     expect(readBody(ctx1).statusCode).toBe(429);
 
     // Bump tier without waiting for cache TTL.
-    quotaRepo.changeTier({
+    await quotaRepo.changeTier({
       tenantId: TENANT,
       tier: "team",
       ...DEFAULT_TIER_LIMITS.team,
@@ -170,8 +170,8 @@ describe("Integration: Quota enforcement (I-08, review §16.4)", () => {
   });
 
   it("per-field override wins over tier and is reflected in headers", async () => {
-    quotaRepo.ensureSeeded(TENANT, "free");
-    quotaRepo.createOverride({
+    await quotaRepo.ensureSeeded(TENANT, "free");
+    await quotaRepo.createOverride({
       tenantId: TENANT,
       fieldName: "max_api_calls_per_day",
       overrideValue: 9999,

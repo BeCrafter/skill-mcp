@@ -30,7 +30,7 @@ import {
 } from "../utils/errors.js";
 import { bumpVersion } from "../db/repositories/skill.repository.js";
 import { pMap } from "../utils/concurrency.js";
-import { randomUUID } from "node:crypto";
+import { shortId, isLegacyUuid } from "../utils/id.js";
 
 const STORAGE_CONCURRENCY = 8;
 const ROLLBACK_STAGING_ROOT = "__staging__";
@@ -379,9 +379,9 @@ export class SkillService {
   }
 
   private async resolveSkill(identifier: string): Promise<SkillMeta | null> {
-    // UUID format: search by id first, fallback to slug
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
-    if (isUuid) {
+    // Prefixed ID or legacy UUID: search by id first, fallback to slug
+    const isId = identifier.startsWith("skl_") || isLegacyUuid(identifier);
+    if (isId) {
       const byId = await this.skillProvider.getSkillMetaById(identifier);
       if (byId) return byId;
     }
@@ -619,7 +619,7 @@ export class SkillService {
       changeSummary: `Pre-rollback snapshot before restoring to ${targetVersion}`,
     });
 
-    const runId = randomUUID();
+    const runId = shortId();
     const stagingPath = `${ROLLBACK_STAGING_ROOT}/${runId}/`;
     const newVersion = bumpVersion(skill.version, bump);
     let dbUpdated = false;

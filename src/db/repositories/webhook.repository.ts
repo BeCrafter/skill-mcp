@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { randomUUID, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
+import { generateId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { webhooks } from "../schema.js";
 
@@ -59,8 +60,8 @@ export interface UpdateWebhookInput {
 export class WebhookRepository {
   constructor(private db: DrizzleDB) {}
 
-  create(input: CreateWebhookInput): WebhookEntity {
-    const id = randomUUID();
+  async create(input: CreateWebhookInput): Promise<WebhookEntity> {
+    const id = await generateUniqueId(() => generateId("wh_"), async (id) => !!(await this.findById(id)));
     const now = Date.now();
     const secret = input.secret ?? randomBytes(32).toString("hex");
     const eventTypesJson = JSON.stringify(input.eventTypes);

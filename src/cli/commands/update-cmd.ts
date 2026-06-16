@@ -22,7 +22,7 @@ export async function updateAction(
 
   const skill = await repo.findBySlug(slug);
   if (!skill) {
-    fail(`Skill not found: ${slug}`);
+    fail(`Skill not found: ${slug}`, "Use `skill-mcp list` to see available skills");
     process.exit(1);
   }
 
@@ -43,5 +43,10 @@ export async function updateAction(
   await cache.clearByPrefix(`skill:entry:${slug}`);
   await cache.clearByPrefix(`skill:file:${slug}`);
 
-  ok(`${c.bold("Updated")}  ${c.boldCyan(slug)}`);
+  ok(`${c.bold("Updated")}  ${c.boldCyan(slug)}`, [
+    ...(options.category ? [{ key: "category", value: options.category }] : []),
+    ...(options.tags ? [{ key: "tags", value: options.tags.join(", ") }] : []),
+    ...(options.description ? [{ key: "description", value: c.dim(options.description.slice(0, 50) + (options.description.length > 50 ? "…" : "")) }] : []),
+    ...(options.displayName ? [{ key: "display", value: options.displayName }] : []),
+  ]);
 }

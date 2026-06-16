@@ -9,7 +9,7 @@ import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { SkillFileRepository } from "../../db/repositories/skill-file.repository.js";
 import { SkillService } from "../../services/skill.service.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
-import { c, detail, ok, fail } from "../ui.js";
+import { c, fail, kv, section, kvWidth } from "../ui.js";
 
 export async function rollbackAction(
   slug: string,
@@ -38,24 +38,26 @@ export async function rollbackAction(
   try {
     const skill = await skillRepo.findBySlug(slug);
     if (!skill) {
-      fail(`Skill not found: ${slug}`);
+      fail(`Skill not found: ${slug}`, "Use `skill-mcp list` to see available skills");
       process.exit(1);
     }
 
     const version = versionRepo.findByVersion(skill.id, options.to);
     if (!version) {
-      fail(`Version ${options.to} not found`);
+      fail(`Version ${options.to} not found`, "Use `skill-mcp versions " + slug + "` to see available versions");
       process.exit(1);
     }
 
-    console.log(`\n  ${c.dim("Rolling back")}  ${c.boldCyan(slug)}  ${c.dim(skill.version + " → " + options.to + " …")}`);
+    console.log(`\n  ${c.dim("Rolling back")}  ${c.boldCyan(slug)}  ${c.dim(skill.version + " → " + options.to)}`);
     await skillService.rollbackToVersion(slug, options.to, options.bump ?? "patch");
 
     const updated = await skillRepo.findBySlug(slug);
     const bump = options.bump ?? "patch";
-    ok(`${c.bold("Rolled back")}  ${c.boldCyan(slug)}  ${c.dim("to v" + options.to)}`);
-    console.log(detail("new version",   `${c.dim("v" + updated!.version)}  ${c.dim("(" + bump + " bump)")}`));
-    console.log(detail("files restored", String(version.fileCount)));
+
+    console.log(section("rollback complete", undefined, kvWidth(12, "v" + updated!.version, String(version.fileCount))));
+    console.log();
+    console.log(kv("new version", `${c.dim("v" + updated!.version)}  ${c.dim("(" + bump + " bump)")}`));
+    console.log(kv("files restored", String(version.fileCount)));
     console.log();
   } catch (error: unknown) {
     if (error instanceof Error) {

@@ -31,8 +31,8 @@ describe("ImportJobRepository (P0-10)", () => {
   let ctx: ReturnType<typeof setup>;
   beforeEach(() => { ctx = setup(); });
 
-  it("create stores source + options + defaults to queued", () => {
-    const job = ctx.repo.create({
+  it("create stores source + options + defaults to queued", async () => {
+    const job = await ctx.repo.create({
       source: "/tmp/skill",
       options: { tags: ["x"], versionBump: "minor" },
       createdByUserId: "u1",
@@ -52,9 +52,9 @@ describe("ImportJobRepository (P0-10)", () => {
   });
 
   it("claimNext picks the oldest queued job and flips status to running", async () => {
-    const a = ctx.repo.create({ source: "/a", options: {} });
+    const a = await ctx.repo.create({ source: "/a", options: {} });
     await new Promise(r => setTimeout(r, 5));
-    const b = ctx.repo.create({ source: "/b", options: {} });
+    const b = await ctx.repo.create({ source: "/b", options: {} });
     const claimed = ctx.repo.claimNext();
     expect(claimed?.id).toBe(a.id);
     expect(claimed?.status).toBe("running");
@@ -68,8 +68,8 @@ describe("ImportJobRepository (P0-10)", () => {
     expect(ctx.repo.claimNext()).toBeNull();
   });
 
-  it("updateProgress clamps progress to [0, 100] and stores the message", () => {
-    const job = ctx.repo.create({ source: "/a", options: {} });
+  it("updateProgress clamps progress to [0, 100] and stores the message", async () => {
+    const job = await ctx.repo.create({ source: "/a", options: {} });
     ctx.repo.updateProgress(job.id, 250, "almost there");
     expect(ctx.repo.findById(job.id)?.progress).toBe(100);
     ctx.repo.updateProgress(job.id, -5);
@@ -80,8 +80,8 @@ describe("ImportJobRepository (P0-10)", () => {
     expect(got?.message).toBe("halfway");
   });
 
-  it("markSucceeded sets status, progress=100, result, finishedAt", () => {
-    const job = ctx.repo.create({ source: "/a", options: {} });
+  it("markSucceeded sets status, progress=100, result, finishedAt", async () => {
+    const job = await ctx.repo.create({ source: "/a", options: {} });
     ctx.repo.markSucceeded(job.id, {
       id: "s1", slug: "a", name: "A", version: "0.0.1",
       fileCount: 3, action: "created", tags: ["x"],
@@ -93,8 +93,8 @@ describe("ImportJobRepository (P0-10)", () => {
     expect(got?.finishedAt).not.toBeNull();
   });
 
-  it("markFailed sets status, error, finishedAt; keeps result null", () => {
-    const job = ctx.repo.create({ source: "/a", options: {} });
+  it("markFailed sets status, error, finishedAt; keeps result null", async () => {
+    const job = await ctx.repo.create({ source: "/a", options: {} });
     ctx.repo.markFailed(job.id, "boom");
     const got = ctx.repo.findById(job.id);
     expect(got?.status).toBe("failed");
@@ -103,9 +103,9 @@ describe("ImportJobRepository (P0-10)", () => {
     expect(got?.finishedAt).not.toBeNull();
   });
 
-  it("recoverOrphans flips running rows back to queued, returns the count", () => {
-    const a = ctx.repo.create({ source: "/a", options: {} });
-    const b = ctx.repo.create({ source: "/b", options: {} });
+  it("recoverOrphans flips running rows back to queued, returns the count", async () => {
+    const a = await ctx.repo.create({ source: "/a", options: {} });
+    const b = await ctx.repo.create({ source: "/b", options: {} });
     ctx.repo.claimNext();
     ctx.repo.claimNext();
     expect(ctx.repo.findById(a.id)?.status).toBe("running");
@@ -119,17 +119,17 @@ describe("ImportJobRepository (P0-10)", () => {
     expect(ctx.repo.findById(a.id)?.startedAt).toBeNull();
   });
 
-  it("list filters by status when provided", () => {
-    ctx.repo.create({ source: "/a", options: {} });
-    const b = ctx.repo.create({ source: "/b", options: {} });
+  it("list filters by status when provided", async () => {
+    await ctx.repo.create({ source: "/a", options: {} });
+    const b = await ctx.repo.create({ source: "/b", options: {} });
     ctx.repo.markFailed(b.id, "x");
     expect(ctx.repo.list({ status: "queued" }).map(j => j.source)).toEqual(["/a"]);
     expect(ctx.repo.list({ status: "failed" }).map(j => j.source)).toEqual(["/b"]);
     expect(ctx.repo.list().length).toBe(2);
   });
 
-  it("survives a corrupt options_json by falling back to {}", () => {
-    const job = ctx.repo.create({ source: "/a", options: { tags: ["x"] } });
+  it("survives a corrupt options_json by falling back to {}", async () => {
+    const job = await ctx.repo.create({ source: "/a", options: { tags: ["x"] } });
     ctx.db.run(`UPDATE import_jobs SET options_json = '{not json' WHERE id = '${job.id}'`);
     const got = ctx.repo.findById(job.id);
     expect(got?.options).toEqual({});

@@ -101,7 +101,7 @@ describe("registerAdminUserRoutes", () => {
     const out = bodyOf(ctx);
     expect(out.statusCode).toBe(201);
     const body = out.body as { data: { token: string; roles: string[]; tags: string[] } };
-    expect(body.data.token).toMatch(/^sk-live-[0-9a-f]{24}$/);
+    expect(body.data.token).toMatch(/^sk-live-[a-z0-9]{24}$/);
     // Persisted token must be the SHA-256 hex digest, NOT the plaintext.
     const persistedToken = userRepo.create.mock.calls[0][0].token;
     expect(persistedToken).not.toBe(body.data.token);
@@ -199,7 +199,7 @@ describe("registerAdminUserRoutes", () => {
       const out = bodyOf(ctx);
       expect(out.statusCode).toBe(200);
       const body = out.body as { data: { token: string; previous_token_expires_at: number; grace_seconds: number } };
-      expect(body.data.token).toMatch(/^sk-live-[0-9a-f]{24}$/);
+      expect(body.data.token).toMatch(/^sk-live-[a-z0-9]{24}$/);
       expect(body.data.previous_token_expires_at).toBeGreaterThan(Date.now());
       expect(body.data.grace_seconds).toBe(7 * 86400);
       // Persisted hash, not plaintext, was passed to rotateToken.

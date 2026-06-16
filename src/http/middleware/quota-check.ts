@@ -66,7 +66,7 @@ export function createQuotaCheck(options: QuotaCheckOptions): Middleware {
     }
     const tenantId = tenantExtractor(ctx);
     const inc = typeof increment === "function" ? increment(ctx) : increment;
-    const result = quotaService.check({ tenantId, dimension, increment: inc });
+    const result = await quotaService.check({ tenantId, dimension, increment: inc });
 
     // Always surface limit + remaining as headers so clients can self-meter
     // even on success. Match `X-RateLimit-*` shape so consumers don't need

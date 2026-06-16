@@ -107,20 +107,20 @@ export class QuotaService {
    * to remember to bootstrap. Caller is responsible for handling errors —
    * `check()` calls this in a try/catch.
    */
-  resolveTenant(tenantId: string, now: number = Date.now()): { quota: TenantQuotaEntity; overrides: QuotaOverrideEntity[] } {
+  async resolveTenant(tenantId: string, now: number = Date.now()): Promise<{ quota: TenantQuotaEntity; overrides: QuotaOverrideEntity[] }> {
     const cached = this.tenantCache.get(tenantId);
     if (cached && cached.expiresAt > now) {
       return { quota: cached.quota, overrides: cached.overrides };
     }
-    const quota = this.quotaRepo.ensureSeeded(tenantId, "free");
+    const quota = await this.quotaRepo.ensureSeeded(tenantId, "free");
     const overrides = this.quotaRepo.listActiveOverrides(tenantId, now);
     this.tenantCache.set(tenantId, { quota, overrides, expiresAt: now + this.cacheTtlMs });
     return { quota, overrides };
   }
 
   /** Resolve a single field's effective value (override wins over tier). */
-  resolveLimit(tenantId: string, field: QuotaField, now: number = Date.now()): ResolvedLimit {
-    const { quota, overrides } = this.resolveTenant(tenantId, now);
+  async resolveLimit(tenantId: string, field: QuotaField, now: number = Date.now()): Promise<ResolvedLimit> {
+    const { quota, overrides } = await this.resolveTenant(tenantId, now);
     const matching = overrides.find(o => o.fieldName === field);
     if (matching) {
       return { field, value: matching.overrideValue, source: "override", override: matching };
@@ -134,14 +134,14 @@ export class QuotaService {
    * `source: "unknown"`. Caller is responsible for emitting a 429 when
    * `ok: false`.
    */
-  check(opts: CheckOptions): CheckResult {
+  async check(opts: CheckOptions): Promise<CheckResult> {
     const tenantId = opts.tenantId || DEFAULT_TENANT_ID;
     const dimension = opts.dimension;
     const increment = opts.increment ?? 1;
     const now = opts.now ?? Date.now();
     try {
       const field = DIMENSION_TO_FIELD[dimension];
-      const resolved = this.resolveLimit(tenantId, field, now);
+      const resolved = await this.resolveLimit(tenantId, field, now);
       const used = this.measureUsage(tenantId, dimension, now);
       const projected = used + increment;
       return {

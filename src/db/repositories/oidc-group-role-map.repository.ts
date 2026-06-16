@@ -1,5 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { oidcGroupRoleMap } from "../schema.js";
 import { withSpan } from "../../telemetry/spans.js";
@@ -76,7 +76,7 @@ export class OidcGroupRoleMapRepository {
       tx.insert(oidcGroupRoleMap)
         .values(
           unique.map((roleId) => ({
-            id: randomUUID(),
+            id: shortId(),
             tenantId,
             groupName,
             roleId,
@@ -111,7 +111,10 @@ export class OidcGroupRoleMapRepository {
     groupName: string;
     roleId: string;
   }): Promise<OidcGroupRoleMapEntity> {
-    const id = randomUUID();
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: oidcGroupRoleMap.id }).from(oidcGroupRoleMap).where(eq(oidcGroupRoleMap.id, id)).get();
+      return !!row;
+    });
     const now = Date.now();
     this.db
       .insert(oidcGroupRoleMap)

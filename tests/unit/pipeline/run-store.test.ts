@@ -32,19 +32,19 @@ describe("PipelineRunStore", () => {
   });
 
   describe("createRun", () => {
-    it("should create a new pipeline run with a unique runId", () => {
+    it("should create a new pipeline run with a unique runId", async () => {
       const inputs = { url: "http://test.com" };
-      const runId1 = runStore.createRun(mockPipeline, inputs);
-      const runId2 = runStore.createRun(mockPipeline, inputs);
+      const runId1 = await runStore.createRun(mockPipeline, inputs);
+      const runId2 = await runStore.createRun(mockPipeline, inputs);
 
       expect(runId1).toBeDefined();
       expect(runId2).toBeDefined();
       expect(runId1).not.toBe(runId2);
     });
 
-    it("should initialize run with correct state", () => {
+    it("should initialize run with correct state", async () => {
       const inputs = { url: "http://test.com" };
-      const runId = runStore.createRun(mockPipeline, inputs);
+      const runId = await runStore.createRun(mockPipeline, inputs);
       const run = runStore.getRun(runId);
 
       expect(run).not.toBeNull();
@@ -56,8 +56,8 @@ describe("PipelineRunStore", () => {
       expect(run!.completedStages.size).toBe(0);
     });
 
-    it("should calculate batches based on stage dependencies", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should calculate batches based on stage dependencies", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
       const run = runStore.getRun(runId);
 
       expect(run!.batches).toHaveLength(2);
@@ -72,17 +72,17 @@ describe("PipelineRunStore", () => {
       expect(run).toBeNull();
     });
 
-    it("should return the run when it exists", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should return the run when it exists", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
       const run = runStore.getRun(runId);
 
       expect(run).not.toBeNull();
       expect(run!.runId).toBe(runId);
     });
 
-    it("should return null for expired runs (TTL check)", () => {
+    it("should return null for expired runs (TTL check)", async () => {
       vi.useFakeTimers();
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
 
       // Advance time past TTL (30 minutes)
       vi.advanceTimersByTime(31 * 60 * 1000);
@@ -95,8 +95,8 @@ describe("PipelineRunStore", () => {
   });
 
   describe("completeStage", () => {
-    it("should store stage outputs", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should store stage outputs", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
       const outputs = { content: "test content" };
 
       runStore.completeStage(runId, "fetch", outputs);
@@ -106,8 +106,8 @@ describe("PipelineRunStore", () => {
       expect(run!.completedStages.get("fetch")).toEqual(outputs);
     });
 
-    it("should update context with stage outputs", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should update context with stage outputs", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
       const outputs = { content: "test content" };
 
       runStore.completeStage(runId, "fetch", outputs);
@@ -125,8 +125,8 @@ describe("PipelineRunStore", () => {
   });
 
   describe("advanceBatch", () => {
-    it("should advance to next batch and return stage names", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should advance to next batch and return stage names", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
       const nextBatch = runStore.advanceBatch(runId);
       const run = runStore.getRun(runId);
 
@@ -134,8 +134,8 @@ describe("PipelineRunStore", () => {
       expect(run!.currentBatchIndex).toBe(1);
     });
 
-    it("should return null and mark as completed when advancing past last batch", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should return null and mark as completed when advancing past last batch", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
 
       // Advance past all batches
       const batch1 = runStore.advanceBatch(runId);
@@ -155,8 +155,8 @@ describe("PipelineRunStore", () => {
   });
 
   describe("removeRun", () => {
-    it("should remove a run from the store", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should remove a run from the store", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
 
       runStore.removeRun(runId);
       const run = runStore.getRun(runId);
@@ -172,17 +172,17 @@ describe("PipelineRunStore", () => {
   });
 
   describe("cleanup", () => {
-    it("should automatically clean up expired runs on createRun", () => {
+    it("should automatically clean up expired runs on createRun", async () => {
       vi.useFakeTimers();
 
       // Create first run
-      const runId1 = runStore.createRun(mockPipeline, { url: "http://test.com" });
+      const runId1 = await runStore.createRun(mockPipeline, { url: "http://test.com" });
 
       // Advance time to 20 minutes
       vi.advanceTimersByTime(20 * 60 * 1000);
 
       // Create second run (triggers cleanup, but first run is still valid)
-      const runId2 = runStore.createRun(mockPipeline, { url: "http://test.com" });
+      const runId2 = await runStore.createRun(mockPipeline, { url: "http://test.com" });
 
       expect(runStore.getRun(runId1)).not.toBeNull();
       expect(runStore.getRun(runId2)).not.toBeNull();
@@ -191,7 +191,7 @@ describe("PipelineRunStore", () => {
       vi.advanceTimersByTime(11 * 60 * 1000);
 
       // Create third run (triggers cleanup, first run should be removed)
-      const runId3 = runStore.createRun(mockPipeline, { url: "http://test.com" });
+      const runId3 = await runStore.createRun(mockPipeline, { url: "http://test.com" });
 
       expect(runStore.getRun(runId1)).toBeNull(); // Expired
       expect(runStore.getRun(runId2)).not.toBeNull(); // Still valid (only 11 min old)
@@ -200,20 +200,20 @@ describe("PipelineRunStore", () => {
       vi.useRealTimers();
     });
 
-    it("should not affect active runs during cleanup", () => {
+    it("should not affect active runs during cleanup", async () => {
       vi.useFakeTimers();
 
       // Create multiple runs
       const runIds: string[] = [];
       for (let i = 0; i < 5; i++) {
-        runIds.push(runStore.createRun(mockPipeline, { url: `http://test${i}.com` }));
+        runIds.push(await runStore.createRun(mockPipeline, { url: `http://test${i}.com` }));
       }
 
       // Advance to 25 minutes (all runs still valid)
       vi.advanceTimersByTime(25 * 60 * 1000);
 
       // Trigger cleanup by creating new run
-      runStore.createRun(mockPipeline, { url: "http://new.com" });
+      await runStore.createRun(mockPipeline, { url: "http://new.com" });
 
       // All original runs should still exist
       for (const runId of runIds) {
@@ -225,8 +225,8 @@ describe("PipelineRunStore", () => {
   });
 
   describe("completeStage + advanceBatch workflow", () => {
-    it("should support the complete-then-advance pattern", () => {
-      const runId = runStore.createRun(mockPipeline, { url: "http://test.com" });
+    it("should support the complete-then-advance pattern", async () => {
+      const runId = await runStore.createRun(mockPipeline, { url: "http://test.com" });
       const outputs = { content: "fetched data" };
 
       // Complete first stage
@@ -245,7 +245,7 @@ describe("PipelineRunStore", () => {
       expect(updatedRun!.currentBatchIndex).toBe(1);
     });
 
-    it("should allow completing multiple stages in same batch", () => {
+    it("should allow completing multiple stages in same batch", async () => {
       // Create pipeline with two independent stages
       const parallelPipeline: PipelineDefinition = {
         name: "parallel-pipeline",
@@ -273,7 +273,7 @@ describe("PipelineRunStore", () => {
         output: {},
       };
 
-      const runId = runStore.createRun(parallelPipeline, {});
+      const runId = await runStore.createRun(parallelPipeline, {});
 
       // Complete both stages in first batch
       runStore.completeStage(runId, "stage1", { out1: "result1" });

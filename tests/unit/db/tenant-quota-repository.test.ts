@@ -45,26 +45,26 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
   beforeEach(() => { ctx = setup(); });
 
   describe("ensureSeeded", () => {
-    it("creates a free-tier row on first call", () => {
-      const row = ctx.repo.ensureSeeded("default");
+    it("creates a free-tier row on first call", async () => {
+      const row = await ctx.repo.ensureSeeded("default");
       expect(row.tier).toBe("free");
       expect(row.maxUsers).toBe(DEFAULT_TIER_LIMITS.free.maxUsers);
       expect(row.maxStorageBytes).toBe(DEFAULT_TIER_LIMITS.free.maxStorageBytes);
       expect(row.effectiveUntil).toBeNull();
     });
 
-    it("is idempotent — second call returns the existing row, does not switch tier", () => {
-      const first = ctx.repo.ensureSeeded("default", "free");
-      const second = ctx.repo.ensureSeeded("default", "team"); // request team
+    it("is idempotent — second call returns the existing row, does not switch tier", async () => {
+      const first = await ctx.repo.ensureSeeded("default", "free");
+      const second = await ctx.repo.ensureSeeded("default", "team"); // request team
       expect(second.id).toBe(first.id);
       expect(second.tier).toBe("free"); // still free
     });
 
-    it("seeds team / enterprise tier with their respective limits", () => {
-      const team = ctx.repo.ensureSeeded("tenant-a", "team");
+    it("seeds team / enterprise tier with their respective limits", async () => {
+      const team = await ctx.repo.ensureSeeded("tenant-a", "team");
       expect(team.tier).toBe("team");
       expect(team.maxApiCallsPerDay).toBe(DEFAULT_TIER_LIMITS.team.maxApiCallsPerDay);
-      const ent = ctx.repo.ensureSeeded("tenant-b", "enterprise");
+      const ent = await ctx.repo.ensureSeeded("tenant-b", "enterprise");
       expect(ent.tier).toBe("enterprise");
       expect(ent.maxStorageBytes).toBe(DEFAULT_TIER_LIMITS.enterprise.maxStorageBytes);
     });
@@ -75,14 +75,14 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
       expect(ctx.repo.findCurrent("default")).toBeNull();
     });
 
-    it("returns the row with effective_until IS NULL", () => {
-      ctx.repo.ensureSeeded("default", "free");
+    it("returns the row with effective_until IS NULL", async () => {
+      await ctx.repo.ensureSeeded("default", "free");
       const row = ctx.repo.findCurrent("default");
       expect(row?.tier).toBe("free");
     });
 
-    it("ignores rows whose effective_until has been stamped (history)", () => {
-      const row = ctx.repo.ensureSeeded("default", "free");
+    it("ignores rows whose effective_until has been stamped (history)", async () => {
+      const row = await ctx.repo.ensureSeeded("default", "free");
       // Manually stamp effective_until to simulate history.
       ctx.db.run(`UPDATE tenant_quotas SET effective_until = 100 WHERE id = '${row.id}'`);
       expect(ctx.repo.findCurrent("default")).toBeNull();
@@ -90,9 +90,9 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
   });
 
   describe("changeTier", () => {
-    it("stamps the old current row and inserts a new current row", () => {
-      const before = ctx.repo.ensureSeeded("default", "free");
-      const after = ctx.repo.changeTier({
+    it("stamps the old current row and inserts a new current row", async () => {
+      const before = await ctx.repo.ensureSeeded("default", "free");
+      const after = await ctx.repo.changeTier({
         tenantId: "default",
         tier: "team",
         ...DEFAULT_TIER_LIMITS.team,
@@ -109,20 +109,20 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
       expect(oldRow?.effectiveUntil).toBe(after.effectiveFrom);
     });
 
-    it("only ever leaves one current row per tenant after multiple changes", () => {
-      ctx.repo.ensureSeeded("default", "free");
-      ctx.repo.changeTier({ tenantId: "default", tier: "team", ...DEFAULT_TIER_LIMITS.team });
-      ctx.repo.changeTier({ tenantId: "default", tier: "enterprise", ...DEFAULT_TIER_LIMITS.enterprise });
+    it("only ever leaves one current row per tenant after multiple changes", async () => {
+      await ctx.repo.ensureSeeded("default", "free");
+      await ctx.repo.changeTier({ tenantId: "default", tier: "team", ...DEFAULT_TIER_LIMITS.team });
+      await ctx.repo.changeTier({ tenantId: "default", tier: "enterprise", ...DEFAULT_TIER_LIMITS.enterprise });
       const all = ctx.repo.listHistory("default");
       const open = all.filter(r => r.effectiveUntil === null);
       expect(open).toHaveLength(1);
       expect(open[0].tier).toBe("enterprise");
     });
 
-    it("isolates tenants — changing tenant-A does not stamp tenant-B's row", () => {
-      const a = ctx.repo.ensureSeeded("tenant-a", "free");
-      ctx.repo.ensureSeeded("tenant-b", "free");
-      ctx.repo.changeTier({ tenantId: "tenant-a", tier: "team", ...DEFAULT_TIER_LIMITS.team });
+    it("isolates tenants — changing tenant-A does not stamp tenant-B's row", async () => {
+      const a = await ctx.repo.ensureSeeded("tenant-a", "free");
+      await ctx.repo.ensureSeeded("tenant-b", "free");
+      await ctx.repo.changeTier({ tenantId: "tenant-a", tier: "team", ...DEFAULT_TIER_LIMITS.team });
       expect(ctx.repo.findCurrent("tenant-b")?.tier).toBe("free");
       const aHistory = ctx.repo.listHistory("tenant-a");
       expect(aHistory.find(r => r.id === a.id)?.effectiveUntil).not.toBeNull();
@@ -130,8 +130,8 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
   });
 
   describe("createOverride", () => {
-    it("inserts an override with explicit expires_at = null (permanent)", () => {
-      const ov = ctx.repo.createOverride({
+    it("inserts an override with explicit expires_at = null (permanent)", async () => {
+      const ov = await ctx.repo.createOverride({
         tenantId: "default",
         fieldName: "max_skills",
         overrideValue: 5000,
@@ -142,15 +142,15 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
       expect(ov.reason).toBe("Pilot customer raised the cap");
     });
 
-    it("rejects empty / whitespace-only reason (audit-grade text)", () => {
-      expect(() => ctx.repo.createOverride({
+    it("rejects empty / whitespace-only reason (audit-grade text)", async () => {
+      await expect(async () => await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_skills",
         overrideValue: 100, reason: "  ", grantedBy: "admin-1",
-      })).toThrow(/reason is required/);
+      })).rejects.toThrow(/reason is required/);
     });
 
-    it("preserves explicit expires_at", () => {
-      const ov = ctx.repo.createOverride({
+    it("preserves explicit expires_at", async () => {
+      const ov = await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_api_calls_per_day",
         overrideValue: 10_000, reason: "Burst", grantedBy: "admin-1",
         expiresAt: 5_000,
@@ -160,17 +160,17 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
   });
 
   describe("listActiveOverrides", () => {
-    it("returns only un-expired overrides at the given clock time", () => {
-      ctx.repo.createOverride({
+    it("returns only un-expired overrides at the given clock time", async () => {
+      await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_skills",
         overrideValue: 100, reason: "perm", grantedBy: "a",
       });
-      ctx.repo.createOverride({
+      await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_users",
         overrideValue: 50, reason: "expired", grantedBy: "a",
         expiresAt: 1000, grantedAt: 500,
       });
-      ctx.repo.createOverride({
+      await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_api_calls_per_day",
         overrideValue: 200, reason: "still active", grantedBy: "a",
         expiresAt: 5000, grantedAt: 500,
@@ -181,12 +181,12 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
       ]);
     });
 
-    it("freshest override sorts first when multiple cover the same field", () => {
-      ctx.repo.createOverride({
+    it("freshest override sorts first when multiple cover the same field", async () => {
+      await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_skills",
         overrideValue: 100, reason: "first", grantedBy: "a", grantedAt: 1000,
       });
-      ctx.repo.createOverride({
+      await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_skills",
         overrideValue: 200, reason: "second", grantedBy: "a", grantedAt: 2000,
       });
@@ -194,12 +194,12 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
       expect(active[0].overrideValue).toBe(200);
     });
 
-    it("isolates tenants", () => {
-      ctx.repo.createOverride({
+    it("isolates tenants", async () => {
+      await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_skills",
         overrideValue: 100, reason: "p", grantedBy: "a",
       });
-      ctx.repo.createOverride({
+      await ctx.repo.createOverride({
         tenantId: "tenant-x", fieldName: "max_skills",
         overrideValue: 200, reason: "q", grantedBy: "a",
       });
@@ -209,8 +209,8 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
   });
 
   describe("deleteOverride", () => {
-    it("returns true when a row was removed, false otherwise", () => {
-      const ov = ctx.repo.createOverride({
+    it("returns true when a row was removed, false otherwise", async () => {
+      const ov = await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_skills",
         overrideValue: 100, reason: "x", grantedBy: "a",
       });
@@ -221,8 +221,8 @@ describe("TenantQuotaRepository (P1-13.5)", () => {
   });
 
   describe("listAllOverrides (audit view)", () => {
-    it("includes expired rows", () => {
-      ctx.repo.createOverride({
+    it("includes expired rows", async () => {
+      await ctx.repo.createOverride({
         tenantId: "default", fieldName: "max_skills",
         overrideValue: 100, reason: "expired", grantedBy: "a",
         expiresAt: 1, grantedAt: 0,

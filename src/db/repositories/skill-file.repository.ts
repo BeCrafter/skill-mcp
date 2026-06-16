@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { skillFiles } from "../schema.js";
 
@@ -13,8 +13,12 @@ export class SkillFileRepository {
     mimeType: string;
     checksum?: string;
   }): Promise<void> {
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: skillFiles.id }).from(skillFiles).where(eq(skillFiles.id, id)).get();
+      return !!row;
+    });
     this.db.insert(skillFiles).values({
-      id: randomUUID(),
+      id,
       skillId,
       filePath: file.filePath,
       fileType: file.fileType,
@@ -59,7 +63,7 @@ export class SkillFileRepository {
       tx.delete(skillFiles).where(eq(skillFiles.skillId, skillId)).run();
       if (files.length === 0) return;
       tx.insert(skillFiles).values(files.map(f => ({
-        id: randomUUID(),
+        id: shortId(),
         skillId,
         filePath: f.filePath,
         fileType: f.fileType,

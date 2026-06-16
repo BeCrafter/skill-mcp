@@ -1,5 +1,5 @@
 import { and, eq, gt, isNull, or, desc } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { shortId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { tenantQuotas, tenantQuotaOverrides } from "../schema.js";
 
@@ -135,8 +135,11 @@ export class TenantQuotaRepository {
    * row with `effective_until IS NULL` exists for this tenant — use
    * `changeTier()` for atomic transitions.
    */
-  create(input: CreateQuotaInput): TenantQuotaEntity {
-    const id = randomUUID();
+  async create(input: CreateQuotaInput): Promise<TenantQuotaEntity> {
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: tenantQuotas.id }).from(tenantQuotas).where(eq(tenantQuotas.id, id)).get();
+      return !!row;
+    });
     const effectiveFrom = input.effectiveFrom ?? Date.now();
     this.db.insert(tenantQuotas).values({
       id,
@@ -172,15 +175,18 @@ export class TenantQuotaRepository {
    * transaction so a reader never sees zero or two current rows. Returns
    * the new row.
    */
-  changeTier(input: CreateQuotaInput): TenantQuotaEntity {
+  async changeTier(input: CreateQuotaInput): Promise<TenantQuotaEntity> {
     const now = input.effectiveFrom ?? Date.now();
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: tenantQuotas.id }).from(tenantQuotas).where(eq(tenantQuotas.id, id)).get();
+      return !!row;
+    });
     let result!: TenantQuotaEntity;
     this.db.transaction((tx) => {
       tx.update(tenantQuotas)
         .set({ effectiveUntil: now })
         .where(and(eq(tenantQuotas.tenantId, input.tenantId), isNull(tenantQuotas.effectiveUntil)))
         .run();
-      const id = randomUUID();
       tx.insert(tenantQuotas).values({
         id,
         tenantId: input.tenantId,
@@ -216,11 +222,11 @@ export class TenantQuotaRepository {
    * tenant already has a current row, return it unchanged (does NOT switch
    * tier). Use `changeTier` when you do want to migrate.
    */
-  ensureSeeded(tenantId: string, tier: Tier = "free"): TenantQuotaEntity {
+  async ensureSeeded(tenantId: string, tier: Tier = "free"): Promise<TenantQuotaEntity> {
     const existing = this.findCurrent(tenantId);
     if (existing) return existing;
     const limits = DEFAULT_TIER_LIMITS[tier];
-    return this.create({ tenantId, tier, ...limits });
+    return await this.create({ tenantId, tier, ...limits });
   }
 
   // --- Overrides -----------------------------------------------------------
@@ -255,12 +261,15 @@ export class TenantQuotaRepository {
     return rows.map(r => this.toOverrideEntity(r));
   }
 
-  createOverride(input: CreateOverrideInput): QuotaOverrideEntity {
+  async createOverride(input: CreateOverrideInput): Promise<QuotaOverrideEntity> {
     const trimmedReason = input.reason.trim();
     if (!trimmedReason) {
       throw new Error("override reason is required (audit-grade text, non-empty)");
     }
-    const id = randomUUID();
+    const id = await generateUniqueId(() => shortId(), async (id) => {
+      const row = this.db.select({ id: tenantQuotaOverrides.id }).from(tenantQuotaOverrides).where(eq(tenantQuotaOverrides.id, id)).get();
+      return !!row;
+    });
     const grantedAt = input.grantedAt ?? Date.now();
     this.db.insert(tenantQuotaOverrides).values({
       id,
