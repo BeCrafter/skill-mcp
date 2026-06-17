@@ -155,18 +155,16 @@ export async function userGetAction(userId: string): Promise<void> {
     closeDatabase();
     process.exit(1);
   }
-  const tags = await userRoleRepo.getAggregatedTagsByUserId(userId);
   const roleIds = await userRoleRepo.findRoleIdsByUserId(userId);
   const roleRows = await roleRepo.findByIds(roleIds);
   const roles = roleRows.map(r => ({ id: r.id, name: r.name, tags: r.tags }));
 
-    console.log(section("user", undefined, kvWidth(12, c.dim(user.id), user.name ?? "(unnamed)", user.status, roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; "), tags.join(", "))));
+    console.log(section("user", undefined, kvWidth(12, c.dim(user.id), user.name ?? "(unnamed)", user.status, roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; "))));
     console.log();
     console.log(kv("id", c.dim(user.id)));
     console.log(kv("name", user.name ?? c.dim("(unnamed)")));
     console.log(kv("status", user.status));
     console.log(kv("roles", roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; ") || c.dim("(none)")));
-    console.log(kv("tags", tags.join(", ") || c.dim("(none)")));
 
   console.log();
   closeDatabase();
