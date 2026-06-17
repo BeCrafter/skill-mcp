@@ -151,9 +151,16 @@ export function table(rows: Array<Record<string, unknown>>, columns: Column[]): 
   for (const row of rows) {
     const cells = computedColumns.map(col => {
       const raw = row[col.key] ?? "";
-      const text = col.format ? col.format(raw) : String(raw);
-      if (col.align === "right") return text.padStart(col.width);
-      return text.padEnd(col.width);
+      const rawText = String(raw);
+      if (col.format) {
+        // Pad raw text first, then apply format (e.g. color) so ANSI codes
+        // don't interfere with padEnd's character count.
+        const padded = col.align === "right"
+          ? rawText.padStart(col.width)
+          : rawText.padEnd(col.width);
+        return col.format(padded);
+      }
+      return col.align === "right" ? rawText.padStart(col.width) : rawText.padEnd(col.width);
     });
     lines.push(`    ${cells.join("  ")}`);
   }

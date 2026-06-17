@@ -28,17 +28,17 @@ export async function roleListAction(): Promise<void> {
   console.log();
 
   const rows = roles.map(r => ({
-    id: c.dim(r.id),
+    id: r.id,
     name: r.name,
     tags: r.tags.join(", "),
-    desc: r.description ? c.dim(r.description.slice(0, 40)) : "",
+    desc: r.description ? r.description.slice(0, 40) : "",
   }));
 
   console.log(table(rows, [
-    { key: "id", header: "ID", width: 2 },
+    { key: "id", header: "ID", width: 2, format: v => c.dim(String(v)) },
     { key: "name", header: "NAME", width: 16 },
     { key: "tags", header: "TAGS", width: 24 },
-    { key: "desc", header: "DESCRIPTION", width: 42 },
+    { key: "desc", header: "DESCRIPTION", width: 42, format: v => v ? c.dim(String(v)) : "" },
   ]));
 
   console.log();

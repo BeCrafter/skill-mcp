@@ -47,18 +47,18 @@ export async function userListAction(): Promise<void> {
     const roleRows = await roleRepo.findByIds(roleIds);
     const roleNames = roleRows.map(r => r.name);
     rows.push({
-      id: c.dim(user.id),
-      name: user.name ?? c.dim("(unnamed)"),
+      id: user.id,
+      name: user.name ?? "",
       status: user.status,
-      roles: roleNames.join(", ") || c.dim("(none)"),
+      roles: roleNames.join(", ") || "",
     });
   }
 
   console.log(table(rows, [
-    { key: "id", header: "ID", width: 2 },
-    { key: "name", header: "NAME", width: 16 },
+    { key: "id", header: "ID", width: 2, format: v => c.dim(String(v)) },
+    { key: "name", header: "NAME", width: 16, format: v => String(v) || c.dim("(unnamed)") },
     { key: "status", header: "STATUS", width: 10 },
-    { key: "roles", header: "ROLES", width: 24 },
+    { key: "roles", header: "ROLES", width: 24, format: v => String(v) || c.dim("(none)") },
   ]));
 
   console.log();
