@@ -8,6 +8,9 @@ export interface UserEntity {
   id: string;
   tenantId: string;
   name: string | null;
+  username: string | null;
+  passwordHash: string | null;
+  userType: string;
   token: string;
   status: string;
   tokenExpiresAt: number | null;
@@ -78,12 +81,20 @@ export class UserRepository {
     return rows.map(r => this.toEntity(r));
   }
 
-  async create(input: { name?: string; token: string; tokenExpiresAt?: number | null }): Promise<UserEntity> {
+  async findByUsername(username: string): Promise<UserEntity | null> {
+    const rows = this.db.select().from(users).where(eq(users.username, username)).limit(1).all();
+    return rows.length > 0 ? this.toEntity(rows[0]) : null;
+  }
+
+  async create(input: { name?: string; username?: string; passwordHash?: string; userType?: string; token: string; tokenExpiresAt?: number | null }): Promise<UserEntity> {
     const now = Date.now();
     const id = await generateUniqueId(() => generateId("usr_"), async (id) => !!(await this.findById(id)));
     this.db.insert(users).values({
       id,
       name: input.name ?? null,
+      username: input.username ?? null,
+      passwordHash: input.passwordHash ?? null,
+      userType: input.userType ?? "user",
       token: input.token,
       status: "active",
       tokenExpiresAt: input.tokenExpiresAt ?? null,
@@ -93,14 +104,20 @@ export class UserRepository {
     return this.findById(id) as Promise<UserEntity>;
   }
 
-  async update(id: string, input: { name?: string; status?: string }): Promise<UserEntity | null> {
+  async update(id: string, input: { name?: string; status?: string; username?: string; userType?: string }): Promise<UserEntity | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
     if (input.name !== undefined) updateData.name = input.name;
     if (input.status !== undefined) updateData.status = input.status;
+    if (input.username !== undefined) updateData.username = input.username;
+    if (input.userType !== undefined) updateData.userType = input.userType;
     this.db.update(users).set(updateData).where(eq(users.id, id)).run();
     return this.findById(id);
+  }
+
+  async updatePassword(id: string, passwordHash: string): Promise<void> {
+    this.db.update(users).set({ passwordHash, updatedAt: Date.now() }).where(eq(users.id, id)).run();
   }
 
   async updateToken(id: string, tokenHash: string): Promise<void> {
@@ -155,6 +172,9 @@ export class UserRepository {
       id: row.id,
       tenantId: row.tenantId ?? "default",
       name: row.name,
+      username: row.username ?? null,
+      passwordHash: row.passwordHash ?? null,
+      userType: row.userType ?? "user",
       token: row.token,
       status: row.status ?? "active",
       tokenExpiresAt: row.tokenExpiresAt ?? null,

@@ -24,6 +24,8 @@ export type DomainEvent =
   | { type: "pipeline:completed"; tenantId?: string; runId?: string; pipelineName: string; status: "success" | "partial" | "failed"; stageCount: number }
   | { type: "user:token_rotated"; tenantId: string; userId: string; rotatedAt: number; previousTokenExpiresAt?: number | null }
   | { type: "user:roles_changed"; userId: string }
+  | { type: "user:logged_in"; userId: string; username: string }
+  | { type: "user:password_changed"; userId: string }
   | { type: "role:updated"; roleId: string; affectedUserIds: string[] };
 
 export interface DomainEventBusOptions {

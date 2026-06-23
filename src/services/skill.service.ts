@@ -86,7 +86,7 @@ export interface TransitionLifecycleOptions {
 const SKILL_LIST_TTL_SECONDS = 600;
 
 function anonymousContext(): RequestContext {
-  return { tenantId: DEFAULT_TENANT_ID, userId: "anonymous", sessionId: "anonymous", tags: new Set(), isAuthenticated: false };
+  return { tenantId: DEFAULT_TENANT_ID, userId: "anonymous", sessionId: "anonymous", tags: new Set(), isAuthenticated: false, userType: undefined };
 }
 
 export interface ListSkillsOptions {

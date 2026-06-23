@@ -5,6 +5,7 @@ import type { AppDependencies } from "../../../app.js";
 import { json, readJsonBody } from "../../helpers.js";
 import { AppError } from "../../../utils/errors.js";
 import { TOKEN_ROTATION_GRACE_MS } from "../../../db/repositories/user.repository.js";
+import { requireSuperadmin, assertSuperadminProtected } from "../../middleware/admin-auth.js";
 
 class UserNotFoundError extends AppError {
   constructor() { super("User not found", "USER_NOT_FOUND", 404); this.name = "UserNotFoundError"; }
@@ -14,9 +15,6 @@ class InvalidExpiryError extends AppError {
   constructor(msg: string) { super(msg, "INVALID_EXPIRY", 400); this.name = "InvalidExpiryError"; }
 }
 
-// P0-4 — accept either an absolute epoch ms (`token_expires_at`) or a relative
-// duration in seconds (`expires_in`). Returns null when neither is supplied
-// (token never expires) or throws InvalidExpiryError on malformed inputs.
 function parseExpiry(input: { token_expires_at?: number | null; expires_in?: number | null }): number | null {
   if (input.token_expires_at != null) {
     if (typeof input.token_expires_at !== "number" || !Number.isFinite(input.token_expires_at) || input.token_expires_at <= Date.now()) {
@@ -43,28 +41,68 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
   });
 
   router.post("/api/admin/users", async (ctx) => {
-    const data = await readJsonBody<{ name?: string; role_ids?: string[]; token_expires_at?: number | null; expires_in?: number | null }>(ctx.req);
+    const rc = ctx.requestContext!;
+    const data = await readJsonBody<{ name?: string; role_ids?: string[]; token_expires_at?: number | null; expires_in?: number | null; user_type?: string; username?: string; password?: string }>(ctx.req);
+
+    // user_type enum validation
+    if (data.user_type && !["user", "admin"].includes(data.user_type)) {
+      throw new AppError("Invalid user_type. Must be 'user' or 'admin'", "INVALID_USER_TYPE", 400);
+    }
+
+    // Only superadmin can create admin users
+    if (data.user_type === "admin") {
+      requireSuperadmin(rc);
+    }
+
+    // Password length validation
+    if (data.password && data.password.length < 8) {
+      throw new AppError("Password must be at least 8 characters", "PASSWORD_TOO_SHORT", 400);
+    }
+
     const tokenExpiresAt = parseExpiry(data);
     const token = generateToken();
     const hash = createHash("sha256").update(token).digest("hex");
-    const user = await userRepo.create({ name: data.name, token: hash, tokenExpiresAt });
-    if (data.role_ids?.length) {
+
+    let passwordHash: string | undefined;
+    if (data.password) {
+      const { hashSync } = await import("bcryptjs");
+      passwordHash = hashSync(data.password, 12);
+    }
+
+    const user = await userRepo.create({
+      name: data.name,
+      username: data.username,
+      passwordHash,
+      userType: data.user_type ?? "user",
+      token: hash,
+      tokenExpiresAt,
+    });
+
+    // Auto-assign admin role for admin users if no explicit roles provided
+    if ((data.user_type === "admin") && !data.role_ids?.length) {
+      const allRoles = await roleRepo.findAll();
+      const adminRole = allRoles.find(r => r.name === "admin");
+      if (adminRole) {
+        await userRoleRepo.replaceUserRoles(user.id, [adminRole.id]);
+      }
+    } else if (data.role_ids?.length) {
       await userRoleRepo.replaceUserRoles(user.id, data.role_ids);
     }
+
     const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
     const roleIds = await userRoleRepo.findRoleIdsByUserId(user.id);
     const roleRows = await roleRepo.findByIds(roleIds);
     const roleNames = roleRows.map(r => r.name);
-    json(ctx.res, 201, { success: true, data: { id: user.id, name: user.name, token, token_expires_at: tokenExpiresAt, roles: roleNames, tags } });
+    json(ctx.res, 201, { success: true, data: { id: user.id, name: user.name, username: user.username, user_type: user.userType, token, token_expires_at: tokenExpiresAt, roles: roleNames, tags } });
   });
 
-  // P0-4 — rotate-token endpoint. Mints a fresh plaintext token, atomically
-  // moves the previous token into the grace slot (default 7 days), and
-  // returns both the new token and the grace expiry so callers can plan a
-  // staged client rollout. Returns 404 if the user does not exist; 400 if
-  // expires_in / token_expires_at / grace_seconds are malformed.
   router.post("/api/admin/users/:userId/rotate-token", async (ctx) => {
+    const rc = ctx.requestContext!;
     const userId = ctx.params.userId;
+    const target = await userRepo.findById(userId);
+    if (!target) throw new UserNotFoundError();
+    assertSuperadminProtected(target, rc.userId);
+
     type RotateBody = { token_expires_at?: number | null; expires_in?: number | null; grace_seconds?: number | null };
     const data = await readJsonBody<RotateBody>(ctx.req).catch(() => ({} as RotateBody));
     const tokenExpiresAt = parseExpiry(data);
@@ -92,13 +130,12 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     });
   });
 
-  // P0-4 — explicit revocation of the previous-token grace slot. Use this
-  // ahead of the natural grace expiry when responding to a credential
-  // compromise. Idempotent: returns 200 even if no grace slot was set.
   router.delete("/api/admin/users/:userId/previous-token", async (ctx) => {
+    const rc = ctx.requestContext!;
     const userId = ctx.params.userId;
     const user = await userRepo.findById(userId);
     if (!user) throw new UserNotFoundError();
+    assertSuperadminProtected(user, rc.userId);
     await userRepo.clearPreviousToken(userId);
     json(ctx.res, 200, { success: true });
   });
@@ -115,15 +152,40 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
   });
 
   router.put("/api/admin/users/:userId", async (ctx) => {
+    const rc = ctx.requestContext!;
     const userId = ctx.params.userId;
-    const data = await readJsonBody<{ name?: string; status?: string }>(ctx.req);
-    const updated = await userRepo.update(userId, data);
-    if (!updated) throw new UserNotFoundError();
+    const data = await readJsonBody<{ name?: string; status?: string; user_type?: string }>(ctx.req);
+    const target = await userRepo.findById(userId);
+    if (!target) throw new UserNotFoundError();
+    assertSuperadminProtected(target, rc.userId);
+
+    const updateInput: { name?: string; status?: string; userType?: string } = {};
+    if (data.name !== undefined) updateInput.name = data.name;
+    if (data.status !== undefined) updateInput.status = data.status;
+
+    // user_type change rules
+    if (data.user_type !== undefined) {
+      if (data.user_type === "superadmin") {
+        throw new AppError("Cannot promote to superadmin via API", "FORBIDDEN_USER_TYPE", 403);
+      }
+      if (!["user", "admin"].includes(data.user_type)) {
+        throw new AppError("Invalid user_type. Must be 'user' or 'admin'", "INVALID_USER_TYPE", 400);
+      }
+      // Only superadmin can change user_type
+      requireSuperadmin(rc);
+      updateInput.userType = data.user_type;
+    }
+
+    const updated = await userRepo.update(userId, updateInput);
     json(ctx.res, 200, { success: true, data: updated });
   });
 
   router.delete("/api/admin/users/:userId", async (ctx) => {
+    const rc = ctx.requestContext!;
     const userId = ctx.params.userId;
+    const target = await userRepo.findById(userId);
+    if (!target) throw new UserNotFoundError();
+    assertSuperadminProtected(target, rc.userId);
     await userRoleRepo.deleteByUserId(userId);
     const deleted = await userRepo.delete(userId);
     if (!deleted) throw new UserNotFoundError();
@@ -131,10 +193,12 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
   });
 
   router.put("/api/admin/users/:userId/roles", async (ctx) => {
+    const rc = ctx.requestContext!;
     const userId = ctx.params.userId;
     const data = await readJsonBody<{ role_ids?: string[] }>(ctx.req);
     const user = await userRepo.findById(userId);
     if (!user) throw new UserNotFoundError();
+    assertSuperadminProtected(user, rc.userId);
     await userRoleRepo.replaceUserRoles(userId, data.role_ids ?? []);
     eventBus.publish({ type: "user:roles_changed", userId });
     json(ctx.res, 200, { success: true });

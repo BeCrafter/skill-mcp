@@ -19,13 +19,17 @@ export type WebhookEventType =
   | "skill.published"
   | "skill.deprecated"
   | "pipeline.completed"
-  | "user.token_rotated";
+  | "user.token_rotated"
+  | "user.logged_in"
+  | "user.password_changed";
 
 export const VALID_WEBHOOK_EVENT_TYPES: ReadonlySet<WebhookEventType> = new Set([
   "skill.published",
   "skill.deprecated",
   "pipeline.completed",
   "user.token_rotated",
+  "user.logged_in",
+  "user.password_changed",
 ]);
 
 export interface WebhookEntity {

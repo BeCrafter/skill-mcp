@@ -17,6 +17,8 @@ import { roleListAction, roleCreateAction, roleGetAction, roleUpdateAction, role
 import { migrateCheckAction } from "./commands/migrate-cmd.js";
 import { manifestMigrateAction } from "./commands/manifest-migrate-cmd.js";
 import { evalListAction, evalRunAction, evalResultsAction } from "./commands/eval-cmd.js";
+import { loginAction, logoutAction, whoamiAction, resetPasswordAction } from "./commands/auth-cmd.js";
+import { initAction } from "./commands/init-cmd.js";
 
 export async function createCli(): Promise<Command> {
   const config = getConfig();
@@ -247,6 +249,45 @@ export async function createCli(): Promise<Command> {
       await evalResultsAction(slug, { limit: parseInt(opts.limit as string, 10) });
     });
 
+  // ── System initialization ──────────────────────────────────────────
+  program
+    .command("init")
+    .description("Initialize system with first superadmin user")
+    .requiredOption("--username <username>", "Superadmin username")
+    .requiredOption("--password <password>", "Superadmin password (min 8 chars)")
+    .action(async (opts) => {
+      await initAction({ username: opts.username, password: opts.password });
+    });
+
+  // ── Auth commands ─────────────────────────────────────────────────
+  const authCmd = program
+    .command("auth")
+    .description("Authentication commands");
+
+  authCmd
+    .command("login")
+    .description("Log in with username and password")
+    .action(async () => { await loginAction(); });
+
+  authCmd
+    .command("logout")
+    .description("Clear stored credentials")
+    .action(async () => { await logoutAction(); });
+
+  authCmd
+    .command("whoami")
+    .description("Show current authenticated user")
+    .action(async () => { await whoamiAction(); });
+
+  authCmd
+    .command("reset-password")
+    .description("Reset a user's password (requires local DB access)")
+    .requiredOption("--username <username>", "Username")
+    .requiredOption("--password <password>", "New password (min 8 chars)")
+    .action(async (opts) => {
+      await resetPasswordAction({ username: opts.username, password: opts.password });
+    });
+
   // ── User management ────────────────────────────────────────────────
   const userCmd = program
     .command("user")
@@ -261,11 +302,17 @@ export async function createCli(): Promise<Command> {
     .command("create")
     .description("Create a new user")
     .option("--name <name>", "User name")
+    .option("--username <username>", "Login username (for admin/superadmin)")
+    .option("--password <password>", "Login password (for admin/superadmin, min 8 chars)")
+    .option("--user-type <type>", "User type: user|admin", "user")
     .option("--role-ids <ids>", "Comma-separated role IDs to assign")
     .option("--ttl <duration>", "Token time-to-live (e.g. 30d, 12h, 45m, 3600s). Omit for non-expiring tokens.")
     .action(async (opts) => {
       await userCreateAction({
         name: opts.name as string | undefined,
+        username: opts.username as string | undefined,
+        password: opts.password as string | undefined,
+        userType: opts.userType as string | undefined,
         roleIds: opts.roleIds ? (opts.roleIds as string).split(",").map((s: string) => s.trim()) : undefined,
         ttl: opts.ttl as string | undefined,
       });

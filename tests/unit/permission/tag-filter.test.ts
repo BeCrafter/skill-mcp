@@ -90,9 +90,9 @@ describe("TagPermissionFilter lifecycle gate (P0-9)", () => {
     expect(out).toHaveLength(1);
   });
 
-  it("admin:read tag bypasses the lifecycle filter and sees drafts", async () => {
+  it("userType=admin bypasses the lifecycle filter and sees drafts", async () => {
     const filter = new TagPermissionFilter(ctx({
-      userId: "admin", isAuthenticated: true, tags: new Set(["admin:read"]),
+      userId: "admin", isAuthenticated: true, userType: "admin", tags: new Set(),
     }));
     const out = await filter.filter([
       skill({ slug: "d", visibility: "private", status: "draft" }),
@@ -101,19 +101,26 @@ describe("TagPermissionFilter lifecycle gate (P0-9)", () => {
     expect(out.map(s => s.slug).sort()).toEqual(["a", "d"]);
   });
 
-  it("admin:write tag also bypasses the lifecycle filter", async () => {
+  it("userType=superadmin also bypasses the lifecycle filter", async () => {
     const filter = new TagPermissionFilter(ctx({
-      userId: "admin", isAuthenticated: true, tags: new Set(["admin:write"]),
+      userId: "sa", isAuthenticated: true, userType: "superadmin", tags: new Set(),
     }));
     const out = await filter.filter([skill({ visibility: "public", status: "draft" })]);
     expect(out).toHaveLength(1);
   });
 
-  it("anonymous caller does NOT pick up admin bypass via tags alone (auth required)", async () => {
-    // Sanity: even if tags somehow include admin:write, isAuthenticated=false
-    // means isAdmin() short-circuits to false.
+  it("userType=user does NOT bypass the lifecycle filter", async () => {
     const filter = new TagPermissionFilter(ctx({
-      tags: new Set(["admin:write"]), isAuthenticated: false,
+      userId: "u1", isAuthenticated: true, userType: "user", tags: new Set(),
+    }));
+    const out = await filter.filter([skill({ visibility: "public", status: "draft" })]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("anonymous caller does NOT pick up admin bypass even with userType set", async () => {
+    // Sanity: isAuthenticated=false means isAdmin() short-circuits to false.
+    const filter = new TagPermissionFilter(ctx({
+      userType: "admin", isAuthenticated: false, tags: new Set(),
     }));
     const out = await filter.filter([skill({ visibility: "public", status: "draft" })]);
     expect(out).toHaveLength(0);

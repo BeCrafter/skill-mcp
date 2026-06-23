@@ -41,4 +41,17 @@ export function setupWebhookSubscribers(bus: DomainEventBus, webhookService: Web
       previous_token_expires_at: event.previousTokenExpiresAt ?? null,
     });
   });
+
+  bus.on("user:logged_in", (event) => {
+    webhookService.publishEvent("user.logged_in", DEFAULT_TENANT_ID, {
+      user_id: event.userId,
+      username: event.username,
+    });
+  });
+
+  bus.on("user:password_changed", (event) => {
+    webhookService.publishEvent("user.password_changed", DEFAULT_TENANT_ID, {
+      user_id: event.userId,
+    });
+  });
 }

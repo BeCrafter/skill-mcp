@@ -7,12 +7,7 @@ import { CompositeCacheProvider } from "../../cache/composite.provider.js";
 import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { RemoteSkillProvider } from "../../provider/remote.provider.js";
 import { instrumentProvider } from "../../provider/instrument.js";
-import { createContextBuilder, withFallbackToken, type OidcContextOptions } from "../../permission/context-builder.js";
-import { OidcVerifier } from "../../auth/oidc-verifier.js";
-import { RemoteJwksProvider } from "../../auth/jwks-provider.js";
-import { OidcProvisioner } from "../../auth/oidc-provisioner.js";
-import { OidcIdentityRepository } from "../../db/repositories/oidc-identity.repository.js";
-import { OidcGroupRoleMapRepository } from "../../db/repositories/oidc-group-role-map.repository.js";
+import { createContextBuilder, withFallbackToken } from "../../permission/context-builder.js";
 import { assertStdioTokenOrExit } from "./serve-stdio-auth.js";
 import { SkillService } from "../../services/skill.service.js";
 import { SkillSearchService } from "../../services/skill-search.service.js";
@@ -204,62 +199,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   skillSearchService.init().catch((err) => {
     logger.warn({ err }, "Initial BM25 index build failed; will retry on next event");
   });
-  // P1-14 stage 2 — OIDC verifier wiring. The `auth.oidc` block is optional
-  // — absent issuer/audience/jwksUri triple keeps SSO disabled and the
-  // bearer-token path runs unchanged. When present, a single
-  // `RemoteJwksProvider` (JWKS TTL cache + rotation refresh) + `OidcVerifier`
-  // (RS256/RS384/RS512 verification) pair is shared across the MCP context
-  // builder and the admin / gateway middlewares so the JWKS cache and audit
-  // surface are unified.
-  // P1-14 stage 3 — auto-provisioning + group→role mapping. Repositories are
-  // built unconditionally so the admin REST surface (/api/v1/admin/oidc/...)
-  // is always available, even when the runtime SSO toggle is off (operators
-  // typically configure mappings before flipping the verifier on). The
-  // provisioner is only constructed + wired when SSO is actually enabled.
-  const oidcIdentityRepo = new OidcIdentityRepository(db);
-  const oidcGroupRoleMapRepo = new OidcGroupRoleMapRepository(db);
-
-  let oidcOptions: OidcContextOptions | undefined;
-  let oidcProvisioner: OidcProvisioner | undefined;
-  if (config.auth?.oidc) {
-    const oidcCfg = config.auth.oidc;
-    const jwks = new RemoteJwksProvider({
-      jwksUri: oidcCfg.jwksUri,
-      ttlMs: oidcCfg.jwksTtlMs,
-    });
-    const verifier = new OidcVerifier({
-      issuer: oidcCfg.issuer,
-      audience: oidcCfg.audience,
-      jwks,
-      allowedAlgorithms: oidcCfg.allowedAlgorithms,
-      clockSkewSec: oidcCfg.clockSkewSec,
-    });
-    oidcProvisioner = new OidcProvisioner({
-      identityRepo: oidcIdentityRepo,
-      groupRoleMapRepo: oidcGroupRoleMapRepo,
-      userRepo,
-      userRoleRepo,
-      logger,
-    });
-    oidcOptions = {
-      verifier,
-      userClaim: oidcCfg.userClaim,
-      groupsClaim: oidcCfg.groupsClaim,
-      logger,
-      provisioner: oidcProvisioner,
-    };
-    logger.info(
-      {
-        issuer: oidcCfg.issuer,
-        audience: oidcCfg.audience,
-        jwksUri: oidcCfg.jwksUri,
-        algorithms: oidcCfg.allowedAlgorithms,
-        autoProvision: true,
-      },
-      "OIDC verifier enabled (P1-14 stage 3 — auto-provision active)",
-    );
-  }
-  const contextBuilder = createContextBuilder(userRepo, userRoleRepo, oidcOptions);
+  const contextBuilder = createContextBuilder(userRepo, userRoleRepo, config.auth?.jwt?.secret, config.auth?.jwt?.issuer);
   // P0-10 — async import job queue + background worker (single-process; the
   // P1 roadmap promotes this to an external Redis/PG queue, see review §11).
   const importJobRepo = new ImportJobRepository(db);
@@ -315,10 +255,10 @@ export async function serveAction(options: ServeOptions): Promise<void> {
         webhookDeliveryRepo,
         webhookService,
         webhookWorker,
-        oidc: oidcOptions,
-        oidcIdentityRepo,
-        oidcGroupRoleMapRepo,
-        oidcProvisioner,
+        jwtSecret: config.auth?.jwt?.secret,
+        jwtIssuer: config.auth?.jwt?.issuer,
+        jwtAccessExpiresIn: config.auth?.jwt?.accessExpiresIn,
+        jwtRefreshExpiresIn: config.auth?.jwt?.refreshExpiresIn,
       },
       { type: options.transport as "sse" | "http" },
     );

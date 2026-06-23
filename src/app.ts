@@ -10,7 +10,7 @@ import { registerAdminImportJobRoutes } from "./http/handlers/admin/import-jobs.
 import { registerAdminUsageRoutes } from "./http/handlers/admin/usage.handler.js";
 import { registerAdminQuotaRoutes } from "./http/handlers/admin/quotas.handler.js";
 import { registerAdminWebhookRoutes } from "./http/handlers/admin/webhooks.handler.js";
-import { registerAdminOidcRoutes } from "./http/handlers/admin/oidc.handler.js";
+import { registerAuthRoutes } from "./http/handlers/auth.handler.js";
 import { setupWebhookSubscribers } from "./events/webhook-subscriber.js";
 import { registerGatewaySkillRoutes } from "./http/handlers/gateway/skills.handler.js";
 import { errorMap } from "./http/middleware/error-map.js";
@@ -30,29 +30,18 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
   const httpServer = createServer();
   const appConfig = getConfig();
 
-  // Per-user epoch counters keep cache invalidation O(1): a private+tagged
-  // skill change only bumps epochs of users whose roles intersect those tags.
   setupCacheSubscribers(deps.eventBus, deps.cache, deps.cacheEpochs, {
     roleRepo: deps.roleRepo,
     userRoleRepo: deps.userRoleRepo,
   });
 
-  // P1-16 — domain events → webhook fan-out. Producers stay decoupled; the
-  // bridge enqueues a row per matching subscription, the worker fires the POST.
   if (deps.webhookService) {
     setupWebhookSubscribers(deps.eventBus, deps.webhookService);
   }
 
-  if (appConfig.auth.adminAuthOptional) {
-    logger.warn(
-      "SKILL_MCP_ADMIN_AUTH_OPTIONAL=true — /api/admin/* is anonymous. " +
-        "Legacy escape hatch; gate admin endpoints with a token bearing the 'admin:write' tag.",
-    );
-  }
-
   const isCloudServiceOnlyMode = appConfig.deployment.mode === "cloud";
   const contextBuilder = deps.userRepo && deps.userRoleRepo
-    ? createContextBuilder(deps.userRepo, deps.userRoleRepo, deps.oidc)
+    ? createContextBuilder(deps.userRepo, deps.userRoleRepo, deps.jwtSecret, deps.jwtIssuer)
     : undefined;
 
   let mcpHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | null = null;
@@ -65,6 +54,11 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
     mcpHandler = await createSseMcpHandler(deps, contextBuilder);
     logger.info("SSE transport configured at /mcp/sse");
   }
+
+  // Auth routes (no admin auth required)
+  const authRouter = new Router();
+  authRouter.use(errorMap("Auth operation failed"));
+  registerAuthRoutes(authRouter, deps);
 
   const adminRouter = new Router();
   adminRouter.use(errorMap("Admin operation failed"));
@@ -82,7 +76,6 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
   registerAdminUsageRoutes(adminRouter, deps);
   registerAdminQuotaRoutes(adminRouter, deps);
   registerAdminWebhookRoutes(adminRouter, deps);
-  registerAdminOidcRoutes(adminRouter, deps);
 
   const gatewayRouter = new Router();
   gatewayRouter.use(errorMap("Gateway operation failed"));
@@ -93,10 +86,6 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
       scope: "gateway",
     }));
   }
-  // P1-13.5 — quota check after rate-limit. RateLimit guards bursts; quota
-  // guards per-tenant daily budgets. Order matters: a 429 from rate-limit
-  // is "slow down"; a 429 from quota is "buy more". Skipping the check
-  // entirely when no QuotaService is wired (e.g. CLI tests).
   if (deps.quotaService) {
     gatewayRouter.use(createQuotaCheck({
       quotaService: deps.quotaService,
@@ -112,7 +101,9 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
     userRepo: deps.userRepo, userRoleRepo: deps.userRoleRepo,
     skillRepo: deps.skillRepo,
     usageMeter: deps.usageMeter,
-    oidc: deps.oidc,
+    jwtSecret: deps.jwtSecret,
+    jwtIssuer: deps.jwtIssuer,
+    authRouter,
   }));
 
   return httpServer;

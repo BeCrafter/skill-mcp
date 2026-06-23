@@ -230,6 +230,8 @@ export interface RequestContext {
   sessionId: string;
   tags: Set<string>;
   isAuthenticated: boolean;
+  /** User type for permission checks (admin route access, superadmin guards). */
+  userType?: "superadmin" | "admin" | "user";
 }
 
 /** Skill feedback entry */

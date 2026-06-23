@@ -46,6 +46,7 @@
     "@opentelemetry/sdk-trace-node": "^2.7.1",
     "@opentelemetry/semantic-conventions": "^1.41.1",
     "ali-oss": "^6.23.0",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.8.1",
     "commander": "^13.1.0",
     "drizzle-orm": "^0.39.3",
@@ -60,6 +61,7 @@
   "devDependencies": {
     "@eslint/js": "^9.21.0",
     "@types/ali-oss": "^6.23.3",
+    "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.5",

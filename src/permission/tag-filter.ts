@@ -8,7 +8,6 @@ import { withSpan } from "../telemetry/spans.js";
 // working with a soft warning surfaced by the SDK). Draft and archived states
 // are hidden so unfinished or retired skills don't leak into the catalog.
 const NON_ADMIN_VISIBLE_STATUSES: ReadonlySet<string> = new Set(["published", "deprecated"]);
-const ADMIN_TAGS: ReadonlySet<string> = new Set(["admin:write", "admin:read"]);
 
 export class TagPermissionFilter implements IPermissionFilter {
   constructor(private context: RequestContext) {}
@@ -39,7 +38,7 @@ export class TagPermissionFilter implements IPermissionFilter {
   }
 
   /**
-   * P0-9 — admin callers (any of `admin:write`, `admin:read`) see every
+   * P0-9 — admin callers (userType=admin or superadmin) see every
    * lifecycle state so they can manage drafts and archives. Everyone else
    * sees only published + deprecated (see NON_ADMIN_VISIBLE_STATUSES). The
    * status check runs BEFORE the visibility check so an unauthenticated
@@ -48,10 +47,7 @@ export class TagPermissionFilter implements IPermissionFilter {
    */
   private isAdmin(): boolean {
     if (!this.context.isAuthenticated) return false;
-    for (const tag of ADMIN_TAGS) {
-      if (this.context.tags.has(tag)) return true;
-    }
-    return false;
+    return this.context.userType === "admin" || this.context.userType === "superadmin";
   }
 
   canAccess(skill: SkillMeta): boolean {
@@ -62,11 +58,9 @@ export class TagPermissionFilter implements IPermissionFilter {
     // Public skills are visible to everyone, including anonymous callers.
     if (skill.visibility === "public") return true;
     // private/internal: must be authenticated to see at all.
-    // NOTE: this guard is what limits the SKILL_MCP_ADMIN_AUTH_OPTIONAL legacy
-    // escape hatch (see src/http/middleware/admin-auth.ts) — it produces a
-    // context with `admin:write` tag but `isAuthenticated=false`, so even if
-    // such a context reaches this filter it cannot read private/internal
-    // skills regardless of tag intersection.
+    // Unauthenticated callers cannot see private/internal skills regardless
+    // of any tags they may carry. This is the primary access control boundary
+    // for the data visibility layer.
     if (!this.context.isAuthenticated) return false;
     // internal: any authenticated user; tag check only applies to private.
     if (skill.visibility === "internal") return true;

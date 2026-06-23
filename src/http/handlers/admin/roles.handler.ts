@@ -18,7 +18,7 @@ export function registerAdminRoleRoutes(router: Router, deps: AppDependencies): 
 
   router.post("/api/admin/roles", async (ctx) => {
     const data = await readJsonBody<{ name?: string; description?: string; tags?: string[] }>(ctx.req);
-    if (!data.name || !data.tags) throw new BadRequestError("name and tags required");
+    if (!data.name || !Array.isArray(data.tags)) throw new BadRequestError("name and tags (array) required");
     const role = await roleRepo.create({ name: data.name, description: data.description, tags: data.tags });
     json(ctx.res, 201, { success: true, data: role });
   });
@@ -33,6 +33,9 @@ export function registerAdminRoleRoutes(router: Router, deps: AppDependencies): 
   router.put("/api/admin/roles/:roleId", async (ctx) => {
     const roleId = ctx.params.roleId;
     const data = await readJsonBody<{ name?: string; description?: string; tags?: string[] }>(ctx.req);
+    if (data.tags !== undefined && !Array.isArray(data.tags)) {
+      throw new BadRequestError("tags must be an array");
+    }
     const updated = await roleRepo.update(roleId, data);
     if (!updated) throw new RoleNotFoundError();
     const affectedUserIds = await userRoleRepo.findUserIdsByRoleId(roleId);

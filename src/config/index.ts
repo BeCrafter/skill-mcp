@@ -65,21 +65,13 @@ function loadConfig(): AppConfig {
     },
     auth: {
       stdioToken: process.env.SKILL_MCP_AUTH_TOKEN,
-      adminAuthOptional: process.env.SKILL_MCP_ADMIN_AUTH_OPTIONAL === "true",
       metricsAuthOptional: process.env.SKILL_MCP_METRICS_AUTH_OPTIONAL === "true",
-      oidc: process.env.OIDC_ISSUER && process.env.OIDC_AUDIENCE && process.env.OIDC_JWKS_URI
+      jwt: process.env.AUTH_JWT_SECRET
         ? {
-            issuer: process.env.OIDC_ISSUER,
-            audience: process.env.OIDC_AUDIENCE.includes(",")
-              ? process.env.OIDC_AUDIENCE.split(",").map((s) => s.trim()).filter(Boolean)
-              : process.env.OIDC_AUDIENCE,
-            jwksUri: process.env.OIDC_JWKS_URI,
-            userClaim: process.env.OIDC_USER_CLAIM ?? "sub",
-            groupsClaim: process.env.OIDC_GROUPS_CLAIM ?? "groups",
-            clockSkewSec: parseInt(process.env.OIDC_CLOCK_SKEW_SEC ?? "60", 10),
-            jwksTtlMs: parseInt(process.env.OIDC_JWKS_TTL_MS ?? "600000", 10),
-            allowedAlgorithms: (process.env.OIDC_ALLOWED_ALGORITHMS ?? "RS256")
-              .split(",").map((s) => s.trim()).filter(Boolean),
+            secret: process.env.AUTH_JWT_SECRET,
+            accessExpiresIn: parseInt(process.env.AUTH_JWT_ACCESS_EXPIRES_IN ?? "7200", 10),
+            refreshExpiresIn: parseInt(process.env.AUTH_JWT_REFRESH_EXPIRES_IN ?? "604800", 10),
+            issuer: process.env.AUTH_JWT_ISSUER ?? "skill-mcp",
           }
         : undefined,
     },

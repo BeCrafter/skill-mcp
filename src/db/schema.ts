@@ -101,6 +101,9 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().default("default"),
   name: text("name"),
+  username: text("username"),
+  passwordHash: text("password_hash"),
+  userType: text("user_type").notNull().default("user"),
   token: text("token").notNull().unique(),
   status: text("status").default("active"),
   // P0-4 — token expiration. NULL means "never expires" so existing rows
@@ -122,6 +125,7 @@ export const users = sqliteTable("users", {
   index("idx_users_token").on(table.token),
   index("idx_users_previous_token").on(table.previousToken),
   index("idx_users_tenant_id").on(table.tenantId),
+  uniqueIndex("idx_users_username").on(table.username),
 ]);
 
 export const roles = sqliteTable("roles", {
@@ -443,40 +447,6 @@ export const skillEvalRuns = sqliteTable("skill_eval_runs", {
   index("idx_skill_eval_runs_created_at").on(table.createdAt),
 ]);
 
-// P1-14 stage 3 — OIDC user auto-provisioning + group→role mapping.
-// `oidc_identities` is the join table from a verified `(issuer, subject)` to
-// a real `users.id`; first sight of a verified JWT for that pair creates a
-// user row + identity row in one transaction. `oidc_group_role_map` lets an
-// operator declare "any subject whose JWT carries group X is in role Y" so
-// the provisioner can seed `user_roles` without per-user provisioning. See
-// drizzle/0016_oidc_provisioning.sql for the rationale on uniqueness scope
-// (issuer+subject globally; group_name+role_id per-tenant).
-export const oidcIdentities = sqliteTable("oidc_identities", {
-  id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
-  issuer: text("issuer").notNull(),
-  subject: text("subject").notNull(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  createdAt: integer("created_at").notNull(),
-  lastSeenAt: integer("last_seen_at").notNull(),
-}, (table) => [
-  uniqueIndex("uk_oidc_identities_issuer_subject").on(table.issuer, table.subject),
-  index("idx_oidc_identities_user_id").on(table.userId),
-  index("idx_oidc_identities_tenant_id").on(table.tenantId),
-]);
-
-export const oidcGroupRoleMap = sqliteTable("oidc_group_role_map", {
-  id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
-  groupName: text("group_name").notNull(),
-  roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-}, (table) => [
-  uniqueIndex("uk_oidc_group_role_map_tenant_group_role").on(table.tenantId, table.groupName, table.roleId),
-  index("idx_oidc_group_role_map_tenant_group").on(table.tenantId, table.groupName),
-]);
-
 // P1-11 stage 3 — Embedding sidecar. One row per skill (PK = skill_id).
 // `vector` stores the raw Float32Array bytes via Buffer; the repository
 // translates to/from Float32Array on read/write so consumers never see the
@@ -494,4 +464,82 @@ export const skillEmbeddings = sqliteTable("skill_embeddings", {
   updatedAt: integer("updated_at").notNull(),
 }, (table) => [
   index("idx_skill_embeddings_model").on(table.modelName),
+]);
+
+// P1-14 stage 3 — Groups for OIDC group→role mapping and organizational structure.
+// Groups can carry tags that cascade to members via the permission system.
+export const groups = sqliteTable("groups", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default("default"),
+  name: text("name").notNull(),
+  description: text("description"),
+  tags: text("tags"), // JSON array of strings
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("uk_groups_tenant_name").on(table.tenantId, table.name),
+  index("idx_groups_tenant_id").on(table.tenantId),
+]);
+
+// P1-14 stage 3 — Group membership join table.
+export const groupMembers = sqliteTable("group_members", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default("default"),
+  groupId: text("group_id").notNull().references(() => groups.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("uk_group_members_group_user").on(table.groupId, table.userId),
+  index("idx_group_members_user_id").on(table.userId),
+  index("idx_group_members_tenant_id").on(table.tenantId),
+]);
+
+// P1-14 stage 3 — Service accounts for machine-to-machine authentication.
+// Service accounts are linked to a user row and carry scoped tokens.
+export const serviceAccounts = sqliteTable("service_accounts", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default("default"),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  secret: text("secret").notNull(),
+  scopes: text("scopes"), // JSON array of scope strings
+  expiresAt: integer("expires_at"),
+  lastUsedAt: integer("last_used_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("uk_service_accounts_user").on(table.userId),
+  index("idx_service_accounts_tenant_id").on(table.tenantId),
+]);
+
+// P1-14 stage 3 — Delegation rules for user-to-user permission delegation.
+// Allows a user to delegate specific scopes to another user with optional conditions.
+export const delegationRules = sqliteTable("delegation_rules", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default("default"),
+  delegatorId: text("delegator_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  delegateeId: text("delegatee_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  scopes: text("scopes"), // JSON array of scope strings
+  conditions: text("conditions"), // JSON object
+  expiresAt: integer("expires_at"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("idx_delegation_rules_delegator").on(table.delegatorId),
+  index("idx_delegation_rules_delegatee").on(table.delegateeId),
+  index("idx_delegation_rules_tenant_id").on(table.tenantId),
+]);
+
+// P1-14 stage 3 — Sessions for tracking active user sessions.
+// Complements the token-based auth with explicit session lifecycle management.
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default("default"),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("uk_sessions_token").on(table.token),
+  index("idx_sessions_user_id").on(table.userId),
+  index("idx_sessions_expires_at").on(table.expiresAt),
+  index("idx_sessions_tenant_id").on(table.tenantId),
 ]);

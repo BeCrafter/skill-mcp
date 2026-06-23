@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { generateToken } from "../../utils/id.js";
 import { getConfig } from "../../config/index.js";
 import { runMigrations } from "../../db/migrate.js";
@@ -6,15 +5,13 @@ import { getDatabase, closeDatabase } from "../../db/connection.js";
 import { UserRepository } from "../../db/repositories/user.repository.js";
 import { RoleRepository } from "../../db/repositories/role.repository.js";
 import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
+import { DomainEventBus } from "../../events/event-bus.js";
 import { WebhookRepository } from "../../db/repositories/webhook.repository.js";
 import { WebhookDeliveryRepository } from "../../db/repositories/webhook-delivery.repository.js";
 import { WebhookService } from "../../services/webhook.service.js";
 import { getLogger } from "../../utils/logger.js";
 import { c, kv, table, section, ok, warn, kvWidth, hint, fail } from "../ui.js";
-
-function sha256(input: string): string {
-  return createHash("sha256").update(input).digest("hex");
-}
+import { sha256 } from "../../utils/crypto.js";
 
 function initRepos() {
   const config = getConfig();
@@ -26,6 +23,7 @@ function initRepos() {
     userRoleRepo: new UserRoleRepository(db),
     webhookRepo: new WebhookRepository(db),
     webhookDeliveryRepo: new WebhookDeliveryRepository(db),
+    eventBus: new DomainEventBus(),
   };
 }
 
@@ -49,6 +47,8 @@ export async function userListAction(): Promise<void> {
     rows.push({
       id: user.id,
       name: user.name ?? "",
+      username: user.username ?? "",
+      userType: user.userType,
       status: user.status,
       roles: roleNames.join(", ") || "",
     });
@@ -57,6 +57,8 @@ export async function userListAction(): Promise<void> {
   console.log(table(rows, [
     { key: "id", header: "ID", width: 2, format: v => c.dim(String(v)) },
     { key: "name", header: "NAME", width: 16, format: v => String(v) || c.dim("(unnamed)") },
+    { key: "username", header: "USERNAME", width: 12, format: v => String(v) || c.dim("-") },
+    { key: "userType", header: "TYPE", width: 10 },
     { key: "status", header: "STATUS", width: 10 },
     { key: "roles", header: "ROLES", width: 24, format: v => String(v) || c.dim("(none)") },
   ]));
@@ -80,21 +82,61 @@ function parseTtlToMs(ttl: string): number {
   }
 }
 
-export async function userCreateAction(opts: { name?: string; roleIds?: string[]; ttl?: string }): Promise<void> {
-  const { userRepo, userRoleRepo } = initRepos();
+export async function userCreateAction(opts: { name?: string; roleIds?: string[]; ttl?: string; username?: string; password?: string; userType?: string }): Promise<void> {
+  const { userRepo, userRoleRepo, roleRepo } = initRepos();
+
+  // Password length validation
+  if (opts.password && opts.password.length < 8) {
+    fail("Password must be at least 8 characters");
+    closeDatabase();
+    process.exit(1);
+  }
+
+  // user_type enum validation
+  if (opts.userType && !["user", "admin"].includes(opts.userType)) {
+    fail("Invalid user_type. Must be 'user' or 'admin'");
+    closeDatabase();
+    process.exit(1);
+  }
+
   const token = generateToken();
   const tokenExpiresAt = opts.ttl ? Date.now() + parseTtlToMs(opts.ttl) : null;
   const hash = sha256(token);
-  const user = await userRepo.create({ name: opts.name, token: hash, tokenExpiresAt });
-  if (opts.roleIds?.length) {
+
+  let passwordHash: string | undefined;
+  if (opts.password) {
+    const { hashSync } = await import("bcryptjs");
+    passwordHash = hashSync(opts.password, 12);
+  }
+
+  const user = await userRepo.create({
+    name: opts.name,
+    username: opts.username,
+    passwordHash,
+    userType: opts.userType ?? "user",
+    token: hash,
+    tokenExpiresAt,
+  });
+
+  // Auto-assign admin role for admin users if no explicit roles
+  if (opts.userType === "admin" && !opts.roleIds?.length) {
+    const allRoles = await roleRepo.findAll();
+    const adminRole = allRoles.find(r => r.name === "admin");
+    if (adminRole) {
+      await userRoleRepo.replaceUserRoles(user.id, [adminRole.id]);
+    }
+  } else if (opts.roleIds?.length) {
     await userRoleRepo.replaceUserRoles(user.id, opts.roleIds);
   }
+
   const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
 
-    console.log(section("user created", undefined, kvWidth(12, c.dim(user.id), user.name ?? "(unnamed)", token, tags.join(", "))));
+    console.log(section("user created", undefined, kvWidth(12, c.dim(user.id), user.name ?? "(unnamed)", user.userType, token, tags.join(", "))));
     console.log();
     console.log(kv("id", c.dim(user.id)));
     console.log(kv("name", user.name ?? c.dim("(unnamed)")));
+    if (user.username) console.log(kv("username", user.username));
+    console.log(kv("userType", user.userType));
     console.log(kv("token", c.boldYellow(token)));
     if (tokenExpiresAt) console.log(kv("expires", new Date(tokenExpiresAt).toISOString()));
     console.log(kv("tags", tags.join(", ") || c.dim("(none)")));
@@ -163,6 +205,8 @@ export async function userGetAction(userId: string): Promise<void> {
     console.log();
     console.log(kv("id", c.dim(user.id)));
     console.log(kv("name", user.name ?? c.dim("(unnamed)")));
+    if (user.username) console.log(kv("username", user.username));
+    console.log(kv("userType", user.userType));
     console.log(kv("status", user.status));
     console.log(kv("roles", roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; ") || c.dim("(none)")));
 
@@ -184,7 +228,7 @@ export async function userDeleteAction(userId: string): Promise<void> {
 }
 
 export async function userAssignRolesAction(userId: string, roleIds: string[]): Promise<void> {
-  const { userRepo, userRoleRepo } = initRepos();
+  const { userRepo, userRoleRepo, eventBus } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {
     fail(`User not found: ${userId}`, "Use `skill-mcp user list` to see available users");
@@ -192,6 +236,7 @@ export async function userAssignRolesAction(userId: string, roleIds: string[]): 
     process.exit(1);
   }
   await userRoleRepo.replaceUserRoles(userId, roleIds);
+  eventBus.publish({ type: "user:roles_changed", userId });
   const tags = await userRoleRepo.getAggregatedTagsByUserId(userId);
   ok(`${c.bold("Roles updated")}  user  ${c.dim(userId)}`, [
     { key: "tags", value: tags.join(", ") || c.dim("(none)") },

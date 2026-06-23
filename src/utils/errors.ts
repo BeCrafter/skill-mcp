@@ -131,33 +131,6 @@ export class EvalRegressionError extends AppError {
 }
 
 /**
- * P1-14 stage 1 — OIDC JWT verification failure. The `reason` discriminator
- * lets the auth middleware emit precise audit logs without leaking token
- * material; statusCode is 401 in every case (the client sees the same response
- * shape regardless of which check failed, which avoids oracle-style probing).
- */
-export type JwtVerificationReason =
-  | "malformed"
-  | "expired"
-  | "not_yet_valid"
-  | "invalid_signature"
-  | "issuer_mismatch"
-  | "audience_mismatch"
-  | "key_not_found"
-  | "unsupported_algorithm"
-  | "jwks_fetch_failed";
-
-export class JwtVerificationError extends AppError {
-  constructor(
-    public readonly reason: JwtVerificationReason,
-    message?: string,
-  ) {
-    super(message ?? `JWT verification failed: ${reason}`, "JWT_VERIFICATION_FAILED", 401);
-    this.name = "JwtVerificationError";
-  }
-}
-
-/**
  * Failure when calling a remote dependency (cloud service, OSS, etc.).
  * Carries the upstream HTTP status / cause so observability can dimension on it,
  * while presenting a single 502 to clients.

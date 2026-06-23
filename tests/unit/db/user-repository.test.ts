@@ -11,7 +11,9 @@ function setup(): { db: DrizzleDB; repo: UserRepository } {
   sqlite.pragma("foreign_keys = ON");
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE users (
-    id TEXT PRIMARY KEY, name TEXT, token TEXT NOT NULL UNIQUE,
+    id TEXT PRIMARY KEY, name TEXT, username TEXT, password_hash TEXT,
+    user_type TEXT DEFAULT 'user',
+    token TEXT NOT NULL UNIQUE,
     status TEXT DEFAULT 'active',
     token_expires_at INTEGER,
     previous_token TEXT,

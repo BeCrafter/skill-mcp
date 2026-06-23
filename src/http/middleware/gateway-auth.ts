@@ -6,23 +6,16 @@ import type { RequestContext } from "../../types/index.js";
 import {
   extractBearerToken,
   buildRequestContextFromHttp,
-  type OidcContextOptions,
 } from "../../permission/context-builder.js";
 import { json } from "../helpers.js";
 
 export interface GatewayAuthDeps {
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
-  oidc?: OidcContextOptions;
+  jwtSecret?: string;
+  jwtIssuer?: string;
 }
 
-/**
- * Authenticate a request hitting `/api/gateway/*` (except `/api/gateway/health`).
- *
- * Returns the resolved `RequestContext` on success. Returns `null` after writing
- * a 401/500 response when the request is rejected — the caller must stop
- * processing the request in that case.
- */
 export async function enforceGatewayAuth(
   ctx: HttpContext,
   deps: GatewayAuthDeps,
@@ -48,7 +41,8 @@ export async function enforceGatewayAuth(
     sessionId,
     deps.userRepo,
     deps.userRoleRepo,
-    deps.oidc,
+    deps.jwtSecret,
+    deps.jwtIssuer,
   );
 
   if (!requestContext.isAuthenticated) {

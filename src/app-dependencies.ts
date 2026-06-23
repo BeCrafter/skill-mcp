@@ -23,10 +23,6 @@ import type { WebhookRepository } from "./db/repositories/webhook.repository.js"
 import type { WebhookDeliveryRepository } from "./db/repositories/webhook-delivery.repository.js";
 import type { WebhookService } from "./services/webhook.service.js";
 import type { WebhookWorker } from "./services/webhook-worker.js";
-import type { OidcContextOptions } from "./permission/context-builder.js";
-import type { OidcIdentityRepository } from "./db/repositories/oidc-identity.repository.js";
-import type { OidcGroupRoleMapRepository } from "./db/repositories/oidc-group-role-map.repository.js";
-import type { OidcProvisioner } from "./auth/oidc-provisioner.js";
 
 export interface AppDependencies {
   skillService: SkillService;
@@ -48,40 +44,18 @@ export interface AppDependencies {
   pipelineRunStore?: PipelineRunStore;
   importJobRepo?: ImportJobRepository;
   importWorker?: BackgroundImportWorker;
-  // P1-13 — usage metering. Optional so existing callers (CLI tests, tools
-  // that don't run a server) can keep their slim mocks. When unset, hot-path
-  // wiring is a no-op; aggregate / list / retention helpers raise
-  // ConfigurationError at the admin handler.
   usageEventRepo?: UsageEventRepository;
   usageMeter?: UsageMeterService;
-  // P1-13.5 — tier limits + per-field overrides. Optional for the same
-  // reason as `usageMeter`: tests / minimal CLI invocations don't need
-  // quota enforcement. When unset, the quota middleware is not registered
-  // and the admin /quotas endpoints respond 500 ConfigurationError.
   tenantQuotaRepo?: TenantQuotaRepository;
   quotaService?: QuotaService;
-  // P1-16 — Outbound webhooks. Optional so unit tests / CLI commands can keep
-  // their slim DI bag. When unset, webhook admin routes are not registered and
-  // domain events that would have triggered fan-out simply pass through.
   webhookRepo?: WebhookRepository;
   webhookDeliveryRepo?: WebhookDeliveryRepository;
   webhookService?: WebhookService;
   webhookWorker?: WebhookWorker;
-  // P1-14 stage 2 — optional OIDC verifier wiring. When config.auth.oidc is
-  // set, serve-cmd builds an `OidcVerifier` + `RemoteJwksProvider` pair and
-  // passes it through here so admin/gateway middlewares + the MCP context
-  // builder all share the same instance (single JWKS cache, single audit
-  // surface). Absent when SSO is disabled — middlewares fall through to
-  // opaque-token auth unchanged.
-  oidc?: OidcContextOptions;
-  // P1-14 stage 3 — auto-provisioning + group→role mapping. Repositories
-  // back the admin REST surface; the provisioner is wired through `oidc`
-  // so the context builder can swap synthetic `oidc:<iss>:<sub>` userIds
-  // for real user rows on first sight. All optional for parity with stage
-  // 2 — absent fields collapse back to stage-2 synthetic identities.
-  oidcIdentityRepo?: OidcIdentityRepository;
-  oidcGroupRoleMapRepo?: OidcGroupRoleMapRepository;
-  oidcProvisioner?: OidcProvisioner;
+  jwtSecret?: string;
+  jwtIssuer?: string;
+  jwtAccessExpiresIn?: number;
+  jwtRefreshExpiresIn?: number;
 }
 
 export interface TransportConfig {

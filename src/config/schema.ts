@@ -108,41 +108,12 @@ export const configSchema = z.object({
 
   auth: z.object({
     stdioToken: z.string().optional(),
-    /**
-     * Backwards-compat escape hatch for `/api/admin/*` routes.
-     *   true  → admin endpoints are anonymous (PRE-T-004 behavior)
-     *   false → admin endpoints require a token whose role tags include `admin:write`
-     * Default false (secure-by-default). Existing deployments that relied on
-     * network isolation must opt in explicitly via SKILL_MCP_ADMIN_AUTH_OPTIONAL=true,
-     * which is logged as a warning at startup and tracked for removal.
-     */
-    adminAuthOptional: z.boolean().default(false),
-    /**
-     * T-707 — `/metrics` Prometheus exposition was anonymous, leaking route
-     * names, session counts, and cache hit rates to any caller. Default now
-     * gates it behind admin tag auth (same as `/api/admin/*`). Set this to
-     * true to restore the legacy anonymous behavior for trusted intra-cluster
-     * scrapers; logged at startup like adminAuthOptional.
-     */
     metricsAuthOptional: z.boolean().default(false),
-    /**
-     * P1-14 stage 1 — OIDC SSO. When present, the HTTP auth middleware will
-     * try OIDC JWT verification before falling back to opaque-token lookup.
-     * Absent (default) → SSO disabled, behaviour identical to pre-P1-14.
-     * `audience` may be a single string or an allow-list (Auth0/Okta often
-     * issue tokens whose `aud` is the API identifier *and* the client_id).
-     * `userClaim`/`groupsClaim` let providers with non-standard claim names
-     * (e.g. Microsoft `oid`, Keycloak `preferred_username`) map cleanly.
-     */
-    oidc: z.object({
-      issuer: z.string().url(),
-      audience: z.union([z.string(), z.array(z.string()).nonempty()]),
-      jwksUri: z.string().url(),
-      userClaim: z.string().default("sub"),
-      groupsClaim: z.string().default("groups"),
-      clockSkewSec: z.number().int().nonnegative().default(60),
-      jwksTtlMs: z.number().int().positive().default(600_000),
-      allowedAlgorithms: z.array(z.string()).nonempty().default(["RS256"]),
+    jwt: z.object({
+      secret: z.string().min(32),
+      accessExpiresIn: z.number().default(7200),
+      refreshExpiresIn: z.number().default(604800),
+      issuer: z.string().default("skill-mcp"),
     }).optional(),
   }).default({}),
 });

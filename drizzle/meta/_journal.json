@@ -120,6 +120,13 @@
       "when": 1779441000000,
       "tag": "0016_oidc_provisioning",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1779443000000,
+      "tag": "0018_user_type_and_login",
+      "breakpoints": true
     }
   ]
 }

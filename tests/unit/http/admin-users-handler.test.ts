@@ -35,6 +35,7 @@ function makeCtx(method: string, url: string, body?: unknown): HttpContext {
     req, res: makeRes(),
     url, method, params: {}, query: new URLSearchParams(),
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+    requestContext: { userId: "super-1", userType: "superadmin", isAuthenticated: true, tenantId: "default", sessionId: "s1", tags: new Set<string>() },
   };
 }
 
@@ -48,7 +49,7 @@ function setup(overrides: Partial<AppDependencies> = {}): {
 } {
   const userRepo = {
     findAll: vi.fn().mockResolvedValue([{ id: "u1", name: "alice" }]),
-    findById: vi.fn(async (id: string) => (id === "u1" ? { id: "u1", name: "alice", status: "active" } : null)),
+    findById: vi.fn(async (id: string) => (id === "u1" ? { id: "u1", name: "alice", status: "active", userType: "user" } : null)),
     create: vi.fn(async ({ name, tokenExpiresAt }: { name?: string; tokenExpiresAt?: number | null }) => ({ id: "u-new", name: name ?? null, tokenExpiresAt: tokenExpiresAt ?? null })),
     update: vi.fn(async (id: string, fields: Record<string, unknown>) => (id === "u1" ? { id, ...fields } : null)),
     delete: vi.fn(async (id: string) => id === "u1"),

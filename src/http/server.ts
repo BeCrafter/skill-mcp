@@ -14,7 +14,6 @@ import type { UserRepository } from "../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../db/repositories/user-role.repository.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { UsageMeterService } from "../services/usage-meter.service.js";
-import type { OidcContextOptions } from "../permission/context-builder.js";
 import { DEFAULT_TENANT_ID } from "../types/index.js";
 import { checkLiveness, checkReadiness } from "./probes.js";
 
@@ -27,13 +26,10 @@ export interface RequestHandlerDeps {
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
   skillRepo?: SkillRepository;
-  // P1-13 — when wired, every dispatched HTTP request emits a fire-and-forget
-  // `api.call` event tagged by route template (not raw URL — the cardinality
-  // bucket already exists for Prometheus, reuse it for the metering ledger).
   usageMeter?: UsageMeterService;
-  // P1-14 stage 2 — when wired, JWT-shaped bearer tokens are verified via
-  // OIDC before falling through to the opaque sha256 lookup.
-  oidc?: OidcContextOptions;
+  jwtSecret?: string;
+  jwtIssuer?: string;
+  authRouter?: Router;
 }
 
 // Translates the raw http.Server `request` event into router dispatch with
@@ -143,8 +139,8 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           const requestContext = await enforceAdminAuth(ctx, {
             userRepo: deps.userRepo,
             userRoleRepo: deps.userRoleRepo,
-            oidc: deps.oidc,
-            authOptional: false,
+            jwtSecret: deps.jwtSecret,
+            jwtIssuer: deps.jwtIssuer,
           });
           if (!requestContext) {
             recordMetrics(url, req.method!, res.statusCode, startTime);
@@ -194,6 +190,19 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         return;
       }
 
+      // Auth routes — no admin auth required (login/refresh/change-password).
+      if (url.startsWith("/api/auth/")) {
+        if (deps.authRouter) {
+          const match = deps.authRouter.match(req.method!, url);
+          if (match) {
+            const ctx: HttpContext = { req, res, url, method: req.method!, params: match.params, query: parseQuery(req.url ?? "/", req.headers.host), logger };
+            await deps.authRouter.dispatch(ctx);
+            recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
+            return;
+          }
+        }
+      }
+
       // Gateway routes — token enforced by enforceGatewayAuth middleware before dispatch.
       // /api/gateway/health is the only anonymous-accessible endpoint (LB / k8s probes).
       if (url.startsWith("/api/gateway/")) {
@@ -204,7 +213,8 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
             const requestContext = await enforceGatewayAuth(ctx, {
               userRepo: deps.userRepo,
               userRoleRepo: deps.userRoleRepo,
-              oidc: deps.oidc,
+              jwtSecret: deps.jwtSecret,
+              jwtIssuer: deps.jwtIssuer,
             });
             if (!requestContext) {
               recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
@@ -218,9 +228,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         }
       }
 
-      // Admin routes — enforce admin-tag-gated bearer auth before dispatch.
-      // Legacy deployments can opt back in to anonymous admin via
-      // SKILL_MCP_ADMIN_AUTH_OPTIONAL=true (see config.auth.adminAuthOptional).
+      // Admin routes — enforce userType-gated bearer auth before dispatch.
       if (url.startsWith("/api/admin/")) {
         const match = adminRouter.match(req.method!, url);
         if (match) {
@@ -228,8 +236,8 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           const requestContext = await enforceAdminAuth(ctx, {
             userRepo: deps.userRepo,
             userRoleRepo: deps.userRoleRepo,
-            oidc: deps.oidc,
-            authOptional: appConfig.auth.adminAuthOptional,
+            jwtSecret: deps.jwtSecret,
+            jwtIssuer: deps.jwtIssuer,
           });
           if (!requestContext) {
             recordMetrics(url, req.method!, res.statusCode, startTime, ctx);

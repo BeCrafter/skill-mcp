@@ -36,7 +36,7 @@ function makeReq(method: string, url: string) {
 const baseConfig = {
   deployment: { mode: "standalone" as const },
   transport: { mcpOnlyMode: false },
-  auth: { adminAuthOptional: true },
+  auth: {},
   security: { enableInjectionScan: true, hstsEnabled: false },
 } as unknown as AppConfig;
 

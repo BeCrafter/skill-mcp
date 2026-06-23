@@ -41,7 +41,7 @@ function makeReq(method: string, url: string) {
 const baseConfig = {
   deployment: { mode: "standalone" as const },
   transport: { mcpOnlyMode: false },
-  auth: { adminAuthOptional: true },
+  auth: {},
   security: { enableInjectionScan: true, hstsEnabled: false },
 } as unknown as AppConfig;
 
@@ -133,13 +133,13 @@ describe("createRequestHandler", () => {
   it("/metrics rejects anonymous request when metricsAuthOptional=false", async () => {
     const cfg = {
       ...baseConfig,
-      auth: { adminAuthOptional: false, metricsAuthOptional: false },
+      auth: { metricsAuthOptional: false },
     } as unknown as AppConfig;
     const handler = createRequestHandler({
       appConfig: cfg, mcpHandler: null, isCloudServiceOnlyMode: false,
       adminRouter, gatewayRouter,
       // Provide minimal stubs so admin-auth doesn't 500 on missing repos.
-      userRepo: { findByTokenHash: () => null } as never,
+      userRepo: { findByToken: () => null } as never,
       userRoleRepo: { listRolesByUserId: () => [] } as never,
     });
     const { res, capture } = makeRes();
@@ -150,7 +150,7 @@ describe("createRequestHandler", () => {
   it("/metrics is anonymous when metricsAuthOptional=true (legacy)", async () => {
     const cfg = {
       ...baseConfig,
-      auth: { adminAuthOptional: false, metricsAuthOptional: true },
+      auth: { metricsAuthOptional: true },
     } as unknown as AppConfig;
     const handler = createRequestHandler({
       appConfig: cfg, mcpHandler: null, isCloudServiceOnlyMode: false,

@@ -6,8 +6,8 @@ import type { AppConfig } from "@/config/schema.js";
 
 // Same minimal request/response stubs used in server.test.ts. P0-1 cares about
 // the URL-normalization layer in createRequestHandler, so we don't need real
-// repositories or auth here — adminAuthOptional=true skips the bearer check
-// and lets us assert dispatch + deprecation header behavior in isolation.
+// repositories or auth here — no admin routes are tested, only public health
+// and gateway dispatch + deprecation header behavior in isolation.
 function makeRes() {
   let statusCode = 200;
   let body = "";
@@ -42,7 +42,7 @@ function makeReq(method: string, url: string) {
 const baseConfig = {
   deployment: { mode: "standalone" as const },
   transport: { mcpOnlyMode: false },
-  auth: { adminAuthOptional: true },
+  auth: {},
   security: { enableInjectionScan: true, hstsEnabled: false },
 } as unknown as AppConfig;
 
@@ -52,7 +52,7 @@ const baseConfig = {
 // shape is incidental.
 const fakeGatewayDeps = {
   userRepo: {
-    findByToken: async () => ({ id: "user-1", username: "tester", status: "active" }),
+    findByToken: async () => ({ id: "user-1", username: "tester", status: "active", userType: "user" }),
   } as never,
   userRoleRepo: {
     getAggregatedTagsByUserId: async () => ["public:read"],
@@ -61,6 +61,20 @@ const fakeGatewayDeps = {
 function authedReq(method: string, url: string) {
   const req = makeReq(method, url);
   (req as unknown as { headers: Record<string, string> }).headers["authorization"] = "Bearer fake-token";
+  return req;
+}
+
+const fakeAdminDeps = {
+  userRepo: {
+    findByToken: async () => ({ id: "admin-1", username: "admin", status: "active", userType: "admin" }),
+  } as never,
+  userRoleRepo: {
+    getAggregatedTagsByUserId: async () => ["admin:write"],
+  } as never,
+};
+function adminReq(method: string, url: string) {
+  const req = makeReq(method, url);
+  (req as unknown as { headers: Record<string, string> }).headers["authorization"] = "Bearer admin-token";
   return req;
 }
 
@@ -92,10 +106,10 @@ describe("API versioning (P0-1)", () => {
   it("/api/v1/admin/skills dispatches to admin router (canonical path)", async () => {
     const handler = createRequestHandler({
       appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
-      adminRouter, gatewayRouter,
+      adminRouter, gatewayRouter, ...fakeAdminDeps,
     });
     const { res, capture } = makeRes();
-    await handler(makeReq("GET", "/api/v1/admin/skills"), res);
+    await handler(adminReq("GET", "/api/v1/admin/skills"), res);
     const out = capture();
     expect(out.statusCode).toBe(200);
     expect(JSON.parse(out.body).route).toBe("admin-skills");
@@ -107,10 +121,10 @@ describe("API versioning (P0-1)", () => {
   it("/api/v1/admin/skills/:slug preserves route params after normalization", async () => {
     const handler = createRequestHandler({
       appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
-      adminRouter, gatewayRouter,
+      adminRouter, gatewayRouter, ...fakeAdminDeps,
     });
     const { res, capture } = makeRes();
-    await handler(makeReq("GET", "/api/v1/admin/skills/my-skill"), res);
+    await handler(adminReq("GET", "/api/v1/admin/skills/my-skill"), res);
     const out = capture();
     expect(out.statusCode).toBe(200);
     expect(JSON.parse(out.body).slug).toBe("my-skill");
@@ -156,10 +170,10 @@ describe("API versioning (P0-1)", () => {
   it("legacy /api/admin/* still works and emits Deprecation + Sunset headers (RFC 8594)", async () => {
     const handler = createRequestHandler({
       appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
-      adminRouter, gatewayRouter,
+      adminRouter, gatewayRouter, ...fakeAdminDeps,
     });
     const { res, capture } = makeRes();
-    await handler(makeReq("GET", "/api/admin/skills"), res);
+    await handler(adminReq("GET", "/api/admin/skills"), res);
     const out = capture();
     expect(out.statusCode).toBe(200);
     expect(out.headers["deprecation"]).toBe("true");

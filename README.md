@@ -142,7 +142,20 @@ The chart wires three Kubernetes probes (`/api/v1/livez` for liveness without DB
 
 ## Quick Start
 
-### 1. Start the MCP Server
+### 1. Initialize the System (First Time Only)
+
+```bash
+# Set JWT secret for admin login
+export AUTH_JWT_SECRET=$(openssl rand -base64 32)
+
+# Initialize the system with a superadmin account
+npx skill-mcp init --username admin --password YourStrongPassword
+
+# Login to obtain JWT credentials
+npx skill-mcp auth login --username admin
+```
+
+### 2. Start the MCP Server
 
 ```bash
 # Scenario A: Local stdio (recommended for development)
@@ -155,7 +168,7 @@ TRANSPORT_TYPE=http npm start
 DEPLOYMENT_MODE=gateway CLOUD_SERVICE_URL=http://cloud-service:3001 npm start
 ```
 
-### 2. Import a Skill
+### 3. Import a Skill
 
 ```bash
 # From a local directory
@@ -212,14 +225,21 @@ npx skill-mcp pipeline run ./pipeline.yaml --input pr_url=https://... --dry-run
 # Create a role
 npx skill-mcp role create --name "data-team" --tags "data,analysis" --description "Data science team"
 
-# Create a user
-npx skill-mcp user create --name "Alice" --role-ids "role-uuid-1,role-uuid-2"
+# Create an admin user (with login credentials)
+npx skill-mcp user create --name "Alice" --username alice --password Passw0rd --user-type admin --role-ids "role-uuid-1"
+
+# Create a regular user (API token only, no login)
+npx skill-mcp user create --name "Bob" --role-ids "role-uuid-1,role-uuid-2"
 
 # List users
 npx skill-mcp user list
 
 # Assign roles
 npx skill-mcp user assign-roles user-id-1 --role-ids "role-uuid-1"
+
+# Auth management
+npx skill-mcp auth whoami
+npx skill-mcp auth logout
 ```
 
 ### 6. Skill Linting
@@ -234,6 +254,7 @@ npx skill-mcp lint ./path/to/skill-package
 | Tool | Description |
 |------|-------------|
 | `skill_list` | List all published skills with optional filtering |
+| `skill_search` | Search skills by name, description, or content similarity |
 | `skill_view` | View the full entry content of a specific skill |
 | `skill_file` | Read individual files from a skill package |
 | `skill_pipeline` | Execute a pipeline (DAG orchestration of skills) |
@@ -295,6 +316,7 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
 | `TRANSPORT_HOST` | HTTP host | `0.0.0.0` |
 | `CLOUD_SERVICE_URL` | Cloud service URL (gateway) | - |
 | `AUTH_TOKEN` | Auth token (gateway outbound) | - |
+| `AUTH_JWT_SECRET` | JWT signing secret for admin login (min 32 chars) | - |
 | `SKILL_MCP_AUTH_TOKEN` | Stdio mode bearer token for permission isolation | - |
 | `LOG_LEVEL` | Logging level | `info` |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing (`true` / `false`) | `false` |
@@ -568,6 +590,11 @@ src/
 
 | Command | Description |
 |---------|-------------|
+| `init` | Initialize system with superadmin account (first-time setup) |
+| `auth login` | Login as admin/superadmin to obtain JWT |
+| `auth logout` | Clear local JWT credentials |
+| `auth whoami` | Show current logged-in user info |
+| `auth reset-password` | Reset admin password (local server access only) |
 | `serve` | Start MCP server |
 | `import <source>` | Import skill from local path or Git repo |
 | `list` | List all skills |
@@ -579,11 +606,16 @@ src/
 | `rollback <slug>` | Rollback to previous version |
 | `lint <path>` | Lint skill package |
 | `manifest:migrate <dir>` | Scan & migrate `manifest_schema` (P1-21, supports `--apply` / `--patch`) |
+| `migrate:check` | Check migration status |
 | `pipeline validate` | Validate pipeline YAML |
 | `pipeline graph` | Visualize pipeline DAG |
 | `pipeline run` | Execute pipeline |
-| `user list/create/get/delete/assign-roles` | Manage users |
-| `role list/create/get/update/delete` | Manage roles |
+| `eval list` | List eval cases |
+| `eval run` | Run eval cases |
+| `eval results` | Show eval results |
+| `migrate:check` | Check migration status |
+| `user list/create/get/delete/assign-roles` | Manage users (requires admin+ login) |
+| `role list/create/get/update/delete` | Manage roles (requires admin+ login) |
 | `release:patch` | Bump patch version and create tag |
 | `release:minor` | Bump minor version and create tag |
 | `release:major` | Bump major version and create tag |
@@ -636,23 +668,35 @@ npm run test:watch
 
 ## RBAC Overview
 
-The server implements a flexible RBAC system based on **tags**:
+The server implements a two-layer permission system:
+
+### User Types (Operation Permissions)
+
+| Type | Login | Capabilities |
+|------|-------|-------------|
+| `superadmin` | username + password → JWT | Full control: manage users, roles, skills. Created via `skill-mcp init`. Cannot be modified by other users. |
+| `admin` | username + password → JWT | Manage skills, roles, and regular users. Cannot create/modify admin or superadmin users. |
+| `user` | API token only (no login) | Browse published skills, use MCP tools, submit feedback. No management operations. |
+
+### Role Tags (Data Visibility)
 
 - **Tags**: Capability tags assigned to skills (`skills.tags`)
-- **Roles**: Collections of tags that grant access
-- **Users**: Platform users assigned to roles
+- **Roles**: Collections of tags that grant visibility to private skills
+- **Users**: Assigned to roles for skill-level access control
 
-**Permission Rules**:
-- `skill.tags = []` → Public skill, accessible to all
-- `skill.tags ∩ user.tags ≠ ∅` → Protected skill, accessible if user has matching tag
-- `skill.tags ∩ user.tags = ∅` → Restricted skill, not accessible
+**Visibility Rules**:
+- `skill.visibility = "public"` → Accessible to all
+- `skill.visibility = "private"` + `skill.tags ∩ user.tags ≠ ∅` → Accessible if user has matching tag
+- `skill.visibility = "private"` + `skill.tags ∩ user.tags = ∅` → Not accessible
+
+> **User type** controls **what you can do** (operation permissions). **Role tags** control **what you can see** (data visibility). These are independent layers.
 
 ## Security
 
 - **Prompt Injection Scanning** — All imported skill content is scanned for known injection patterns
 - **Path Traversal Protection** — File path validation prevents directory traversal attacks
 - **File Type Safety** — Binary files are rejected; only text-based formats are allowed
-- **Per-user RBAC** — HTTP/SSE callers authenticate with bearer tokens issued by `skill-mcp user create`; roles carry tag lists, and `TagPermissionFilter` enforces `visibility` + tag intersection (default `visibility="private"`). For service accounts, reuse the user table with a `svc-*` naming convention.
+- **Per-user RBAC** — Admin/superadmin users authenticate via JWT (username + password login); regular users authenticate with API bearer tokens issued by `skill-mcp user create`. User type (`superadmin`/`admin`/`user`) determines operation permissions; role tags determine skill visibility. For service accounts, reuse the user table with a `svc-*` naming convention.
 
 ## License
 
