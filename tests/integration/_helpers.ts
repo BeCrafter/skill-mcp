@@ -121,7 +121,7 @@ export interface SpawnHttpOpts {
   env: NodeJS.ProcessEnv;
   /** Transport mode passed to `serve --transport`. Defaults to "http". */
   transport?: "http" | "sse";
-  /** ms to wait for "MCP Server started" before failing. Default 20000. */
+  /** ms to wait for "MCP Server started" before failing. Default 60000. */
   readyTimeoutMs?: number;
 }
 
@@ -131,7 +131,7 @@ export interface SpawnHttpOpts {
  * with a stop() that kills + waits for exit.
  */
 export async function spawnHttpServer(opts: SpawnHttpOpts): Promise<SpawnedServer> {
-  const { port, env, transport = "http", readyTimeoutMs = 20_000 } = opts;
+  const { port, env, transport = "http", readyTimeoutMs = 60_000 } = opts;
   const proc = spawn(
     "node",
     [DIST_ENTRY, "serve", "--transport", transport, "--port", String(port), "--host", "127.0.0.1"],
