@@ -6,6 +6,7 @@ import { UserRoleRepository } from "../../db/repositories/user-role.repository.j
 import { c, kv, table, section, ok, fail, warn, kvWidth, hint } from "../ui.js";
 import { requireAuth, readCredentials } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
+import { ConflictError } from "../../utils/errors.js";
 
 function initRepos() {
   const config = getConfig();
@@ -86,7 +87,7 @@ export async function roleCreateAction(opts: { name: string; description?: strin
       console.log(kv("id", c.dim(role.id)));
       console.log(kv("tags", role.tags?.join(", ") || c.dim("(none)")));
     } catch (err) {
-      if (err instanceof Error && err.message.includes("UNIQUE")) {
+      if (err instanceof Error && (err instanceof ConflictError || err.message.includes("already exists"))) {
         fail(`Role "${opts.name}" already exists`);
       } else {
         throw err;
@@ -109,7 +110,7 @@ export async function roleCreateAction(opts: { name: string; description?: strin
 
     console.log();
   } catch (err) {
-    if (err instanceof Error && err.message.includes("UNIQUE")) {
+    if (err instanceof Error && (err instanceof ConflictError || err.message.includes("already exists"))) {
       fail(`Role "${opts.name}" already exists`);
     } else {
       throw err;

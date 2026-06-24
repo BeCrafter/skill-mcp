@@ -4,6 +4,7 @@ import type { DrizzleDB } from "../connection.js";
 import { roles } from "../schema.js";
 import { getLogger } from "../../utils/logger.js";
 import { metrics } from "../../telemetry/metrics.js";
+import { ConflictError } from "../../utils/errors.js";
 
 export interface RoleEntity {
   id: string;
@@ -44,6 +45,8 @@ export class RoleRepository {
   }
 
   async create(input: { name: string; description?: string; tags: string[] }): Promise<RoleEntity> {
+    const existing = await this.findByName(input.name);
+    if (existing) throw new ConflictError(`Role "${input.name}" already exists`);
     const now = Date.now();
     const id = await generateUniqueId(() => generateId("role_"), async (id) => !!(await this.findById(id)));
     this.db.insert(roles).values({
@@ -60,6 +63,10 @@ export class RoleRepository {
   async update(id: string, input: { name?: string; description?: string; tags?: string[] }): Promise<RoleEntity | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
+    if (input.name !== undefined && input.name !== existing.name) {
+      const conflict = await this.findByName(input.name);
+      if (conflict) throw new ConflictError(`Role "${input.name}" already exists`);
+    }
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
     if (input.name !== undefined) updateData.name = input.name;
     if (input.description !== undefined) updateData.description = input.description;

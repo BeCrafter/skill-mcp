@@ -3,6 +3,7 @@ import { generateId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { users } from "../schema.js";
 import { withSpan } from "../../telemetry/spans.js";
+import { ConflictError } from "../../utils/errors.js";
 
 export interface UserEntity {
   id: string;
@@ -87,6 +88,10 @@ export class UserRepository {
   }
 
   async create(input: { name?: string; username?: string; passwordHash?: string; userType?: string; token: string; tokenExpiresAt?: number | null }): Promise<UserEntity> {
+    if (input.username) {
+      const existing = await this.findByUsername(input.username);
+      if (existing) throw new ConflictError(`Username "${input.username}" already exists`);
+    }
     const now = Date.now();
     const id = await generateUniqueId(() => generateId("usr_"), async (id) => !!(await this.findById(id)));
     this.db.insert(users).values({
@@ -107,6 +112,10 @@ export class UserRepository {
   async update(id: string, input: { name?: string; status?: string; username?: string; userType?: string }): Promise<UserEntity | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
+    if (input.username !== undefined && input.username !== existing.username) {
+      const conflict = await this.findByUsername(input.username);
+      if (conflict) throw new ConflictError(`Username "${input.username}" already exists`);
+    }
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
     if (input.name !== undefined) updateData.name = input.name;
     if (input.status !== undefined) updateData.status = input.status;

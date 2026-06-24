@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { DrizzleDB } from "../connection.js";
 import { tenants } from "../schema.js";
 import { DEFAULT_TENANT_ID } from "../../types/index.js";
+import { ConflictError } from "../../utils/errors.js";
 
 export interface TenantEntity {
   id: string;
@@ -51,6 +52,8 @@ export class TenantRepository {
   }
 
   async create(input: { id: string; name: string; description?: string | null }): Promise<TenantEntity> {
+    const existing = await this.findById(input.id);
+    if (existing) throw new ConflictError(`Tenant "${input.id}" already exists`);
     const now = Date.now();
     this.db.insert(tenants).values({
       id: input.id,

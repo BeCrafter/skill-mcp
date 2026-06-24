@@ -87,7 +87,7 @@ describe("RoleRepository", () => {
 
   it("name UNIQUE constraint rejects duplicate names", async () => {
     await ctx.repo.create({ name: "dup", tags: [] });
-    await expect(ctx.repo.create({ name: "dup", tags: [] })).rejects.toThrow(/UNIQUE/);
+    await expect(ctx.repo.create({ name: "dup", tags: [] })).rejects.toThrow(/already exists/);
   });
 
   it("T-712: corrupt tags JSON is parsed as [] and the metric counter increments", async () => {

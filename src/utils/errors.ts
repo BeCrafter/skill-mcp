@@ -89,6 +89,14 @@ export class BadRequestError extends AppError {
   }
 }
 
+/** Unique constraint conflict (duplicate name, username, etc.). */
+export class ConflictError extends AppError {
+  constructor(message: string) {
+    super(message, "CONFLICT", 409);
+    this.name = "ConflictError";
+  }
+}
+
 /** Specific version snapshot not found (skill exists, version doesn't). */
 export class VersionNotFoundError extends AppError {
   constructor(slug: string, version: string) {
