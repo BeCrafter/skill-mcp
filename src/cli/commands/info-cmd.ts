@@ -3,11 +3,32 @@ import { runMigrations } from "../../db/migrate.js";
 import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { c, badge, kv, fail, fmtDate, section, maxLineWidth } from "../ui.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
-export async function infoAction(slug: string): Promise<void> {
+interface SkillDetail {
+  slug: string; name: string; displayName?: string | null; status: string;
+  visibility: string; category?: string | null; tags?: string[];
+  version: string; entryFile: string; storagePath: string;
+  contentHash?: string | null; description?: string | null;
+  createdAt: number; updatedAt: number;
+}
+
+export async function infoAction(slug: string, opts: { serverUrl?: string } = {}): Promise<void> {
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    const skill = await apiCall<SkillDetail>(
+      serverUrl, "GET", `/api/admin/skills/${slug}`, { credentials: creds },
+    );
+    renderSkillInfo(skill);
+    return;
+  }
+
+  // Local mode
   const config = getConfig();
   runMigrations(config.database.path);
-
   const db = getDatabase(config.database.path);
   const repo = new SkillRepository(db);
 
@@ -16,7 +37,10 @@ export async function infoAction(slug: string): Promise<void> {
     fail(`Skill not found: ${slug}`, "Use `skill-mcp list` to see available skills");
     process.exit(1);
   }
-  // Collect kv lines to compute section width
+  renderSkillInfo(skill as SkillDetail);
+}
+
+function renderSkillInfo(skill: SkillDetail): void {
   const kvLines: string[] = [];
   kvLines.push(kv("slug", skill.slug));
   if (skill.name !== skill.slug) kvLines.push(kv("name", skill.name));
@@ -34,9 +58,7 @@ export async function infoAction(slug: string): Promise<void> {
 
   console.log(section(skill.slug, undefined, maxLineWidth(...kvLines)));
   console.log();
-
   for (const line of kvLines) console.log(line);
-
 
   if (skill.description) {
     const desc = skill.description.replace(/^["']|["']$/g, "").trim();

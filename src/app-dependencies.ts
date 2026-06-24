@@ -12,6 +12,8 @@ import type { ICacheProvider } from "./cache/provider.interface.js";
 import type { SkillImporter } from "./import/importer.js";
 import type { DomainEventBus } from "./events/event-bus.js";
 import type { CacheEpochManager } from "./cache/cache-epochs.js";
+import type { SkillEvalRepository } from "./db/repositories/skill-eval.repository.js";
+import type { EvalRunner } from "./eval/runner.js";
 import type { PipelineRunStore } from "./pipeline/run-store.js";
 import type { ImportJobRepository } from "./db/repositories/import-job.repository.js";
 import type { BackgroundImportWorker } from "./services/import-worker.js";
@@ -41,6 +43,8 @@ export interface AppDependencies {
   roleRepo?: RoleRepository;
   userRoleRepo?: UserRoleRepository;
   feedbackRepo?: SkillFeedbackRepository;
+  evalRepo?: SkillEvalRepository;
+  evalRunner?: EvalRunner;
   pipelineRunStore?: PipelineRunStore;
   importJobRepo?: ImportJobRepository;
   importWorker?: BackgroundImportWorker;

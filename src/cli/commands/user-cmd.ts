@@ -12,6 +12,8 @@ import { WebhookService } from "../../services/webhook.service.js";
 import { getLogger } from "../../utils/logger.js";
 import { c, kv, table, section, ok, warn, kvWidth, hint, fail } from "../ui.js";
 import { sha256 } from "../../utils/crypto.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
 function initRepos() {
   const config = getConfig();
@@ -27,7 +29,32 @@ function initRepos() {
   };
 }
 
-export async function userListAction(): Promise<void> {
+export async function userListAction(opts: { serverUrl?: string } = {}): Promise<void> {
+  requireAuth();
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = readCredentials()!;
+    const users = await apiCall<Array<{ id: string; name: string | null; username: string | null; userType: string; status: string }>>(
+      serverUrl, "GET", "/api/admin/users", { credentials: creds },
+    );
+    if (!users.length) { warn("No users found."); return; }
+    console.log(section("Users", users.length));
+    console.log();
+    const rows = users.map(u => ({
+      id: u.id, name: u.name ?? "", user_type: u.userType, status: u.status, roles: "",
+    }));
+    console.log(table(rows, [
+      { key: "id", header: "ID", width: 2, format: v => c.dim(String(v)) },
+      { key: "name", header: "NAME", width: 16, format: v => String(v) || c.dim("(unnamed)") },
+      { key: "user_type", header: "TYPE", width: 12 },
+      { key: "status", header: "STATUS", width: 10 },
+    ]));
+    console.log();
+    return;
+  }
+
+  // Local mode
   const { userRepo, userRoleRepo, roleRepo } = initRepos();
   const users = await userRepo.findAll();
   if (users.length === 0) {
@@ -82,7 +109,31 @@ function parseTtlToMs(ttl: string): number {
   }
 }
 
-export async function userCreateAction(opts: { name?: string; roleIds?: string[]; ttl?: string; username?: string; password?: string; userType?: string }): Promise<void> {
+export async function userCreateAction(opts: { name?: string; roleIds?: string[]; ttl?: string; username?: string; password?: string; userType?: string; serverUrl?: string }): Promise<void> {
+  requireAuth();
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = readCredentials()!;
+    const body: Record<string, unknown> = {};
+    if (opts.name) body.name = opts.name;
+    if (opts.username) body.username = opts.username;
+    if (opts.password) body.password = opts.password;
+    if (opts.userType) body.user_type = opts.userType;
+    if (opts.roleIds) body.role_ids = opts.roleIds;
+    if (opts.ttl) body.expires_in = parseTtlToMs(opts.ttl) / 1000;
+    const user = await apiCall<{ id: string; name: string | null; username: string | null; user_type: string; token: string }>(
+      serverUrl, "POST", "/api/admin/users", { body, credentials: creds },
+    );
+    ok(`User created: ${c.bold(user.username ?? user.name ?? user.id)}`);
+    console.log(kv("id", c.dim(user.id)));
+    if (user.username) console.log(kv("username", user.username));
+    console.log(kv("user_type", user.user_type));
+    console.log(kv("token", c.boldYellow(user.token)));
+    return;
+  }
+
+  // Local mode
   const { userRepo, userRoleRepo, roleRepo } = initRepos();
 
   // Password length validation
@@ -146,7 +197,29 @@ export async function userCreateAction(opts: { name?: string; roleIds?: string[]
 }
 
 // P0-4 — `skill-mcp user rotate-token <id> [--ttl 30d] [--grace 7d]`
-export async function userRotateTokenAction(userId: string, opts: { ttl?: string; grace?: string } = {}): Promise<void> {
+export async function userRotateTokenAction(userId: string, opts: { ttl?: string; grace?: string; serverUrl?: string } = {}): Promise<void> {
+  requireAuth();
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = readCredentials()!;
+    const body: Record<string, unknown> = {};
+    if (opts.ttl) body.expires_in = parseTtlToMs(opts.ttl) / 1000;
+    if (opts.grace) body.grace_seconds = parseTtlToMs(opts.grace) / 1000;
+    const result = await apiCall<{ id: string; token: string; token_expires_at: number | null; previous_token_expires_at: number | null }>(
+      serverUrl, "POST", `/api/admin/users/${userId}/rotate-token`, { body, credentials: creds },
+    );
+    console.log(section("token rotated"));
+    console.log();
+    console.log(kv("id", c.dim(result.id)));
+    console.log(kv("token", c.boldYellow(result.token)));
+    if (result.token_expires_at) console.log(kv("expires", new Date(result.token_expires_at).toISOString()));
+    console.log(kv("grace until", result.previous_token_expires_at ? new Date(result.previous_token_expires_at).toISOString() : c.dim("(immediate)")));
+    hint("Old token still valid until grace expires");
+    return;
+  }
+
+  // Local mode
   const { userRepo, webhookRepo, webhookDeliveryRepo } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {
@@ -189,7 +262,28 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
   closeDatabase();
 }
 
-export async function userGetAction(userId: string): Promise<void> {
+export async function userGetAction(userId: string, opts: { serverUrl?: string } = {}): Promise<void> {
+  requireAuth();
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = readCredentials()!;
+    const user = await apiCall<{ id: string; name: string | null; username: string | null; userType: string; status: string; roles: Array<{ name: string; tags: string[] }>; tags: string[] }>(
+      serverUrl, "GET", `/api/admin/users/${userId}`, { credentials: creds },
+    );
+    console.log(section("user"));
+    console.log();
+    console.log(kv("id", c.dim(user.id)));
+    console.log(kv("name", user.name ?? c.dim("(unnamed)")));
+    if (user.username) console.log(kv("username", user.username));
+    console.log(kv("userType", user.userType));
+    console.log(kv("status", user.status));
+    console.log(kv("roles", user.roles?.map(r => `${r.name} [${r.tags?.join(",")}]`).join("; ") || c.dim("(none)")));
+    console.log();
+    return;
+  }
+
+  // Local mode
   const { userRepo, userRoleRepo, roleRepo } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {
@@ -214,7 +308,18 @@ export async function userGetAction(userId: string): Promise<void> {
   closeDatabase();
 }
 
-export async function userDeleteAction(userId: string): Promise<void> {
+export async function userDeleteAction(userId: string, opts: { serverUrl?: string } = {}): Promise<void> {
+  requireAuth();
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = readCredentials()!;
+    await apiCall(serverUrl, "DELETE", `/api/admin/users/${userId}`, { credentials: creds });
+    ok(`${c.bold("Deleted")}  user  ${c.dim(userId)}`);
+    return;
+  }
+
+  // Local mode
   const { userRepo, userRoleRepo } = initRepos();
   await userRoleRepo.deleteByUserId(userId);
   const deleted = await userRepo.delete(userId);
@@ -227,7 +332,18 @@ export async function userDeleteAction(userId: string): Promise<void> {
   hint("Run `skill-mcp user list` to see remaining users");
 }
 
-export async function userAssignRolesAction(userId: string, roleIds: string[]): Promise<void> {
+export async function userAssignRolesAction(userId: string, roleIds: string[], opts: { serverUrl?: string } = {}): Promise<void> {
+  requireAuth();
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = readCredentials()!;
+    await apiCall(serverUrl, "PUT", `/api/admin/users/${userId}/roles`, { body: { role_ids: roleIds }, credentials: creds });
+    ok(`${c.bold("Roles updated")}  user  ${c.dim(userId)}`);
+    return;
+  }
+
+  // Local mode
   const { userRepo, userRoleRepo, eventBus } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {

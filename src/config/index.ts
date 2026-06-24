@@ -6,6 +6,17 @@ import { createRequire } from "node:module";
 
 const APP_VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
+function readLocalJwtSecret(): string | undefined {
+  const configPath = join(homedir(), ".skill-mcp", "config.json");
+  if (!existsSync(configPath)) return undefined;
+  try {
+    const config = JSON.parse(readFileSync(configPath, "utf-8")) as { jwt_secret?: string };
+    return config.jwt_secret;
+  } catch {
+    return undefined;
+  }
+}
+
 function getDefaultDataDir(): string {
   const userHome = homedir();
   return join(userHome, ".skill-mcp");
@@ -66,14 +77,17 @@ function loadConfig(): AppConfig {
     auth: {
       stdioToken: process.env.SKILL_MCP_AUTH_TOKEN,
       metricsAuthOptional: process.env.SKILL_MCP_METRICS_AUTH_OPTIONAL === "true",
-      jwt: process.env.AUTH_JWT_SECRET
-        ? {
-            secret: process.env.AUTH_JWT_SECRET,
-            accessExpiresIn: parseInt(process.env.AUTH_JWT_ACCESS_EXPIRES_IN ?? "7200", 10),
-            refreshExpiresIn: parseInt(process.env.AUTH_JWT_REFRESH_EXPIRES_IN ?? "604800", 10),
-            issuer: process.env.AUTH_JWT_ISSUER ?? "skill-mcp",
-          }
-        : undefined,
+      jwt: (() => {
+        // Read JWT secret from: env var > local config file
+        const secret = process.env.AUTH_JWT_SECRET || readLocalJwtSecret();
+        if (!secret) return undefined;
+        return {
+          secret,
+          accessExpiresIn: parseInt(process.env.AUTH_JWT_ACCESS_EXPIRES_IN ?? "7200", 10),
+          refreshExpiresIn: parseInt(process.env.AUTH_JWT_REFRESH_EXPIRES_IN ?? "604800", 10),
+          issuer: process.env.AUTH_JWT_ISSUER ?? "skill-mcp",
+        };
+      })(),
     },
     rateLimit: {
       enabled: process.env.RATE_LIMIT_ENABLED !== "false",

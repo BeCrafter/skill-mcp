@@ -3,13 +3,31 @@ import { runMigrations } from "../../db/migrate.js";
 import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { c, badge, truncate, table, section, warn } from "../ui.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
 type SkillRow = { slug: string; name: string; version: string; status: string; description: string; category: string | null; tags: string[] };
 
-export async function listAction(options: { name?: string; tags?: string }): Promise<void> {
+export async function listAction(options: { name?: string; tags?: string; serverUrl?: string }): Promise<void> {
+  const serverUrl = getServerUrl(options);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    let path = "/api/admin/skills";
+    const queryParams: string[] = [];
+    if (options.tags) queryParams.push(`tags=${encodeURIComponent(options.tags)}`);
+    if (options.name) path = `/api/admin/skills/name/${encodeURIComponent(options.name)}`;
+    else if (queryParams.length) path += "?" + queryParams.join("&");
+
+    const skills = await apiCall<SkillRow[]>(serverUrl, "GET", path, { credentials: creds });
+    if (!skills.length) { warn("No skills found."); return; }
+    renderSkillTable(skills);
+    return;
+  }
+
+  // Local mode
   const config = getConfig();
   runMigrations(config.database.path);
-
   const db = getDatabase(config.database.path);
   const repo = new SkillRepository(db);
 
@@ -22,34 +40,30 @@ export async function listAction(options: { name?: string; tags?: string }): Pro
     return;
   }
 
+  renderSkillTable(skills as SkillRow[]);
+}
+
+function renderSkillTable(skills: SkillRow[]): void {
   console.log(section("Skills", skills.length));
   console.log();
 
-  // Build interleaved rows: skill row + optional description row
   const tableRows: Array<Record<string, unknown>> = [];
   const slugWidth = Math.min(Math.max(...skills.map(s => s.slug.length), 16), 36);
 
-  for (const s of skills as SkillRow[]) {
-    // Main row
+  for (const s of skills) {
     tableRows.push({
       slug: c.boldCyan(s.slug),
       version: c.dim("v" + s.version),
       status: badge(s.status),
       name: s.name !== s.slug ? c.dim("[" + s.name + "]") : "",
     });
-    // Description / meta row (empty slug to indent under)
     const meta: string[] = [];
     if (s.description) meta.push(truncate(s.description, 48));
     if (s.category) meta.push(`category: ${s.category}`);
     if (Array.isArray(s.tags) && s.tags.length) meta.push(`tags: ${s.tags.join(", ")}`);
     if (meta.length) {
       const metaText = truncate(meta.join("  ·  "), 52);
-      tableRows.push({
-        slug: "",
-        version: "",
-        status: "",
-        name: c.dim(metaText),
-      });
+      tableRows.push({ slug: "", version: "", status: "", name: c.dim(metaText) });
     }
   }
 

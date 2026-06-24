@@ -7,6 +7,8 @@ import { RoleRepository } from "../../db/repositories/role.repository.js";
 import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
 import { c, kv, section, ok, fail, warn } from "../ui.js";
 import { sha256 } from "../../utils/crypto.js";
+import { saveLocalConfig } from "../local-config.js";
+import { randomBytes } from "node:crypto";
 
 export async function initAction(opts: { username: string; password: string }): Promise<void> {
   if (opts.password.length < 8) {
@@ -15,9 +17,13 @@ export async function initAction(opts: { username: string; password: string }): 
   }
 
   const config = getConfig();
+
+  // Auto-generate JWT secret if not configured
   if (!config.auth?.jwt?.secret) {
-    warn("AUTH_JWT_SECRET not configured. JWT login will not be available.");
-    warn("Set AUTH_JWT_SECRET env var to enable JWT authentication.");
+    const secret = randomBytes(32).toString("base64");
+    saveLocalConfig({ jwt_secret: secret });
+    process.env.AUTH_JWT_SECRET = secret;
+    ok(`JWT secret auto-generated and saved to ~/.skill-mcp/config.json`);
   }
 
   runMigrations(config.database.path);
@@ -49,7 +55,7 @@ export async function initAction(opts: { username: string; password: string }): 
     token: hash,
   });
 
-  // Create superadmin role with broad tags
+  // Create default roles: superadmin, admin, user
   let superadminRole;
   try {
     superadminRole = await roleRepo.create({
@@ -58,9 +64,28 @@ export async function initAction(opts: { username: string; password: string }): 
       tags: ["all-skills"],
     });
   } catch {
-    // Role may already exist from previous partial init
     const roles = await roleRepo.findAll();
     superadminRole = roles.find(r => r.name === "superadmin");
+  }
+
+  try {
+    await roleRepo.create({
+      name: "admin",
+      description: "Admin role with full skill access",
+      tags: ["all-skills"],
+    });
+  } catch {
+    // Role may already exist
+  }
+
+  try {
+    await roleRepo.create({
+      name: "user",
+      description: "Default user role",
+      tags: [],
+    });
+  } catch {
+    // Role may already exist
   }
 
   if (superadminRole) {

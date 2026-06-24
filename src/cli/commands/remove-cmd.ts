@@ -5,12 +5,29 @@ import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { LocalFileSystemProvider } from "../../storage/local-fs.provider.js";
 import { CompositeCacheProvider } from "../../cache/composite.provider.js";
-import { c, kv, fail, warn, section, kvWidth } from "../ui.js";
+import { c, kv, fail, warn, ok, section, kvWidth } from "../ui.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
-export async function removeAction(slug: string, options: { force?: boolean }): Promise<void> {
+export async function removeAction(slug: string, options: { force?: boolean; serverUrl?: string }): Promise<void> {
+  const serverUrl = getServerUrl(options);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    if (!options.force) {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await rl.question(`\n  Remove ${c.boldCyan(slug)}? [y/N] `);
+      rl.close();
+      if (answer.toLowerCase() !== "y") { warn("Cancelled."); return; }
+    }
+    await apiCall(serverUrl, "DELETE", `/api/admin/skills/${slug}`, { credentials: creds });
+    ok(`Removed ${c.boldCyan(slug)}`);
+    return;
+  }
+
+  // Local mode
   const config = getConfig();
   runMigrations(config.database.path);
-
   const db = getDatabase(config.database.path);
   const repo = new SkillRepository(db);
 
@@ -24,10 +41,7 @@ export async function removeAction(slug: string, options: { force?: boolean }): 
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const answer = await rl.question(`\n  Remove ${c.boldCyan(slug)} (v${skill.version})? [y/N] `);
     rl.close();
-    if (answer.toLowerCase() !== "y") {
-      warn("Cancelled.");
-      return;
-    }
+    if (answer.toLowerCase() !== "y") { warn("Cancelled."); return; }
   }
 
   await repo.delete(slug);

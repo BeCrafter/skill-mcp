@@ -85,6 +85,9 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // P1-12 stage 2 — eval cases + run log. Stays alongside versionRepo because
   // both are import-time write targets and runtime-read targets.
   const evalRepo = new SkillEvalRepository(db);
+  const { EchoEvalProvider } = await import("../../eval/echo-provider.js");
+  const { EvalRunner } = await import("../../eval/runner.js");
+  const evalRunner = new EvalRunner(skillRepo, evalRepo, new EchoEvalProvider(), logger);
   const pipelineRunRepo = new PipelineRunRepository(db);
   const pipelineRunStore = new PipelineRunStore(pipelineRunRepo);
   // P1-13 — usage metering data layer (review §9.1). Constructed unconditionally
@@ -255,6 +258,8 @@ export async function serveAction(options: ServeOptions): Promise<void> {
         webhookDeliveryRepo,
         webhookService,
         webhookWorker,
+        evalRepo,
+        evalRunner,
         jwtSecret: config.auth?.jwt?.secret,
         jwtIssuer: config.auth?.jwt?.issuer,
         jwtAccessExpiresIn: config.auth?.jwt?.accessExpiresIn,

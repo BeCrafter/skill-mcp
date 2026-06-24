@@ -78,12 +78,13 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
       tokenExpiresAt,
     });
 
-    // Auto-assign admin role for admin users if no explicit roles provided
-    if ((data.user_type === "admin") && !data.role_ids?.length) {
+    // Auto-assign role matching user_type when no explicit roles provided
+    const resolvedType = data.user_type ?? "user";
+    if (!data.role_ids?.length) {
       const allRoles = await roleRepo.findAll();
-      const adminRole = allRoles.find(r => r.name === "admin");
-      if (adminRole) {
-        await userRoleRepo.replaceUserRoles(user.id, [adminRole.id]);
+      const matchingRole = allRoles.find(r => r.name === resolvedType);
+      if (matchingRole) {
+        await userRoleRepo.replaceUserRoles(user.id, [matchingRole.id]);
       }
     } else if (data.role_ids?.length) {
       await userRoleRepo.replaceUserRoles(user.id, data.role_ids);
@@ -201,6 +202,29 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     assertSuperadminProtected(user, rc.userId);
     await userRoleRepo.replaceUserRoles(userId, data.role_ids ?? []);
     eventBus.publish({ type: "user:roles_changed", userId });
+    json(ctx.res, 200, { success: true });
+  });
+
+  // Reset password endpoint — admin+ can reset, but only superadmin can reset superadmin
+  router.post("/api/admin/users/:username/reset-password", async (ctx) => {
+    const rc = ctx.requestContext!;
+    const username = ctx.params.username;
+    const data = await readJsonBody<{ new_password?: string }>(ctx.req);
+
+    if (!data.new_password || data.new_password.length < 8) {
+      throw new AppError("Password must be at least 8 characters", "PASSWORD_TOO_SHORT", 400);
+    }
+
+    const target = await userRepo.findByUsername(username);
+    if (!target) throw new UserNotFoundError();
+
+    // Only superadmin can reset another superadmin's password
+    if (target.userType === "superadmin" && rc.userType !== "superadmin") {
+      throw new AppError("Only superadmin can reset superadmin password", "SUPERADMIN_PROTECTED", 403);
+    }
+
+    const { hashSync } = await import("bcryptjs");
+    await userRepo.updatePassword(target.id, hashSync(data.new_password, 12));
     json(ctx.res, 200, { success: true });
   });
 }

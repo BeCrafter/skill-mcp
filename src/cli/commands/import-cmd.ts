@@ -15,11 +15,80 @@ import { createLogger, setLogger } from "../../utils/logger.js";
 import { c, badge, ok, fail, hint, kv } from "../ui.js";
 import { DuplicateSkillNameError } from "../../utils/errors.js";
 import type { ImportOptions } from "../../types/index.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall, uploadFile } from "../remote-client.js";
 
 export async function importAction(
   source: string,
-  options: ImportOptions,
+  options: ImportOptions & { serverUrl?: string },
 ): Promise<void> {
+  const serverUrl = getServerUrl(options);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    const isGitUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("git@");
+
+    if (isGitUrl) {
+      // Git URL: pass directly to server API (server clones the repo)
+      const body: Record<string, unknown> = { source };
+      if (options.category) body.category = options.category;
+      if (options.tags) body.tags = options.tags;
+      if (options.description) body.description = options.description;
+      if (options.targetId) body.target_id = options.targetId;
+      if (options.versionBump) body.version_bump = options.versionBump;
+      if (options.overwrite) body.overwrite = options.overwrite;
+      if (options.allowDuplicate) body.allow_duplicate = options.allowDuplicate;
+      if (options.slug) body.slug = options.slug;
+      if (options.branch) body.branch = options.branch;
+      if (options.subDir) body.sub_dir = options.subDir;
+
+      const result = await apiCall<{ id: string; slug: string; version: string; fileCount: number; action: string }>(
+        serverUrl, "POST", "/api/admin/skills", { body, credentials: creds },
+      );
+      const verb = result.action === "created" ? "Created" : "Updated";
+      ok(`${c.bold(verb)}  ${c.boldCyan(result.slug)}  ${c.dim("v" + result.version)}`);
+    } else {
+      // Local directory: pack as tar.gz and upload
+      const { execSync } = await import("node:child_process");
+      const { mkdtempSync, readFileSync, rmSync, existsSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+
+      if (!existsSync(source)) {
+        fail(`Source directory not found: ${source}`);
+        process.exit(1);
+      }
+
+      const tmpDir = mkdtempSync(join(tmpdir(), "skill-mcp-import-"));
+      const tarPath = join(tmpDir, "skill-package.tar.gz");
+
+      try {
+        execSync(`tar -czf "${tarPath}" -C "${source}" .`, { stdio: "pipe" });
+        const fileBuffer = readFileSync(tarPath);
+
+        const metadata: Record<string, unknown> = {};
+        if (options.category) metadata.category = options.category;
+        if (options.tags) metadata.tags = options.tags;
+        if (options.description) metadata.description = options.description;
+        if (options.targetId) metadata.target_id = options.targetId;
+        if (options.versionBump) metadata.version_bump = options.versionBump;
+        if (options.overwrite) metadata.overwrite = options.overwrite;
+        if (options.allowDuplicate) metadata.allow_duplicate = options.allowDuplicate;
+        if (options.slug) metadata.slug = options.slug;
+
+        const result = await uploadFile<{ id: string; slug: string; version: string; fileCount: number; action: string }>(
+          serverUrl, "/api/admin/skills/upload", fileBuffer, metadata, creds,
+        );
+        const verb = result.action === "created" ? "Created" : "Updated";
+        ok(`${c.bold(verb)}  ${c.boldCyan(result.slug)}  ${c.dim("v" + result.version)}`);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }
+    return;
+  }
+
+  // Local mode
   setLogger(createLogger("silent"));
 
   const config = getConfig();

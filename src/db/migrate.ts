@@ -163,6 +163,30 @@ export function runMigrations(dbInput: string): void {
   // semicolons — setting it at the session level guarantees it stays off.
   sqlite.pragma("foreign_keys = OFF");
   const db = drizzle(sqlite);
+
+  // ponytail: idempotency guard for migration 0018. If the 'username' column
+  // already exists (e.g. from a prior 0017 run) but the journal tag is
+  // '0018_user_type_and_login', drizzle will re-run the ALTER TABLE and crash
+  // with "duplicate column name". Pre-check and mark as applied to avoid this.
+  const MIGRATION_0018_TAG = "0018_user_type_and_login";
+  try {
+    const hasUsernameCol = sqlite.prepare(
+      "SELECT name FROM pragma_table_info('users') WHERE name = 'username'"
+    ).get();
+    if (hasUsernameCol) {
+      const hasTag = sqlite.prepare(
+        "SELECT 1 FROM __drizzle_migrations WHERE hash = ?"
+      ).get(MIGRATION_0018_TAG);
+      if (!hasTag) {
+        sqlite.prepare(
+          "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
+        ).run(MIGRATION_0018_TAG, Date.now());
+      }
+    }
+  } catch {
+    // Table may not exist yet on fresh DB — let migrate() handle it
+  }
+
   migrate(db, { migrationsFolder });
   sqlite.pragma("foreign_keys = ON");
 

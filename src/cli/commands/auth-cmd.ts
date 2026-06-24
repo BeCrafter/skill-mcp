@@ -5,12 +5,14 @@ import { getConfig } from "../../config/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import { getDatabase, closeDatabase } from "../../db/connection.js";
 import { UserRepository } from "../../db/repositories/user.repository.js";
+import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
 import { c, kv, section, ok, warn, fail, hint } from "../ui.js";
-import { verifyJwt } from "../../auth/jwt.service.js";
+import { signAccessToken, signRefreshToken, verifyJwt } from "../../auth/jwt.service.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
 const CREDENTIALS_PATH = join(homedir(), ".skill-mcp", "credentials.json");
 
-interface Credentials {
+export interface Credentials {
   userId: string;
   username: string;
   userType: string;
@@ -19,7 +21,7 @@ interface Credentials {
   expiresAt: number;
 }
 
-function readCredentials(): Credentials | null {
+export function readCredentials(): Credentials | null {
   if (!existsSync(CREDENTIALS_PATH)) return null;
   try {
     return JSON.parse(readFileSync(CREDENTIALS_PATH, "utf-8")) as Credentials;
@@ -40,7 +42,7 @@ function clearCredentials(): void {
   }
 }
 
-export async function loginAction(): Promise<void> {
+export async function loginAction(opts: { serverUrl?: string } = {}): Promise<void> {
   const { createInterface } = await import("node:readline");
 
   const rl = createInterface({ input: process.stdin, output: process.stderr });
@@ -50,22 +52,93 @@ export async function loginAction(): Promise<void> {
   const username = await question("Username: ");
   const password = await question("Password: ");
   rl.close();
-  // newline after password input
   process.stderr.write("\n");
 
-  const config = getConfig();
-  const port = config.transport.port;
-  const host = config.transport.host;
+  const serverUrl = getServerUrl(opts);
+  if (serverUrl) {
+    await loginViaHttp(serverUrl, username, password);
+  } else {
+    await loginViaLocal(username, password);
+  }
+}
 
-  const res = await fetch(`http://${host}:${port}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+/** Local mode: verify password against local DB, sign JWT locally */
+async function loginViaLocal(username: string, password: string): Promise<void> {
+  const config = getConfig();
+  const jwtSecret = config.auth?.jwt?.secret;
+  if (!jwtSecret) {
+    fail("JWT secret not found", "Run: skill-mcp init first, or set AUTH_JWT_SECRET");
+    process.exit(1);
+  }
+
+  runMigrations(config.database.path);
+  const db = getDatabase(config.database.path);
+  const userRepo = new UserRepository(db);
+  const userRoleRepo = new UserRoleRepository(db);
+
+  const user = await userRepo.findByUsername(username);
+  if (!user || (user.userType !== "admin" && user.userType !== "superadmin")) {
+    fail("Invalid credentials");
+    closeDatabase();
+    process.exit(1);
+  }
+
+  if (user.status !== "active" || !user.passwordHash) {
+    fail("Invalid credentials");
+    closeDatabase();
+    process.exit(1);
+  }
+
+  const { compare } = await import("bcryptjs");
+  if (!(await compare(password, user.passwordHash))) {
+    fail("Invalid credentials");
+    closeDatabase();
+    process.exit(1);
+  }
+
+  const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
+  const jwtIssuer = config.auth?.jwt?.issuer ?? "skill-mcp";
+  const accessExpiresIn = config.auth?.jwt?.accessExpiresIn ?? 7200;
+  const refreshExpiresIn = config.auth?.jwt?.refreshExpiresIn ?? 604800;
+
+  const accessToken = signAccessToken({
+    userId: user.id, username: user.username ?? "", userType: user.userType,
+    tags, secret: jwtSecret, expiresInSec: accessExpiresIn, issuer: jwtIssuer,
   });
+  const refreshToken = signRefreshToken({
+    userId: user.id, secret: jwtSecret, expiresInSec: refreshExpiresIn, issuer: jwtIssuer,
+  });
+
+  saveCredentials({
+    userId: user.id, username: user.username ?? "", userType: user.userType,
+    accessToken, refreshToken, expiresAt: Date.now() + accessExpiresIn * 1000,
+  });
+
+  ok(`Logged in as ${c.bold(user.username ?? username)} (${user.userType})`);
+  closeDatabase();
+}
+
+/** Remote mode: HTTP request to server */
+async function loginViaHttp(serverUrl: string, username: string, password: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${serverUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch {
+    fail(`Connection failed: ${serverUrl}`, "Is the server running?");
+    process.exit(1);
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: string };
-    fail(`Login failed: ${body.error ?? res.statusText}`);
+    if (res.status === 404) {
+      fail("Auth endpoint not found", "Is the server running with AUTH_JWT_SECRET configured?");
+    } else {
+      fail(`Login failed: ${body.error ?? res.statusText}`);
+    }
     process.exit(1);
   }
 
@@ -73,11 +146,8 @@ export async function loginAction(): Promise<void> {
   const { access_token, refresh_token, expires_in, user } = body.data;
 
   saveCredentials({
-    userId: user.id,
-    username: user.username,
-    userType: user.user_type,
-    accessToken: access_token,
-    refreshToken: refresh_token,
+    userId: user.id, username: user.username, userType: user.user_type,
+    accessToken: access_token, refreshToken: refresh_token,
     expiresAt: Date.now() + expires_in * 1000,
   });
 
@@ -130,12 +200,39 @@ export async function whoamiAction(): Promise<void> {
   console.log();
 }
 
-export async function resetPasswordAction(opts: { username: string; password: string }): Promise<void> {
+export function requireAuth(): Credentials {
+  const creds = readCredentials();
+  if (!creds) {
+    fail("Not logged in. Run `skill-mcp auth login` first.");
+    process.exit(1);
+  }
+  if (creds.expiresAt < Date.now()) {
+    fail("Token expired. Run `skill-mcp auth login` to re-authenticate.");
+    process.exit(1);
+  }
+  return creds;
+}
+
+export async function resetPasswordAction(opts: { username: string; password: string; serverUrl?: string }): Promise<void> {
+  requireAuth();
   if (opts.password.length < 8) {
     fail("Password must be at least 8 characters");
     process.exit(1);
   }
 
+  const serverUrl = getServerUrl(opts);
+  const creds = readCredentials()!;
+
+  if (serverUrl) {
+    await apiCall(serverUrl, "POST", `/api/admin/users/${opts.username}/reset-password`, {
+      body: { new_password: opts.password },
+      credentials: creds,
+    });
+    ok(`Password reset for ${c.bold(opts.username)}`);
+    return;
+  }
+
+  // Local mode
   const config = getConfig();
   runMigrations(config.database.path);
   const db = getDatabase(config.database.path);
@@ -148,8 +245,9 @@ export async function resetPasswordAction(opts: { username: string; password: st
     process.exit(1);
   }
 
-  if (user.userType !== "superadmin" && user.userType !== "admin") {
-    fail(`User "${opts.username}" is not an admin (user_type=${user.userType}). Only admin/superadmin users can reset passwords.`);
+  // Permission check: cannot reset superadmin password unless you are superadmin
+  if (user.userType === "superadmin" && creds.userType !== "superadmin") {
+    fail("Only superadmin can reset superadmin password");
     closeDatabase();
     process.exit(1);
   }

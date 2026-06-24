@@ -1,8 +1,60 @@
 import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
 import { json, parsePagination, requireSlug, readJsonBody, requireFilePaths } from "../../helpers.js";
-import { BadRequestError } from "../../../utils/errors.js";
+import { BadRequestError, DuplicateSkillNameError } from "../../../utils/errors.js";
 import { toSkillMetaPublic, type SkillStatus } from "../../../types/index.js";
+
+interface MultipartPart {
+  name: string;
+  filename?: string;
+  contentType?: string;
+  data: Buffer;
+}
+
+function parseMultipart(body: Buffer, boundary: string): MultipartPart[] {
+  const parts: MultipartPart[] = [];
+  const delimiter = Buffer.from(`--${boundary}`);
+
+  let pos = 0;
+  while (pos < body.length) {
+    // Find next boundary
+    const boundaryStart = body.indexOf(delimiter, pos);
+    if (boundaryStart === -1) break;
+
+    // Check if it's the end delimiter
+    const afterBoundary = body.indexOf("\r\n", boundaryStart);
+    if (afterBoundary === -1) break;
+
+    const boundaryContent = body.slice(boundaryStart, afterBoundary).toString();
+    if (boundaryContent.trim() === `--${boundary}--`) break;
+
+    // Find headers end (double CRLF)
+    const headersEnd = body.indexOf("\r\n\r\n", afterBoundary);
+    if (headersEnd === -1) break;
+
+    const headersStr = body.slice(afterBoundary + 2, headersEnd).toString();
+    const nameMatch = headersStr.match(/name="([^"]+)"/);
+    const filenameMatch = headersStr.match(/filename="([^"]+)"/);
+    const ctMatch = headersStr.match(/Content-Type:\s*(.+)/i);
+
+    // Find next boundary for data end
+    const nextBoundary = body.indexOf(delimiter, headersEnd + 4);
+    const dataEnd = nextBoundary !== -1 ? nextBoundary - 2 : body.length; // -2 for \r\n before boundary
+
+    const data = body.slice(headersEnd + 4, dataEnd);
+
+    parts.push({
+      name: nameMatch?.[1] ?? "",
+      filename: filenameMatch?.[1],
+      contentType: ctMatch?.[1]?.trim(),
+      data,
+    });
+
+    pos = nextBoundary !== -1 ? nextBoundary : body.length;
+  }
+
+  return parts;
+}
 
 // P0-9 — published lifecycle transitions exposed at the HTTP layer. Each verb
 // names its target state explicitly (rather than a generic PATCH ?status=…)
@@ -207,5 +259,108 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
     if (!data.version) throw new BadRequestError("version is required");
     await skillService.adminRollbackToVersion(slug, data.version, data.bump ?? "patch");
     json(ctx.res, 200, { success: true, message: `Rolled back to version ${data.version}` });
+  });
+
+  // ── Skill upload endpoint (for remote CLI import) ──────────────
+
+  router.post("/api/admin/skills/upload", async (ctx) => {
+    // Parse multipart/form-data to extract file and metadata
+    const contentType = ctx.req.headers["content-type"] ?? "";
+    if (!contentType.includes("multipart/form-data")) {
+      throw new BadRequestError("Expected multipart/form-data");
+    }
+
+    // Read raw body
+    const chunks: Buffer[] = [];
+    for await (const chunk of ctx.req) {
+      chunks.push(Buffer.from(chunk));
+    }
+    const rawBody = Buffer.concat(chunks);
+
+    // Extract boundary
+    const boundaryMatch = contentType.match(/boundary=(.+)/);
+    if (!boundaryMatch) throw new BadRequestError("Missing multipart boundary");
+    const boundary = boundaryMatch[1];
+
+    // Parse multipart parts (simple parser)
+    const parts = parseMultipart(rawBody, boundary);
+    const filePart = parts.find(p => p.name === "file");
+    const metadataPart = parts.find(p => p.name === "metadata");
+
+    if (!filePart) throw new BadRequestError("Missing 'file' field");
+    if (!metadataPart) throw new BadRequestError("Missing 'metadata' field");
+
+    const metadata = JSON.parse(metadataPart.data.toString("utf-8"));
+
+    // Extract to temp directory and import
+    const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { execSync } = await import("node:child_process");
+
+    const tmpDir = mkdtempSync(join(tmpdir(), "skill-upload-"));
+    const tarPath = join(tmpDir, "upload.tar.gz");
+
+    try {
+      writeFileSync(tarPath, filePart.data);
+      const extractDir = join(tmpDir, "extracted");
+      mkdirSync(extractDir, { recursive: true });
+      execSync(`tar -xzf "${tarPath}" -C "${extractDir}"`, { stdio: "pipe" });
+
+      const importer = deps.importer;
+      if (!importer) throw new BadRequestError("Importer not configured");
+
+      const result = await importer.import(extractDir, {
+        category: metadata.category,
+        tags: metadata.tags,
+        description: metadata.description,
+        targetId: metadata.target_id,
+        versionBump: metadata.version_bump,
+        overwrite: metadata.overwrite,
+        allowDuplicate: metadata.allow_duplicate,
+        slug: metadata.slug,
+      });
+
+      json(ctx.res, 201, { success: true, data: result });
+    } catch (error) {
+      if (error instanceof DuplicateSkillNameError) {
+        json(ctx.res, 409, { success: false, error: error.message, code: error.code });
+      } else {
+        throw error;
+      }
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Eval endpoints ─────────────────────────────────────────────
+
+  router.get("/api/admin/skills/:slug/eval/cases", async (ctx) => {
+    const slug = requireSlug(ctx);
+    const skill = await deps.skillRepo?.findBySlug(slug);
+    if (!skill) throw new BadRequestError(`Skill not found: ${slug}`);
+    const evalRepo = deps.evalRepo;
+    if (!evalRepo) throw new BadRequestError("Eval not configured");
+    const cases = evalRepo.findCasesBySkillId(skill.id);
+    json(ctx.res, 200, { success: true, data: cases });
+  });
+
+  router.post("/api/admin/skills/:slug/eval/run", async (ctx) => {
+    const slug = requireSlug(ctx);
+    const evalRunner = deps.evalRunner;
+    if (!evalRunner) throw new BadRequestError("Eval runner not configured");
+    const summary = await evalRunner.runForSlug(slug);
+    json(ctx.res, 200, { success: true, data: summary });
+  });
+
+  router.get("/api/admin/skills/:slug/eval/results", async (ctx) => {
+    const slug = requireSlug(ctx);
+    const skill = await deps.skillRepo?.findBySlug(slug);
+    if (!skill) throw new BadRequestError(`Skill not found: ${slug}`);
+    const evalRepo = deps.evalRepo;
+    if (!evalRepo) throw new BadRequestError("Eval not configured");
+    const limit = parseInt(ctx.query.get("limit") ?? "20", 10);
+    const runs = evalRepo.findRunsBySkillVersion(skill.id, skill.version);
+    json(ctx.res, 200, { success: true, data: runs.slice(-limit) });
   });
 }

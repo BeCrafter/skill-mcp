@@ -4,6 +4,8 @@ import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { CompositeCacheProvider } from "../../cache/composite.provider.js";
 import { c, ok, fail, warn } from "../ui.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
 export async function updateAction(
   slug: string,
@@ -12,11 +14,27 @@ export async function updateAction(
     tags?: string[];
     description?: string;
     displayName?: string;
+    serverUrl?: string;
   },
 ): Promise<void> {
+  const serverUrl = getServerUrl(options);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    const body: Record<string, unknown> = {};
+    if (options.category !== undefined) body.category = options.category;
+    if (options.tags !== undefined) body.tags = options.tags;
+    if (options.description !== undefined) body.description = options.description;
+    if (options.displayName !== undefined) body.displayName = options.displayName;
+    if (Object.keys(body).length === 0) { warn("No updates specified."); return; }
+    await apiCall(serverUrl, "PUT", `/api/admin/skills/${slug}`, { body, credentials: creds });
+    ok(`${c.bold("Updated")}  ${c.boldCyan(slug)}`);
+    return;
+  }
+
+  // Local mode
   const config = getConfig();
   runMigrations(config.database.path);
-
   const db = getDatabase(config.database.path);
   const repo = new SkillRepository(db);
 

@@ -9,12 +9,27 @@ import { LocalSkillProvider } from "../../provider/local.provider.js";
 import { SkillFileRepository } from "../../db/repositories/skill-file.repository.js";
 import { SkillService } from "../../services/skill.service.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
-import { c, fail, kv, section, kvWidth } from "../ui.js";
+import { c, fail, kv, section, kvWidth, ok } from "../ui.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
 export async function rollbackAction(
   slug: string,
-  options: { to: string; bump?: "major" | "minor" | "patch" },
+  options: { to: string; bump?: "major" | "minor" | "patch"; serverUrl?: string },
 ): Promise<void> {
+  const serverUrl = getServerUrl(options);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    await apiCall(serverUrl, "POST", `/api/admin/skills/${slug}/rollback`, {
+      body: { version: options.to, bump: options.bump ?? "patch" },
+      credentials: creds,
+    });
+    ok(`Rolled back ${c.boldCyan(slug)} to v${options.to}`);
+    return;
+  }
+
+  // Local mode
   setLogger(createLogger("silent"));
 
   const config = getConfig();

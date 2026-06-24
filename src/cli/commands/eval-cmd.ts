@@ -7,12 +7,35 @@ import { EchoEvalProvider } from "../../eval/echo-provider.js";
 import { EvalRunner } from "../../eval/runner.js";
 import { c, fail, kv, fmtDate, table, section, warn } from "../ui.js";
 import { SkillNotFoundError } from "../../utils/errors.js";
+import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { getServerUrl, apiCall } from "../remote-client.js";
 
-/**
- * P1-12 stage 2 — `skill-mcp eval list <slug>` — print every persisted case
- * with its expectations. Useful as a smoke-test that import wired through.
- */
-export async function evalListAction(slug: string): Promise<void> {
+interface EvalCase { caseName: string; input?: string; expectedTools: string[]; expectedOutputContains: string[]; }
+interface EvalRunResult { caseName: string; status: string; }
+interface EvalSummary { slug: string; version: string; totalCases: number; passed: number; failed: number; errored: number; cases: EvalRunResult[]; }
+interface EvalHistoryRow { skillVersion: string; caseName: string; status: string; createdAt: number; }
+
+export async function evalListAction(slug: string, opts: { serverUrl?: string } = {}): Promise<void> {
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    const cases = await apiCall<EvalCase[]>(
+      serverUrl, "GET", `/api/admin/skills/${slug}/eval/cases`, { credentials: creds },
+    );
+    console.log(section("Eval cases", cases.length));
+    if (!cases.length) { warn("No eval cases declared."); return; }
+    for (const ec of cases) {
+      console.log(kv("case", c.bold(ec.caseName)));
+      if (ec.input) console.log(kv("input", c.dim(ec.input)));
+      if (ec.expectedTools?.length) console.log(kv("tools", ec.expectedTools.join(", ")));
+      if (ec.expectedOutputContains?.length) console.log(kv("contains", ec.expectedOutputContains.join(", ")));
+      console.log();
+    }
+    return;
+  }
+
+  // Local mode
   const { skillRepo, evalRepo } = await bootstrap();
   const skill = await skillRepo.findBySlug(slug);
   if (!skill) {
@@ -37,17 +60,24 @@ export async function evalListAction(slug: string): Promise<void> {
   }
 }
 
-/**
- * P1-12 stage 2 — `skill-mcp eval run <slug>` — execute every case through
- * the stub echo provider, persist a row per case to skill_eval_runs, and
- * print a colored pass/fail/error breakdown.
- */
-export async function evalRunAction(slug: string): Promise<void> {
+export async function evalRunAction(slug: string, opts: { serverUrl?: string } = {}): Promise<void> {
+  const serverUrl = getServerUrl(opts);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    const summary = await apiCall<EvalSummary>(
+      serverUrl, "POST", `/api/admin/skills/${slug}/eval/run`, { credentials: creds },
+    );
+    renderEvalSummary(summary);
+    return;
+  }
+
+  // Local mode
   const { skillRepo, evalRepo } = await bootstrap();
   const provider = new EchoEvalProvider();
   const runner = new EvalRunner(skillRepo, evalRepo, provider);
 
-  let summary;
+  let summary: EvalSummary;
   try {
     summary = await runner.runForSlug(slug);
   } catch (err) {
@@ -59,6 +89,10 @@ export async function evalRunAction(slug: string): Promise<void> {
     process.exit(1);
   }
 
+  renderEvalSummary(summary);
+}
+
+function renderEvalSummary(summary: EvalSummary): void {
   console.log(section(`Eval run  ${summary.slug}  v${summary.version}`));
   console.log();
 
@@ -86,11 +120,22 @@ export async function evalRunAction(slug: string): Promise<void> {
   if (summary.failed > 0 || summary.errored > 0) process.exit(1);
 }
 
-/**
- * P1-12 stage 2 — `skill-mcp eval results <slug>` — print the most recent
- * runs for the skill (latest 20).
- */
-export async function evalResultsAction(slug: string, options: { limit?: number }): Promise<void> {
+export async function evalResultsAction(slug: string, options: { limit?: number; serverUrl?: string } = {}): Promise<void> {
+  const serverUrl = getServerUrl(options);
+
+  if (serverUrl) {
+    const creds = requireAuth();
+    const runs = await apiCall<EvalHistoryRow[]>(
+      serverUrl, "GET",
+      `/api/admin/skills/${slug}/eval/results?limit=${options.limit ?? 20}`,
+      { credentials: creds },
+    );
+    if (!runs.length) { warn("No eval runs found."); return; }
+    renderEvalResults(slug, runs);
+    return;
+  }
+
+  // Local mode
   const { skillRepo, evalRepo } = await bootstrap();
   const skill = await skillRepo.findBySlug(slug);
   if (!skill) {
@@ -123,6 +168,23 @@ export async function evalResultsAction(slug: string, options: { limit?: number 
     { key: "created", header: "CREATED", width: 18 },
   ]));
 
+  console.log();
+}
+
+function renderEvalResults(slug: string, runs: EvalHistoryRow[]): void {
+  console.log(section(`Eval results  ${slug}`, runs.length));
+  const rows = runs.map(r => ({
+    version: r.skillVersion,
+    caseName: r.caseName,
+    status: r.status === "pass" ? c.boldGreen("pass") : r.status === "fail" ? c.boldRed("fail") : c.boldYellow("error"),
+    created: fmtDate(r.createdAt),
+  }));
+  console.log(table(rows, [
+    { key: "version", header: "VERSION", width: 10 },
+    { key: "caseName", header: "CASE", width: 20 },
+    { key: "status", header: "STATUS", width: 10 },
+    { key: "created", header: "CREATED", width: 18 },
+  ]));
   console.log();
 }
 
