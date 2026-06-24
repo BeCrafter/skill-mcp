@@ -9,7 +9,7 @@
 > 4. 文档结构禁止随意拆分：架构图、模块清单、关键流程、问题清单、优化路线图必须留在同一份文件，方便单点检索。
 > 5. 与 `README.md` 的职责边界：README 面向使用者（怎么跑），本文档面向开发者与架构师（怎么实现、为何这样、还能怎样）。
 >
-> 最后审阅日期：2026-05-22 ｜ 当前对应 commit：`50122ec` (dev)
+> 最后审阅日期：2026-06-23 ｜ 当前对应 commit：`01b63ba` (dev)
 
 ---
 
@@ -178,7 +178,8 @@ graph TB
 | `src/cli/` | 命令行入口、子命令分发 | `index.ts`, `commands/serve-cmd.ts`, `serve-stdio-auth.ts` | 写业务逻辑（必须委派给 Service） |
 | `src/app.ts` | HTTP 服务器装配 + MCP transport 绑定 | `app.ts`（单文件） | 散落业务分支（当前已超 300 行，待拆分） |
 | `src/mcp/` | MCP server / transport / tool 注册 | `server.ts`, `transport/index.ts`, `tools/registry.ts`, `tools/skill-*.ts` | 直接读 DB / 存储 |
-| `src/http/` | 路由、中间件、HTTP handler | `router.ts`, `compose.ts`, `middleware/gateway-auth.ts`, `middleware/admin-auth.ts`, `middleware/error-map.ts`, `handlers/admin/*`, `handlers/gateway/*` | 业务逻辑（应转 Service） |
+| `src/auth/` | JWT 签发/验证 | `jwt.service.ts` | 包含业务逻辑（仅签发/验证） |
+| `src/http/` | 路由、中间件、HTTP handler | `router.ts`, `compose.ts`, `middleware/gateway-auth.ts`, `middleware/admin-auth.ts`, `middleware/error-map.ts`, `handlers/admin/*`, `handlers/gateway/*`, `handlers/auth.handler.ts` | 业务逻辑（应转 Service） |
 | `src/services/` | 业务编排：缓存、权限、日志、版本管理 | `skill.service.ts`, `access-log.service.ts` | 暴露 DB 实体类型给上层（当前 SkillMeta 泄漏） |
 | `src/permission/` | 鉴权上下文构建 + 可见性过滤 | `context-builder.ts`, `tag-filter.ts` | 网络 IO 之外的业务逻辑 |
 | `src/provider/` | Skill 数据源抽象 + Local/Remote 实现 + Proxy 指标装饰 | `interface.ts`, `local.provider.ts`, `remote.provider.ts`, `instrument.ts` | 包含权限判断（由 Service 注入） |
@@ -349,7 +350,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 | `skill_versions` | `id` / `skillId` / `version` / `contentHash` / `storagePath` / `fileCount` | `idx_skill_versions_*` | → `skills` CASCADE |
 | `skill_feedbacks` | `id` / `skillId` / `skillSlug` / `outcome` / `context` | `idx_feedbacks_*` | → `skills` CASCADE |
 | `access_logs` | `id` / `skillId` / `skillSlug` / `action` / `latencyMs` | `idx_access_logs_created_at` | → `skills` **❌ 无 CASCADE** |
-| `users` | `id` / `token` UNIQUE / `name` / `status` | `idx_users_token` | — |
+| `users` | `id` / `token` UNIQUE / `name` / `username` UNIQUE(partial) / `password_hash` / `user_type` / `status` | `idx_users_token` / `idx_users_username` | — |
 | `roles` | `id` / `name` UNIQUE / `tags` JSON | — | — |
 | `user_roles` | `id` / `(userId, roleId)` | `idx_user_roles_user_id` | → users, roles CASCADE |
 
@@ -358,7 +359,9 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 - Skill 的物理目录由 `slug` 决定：`STORAGE_BASE_PATH/{slug}/`，`skills.storage_path` 存相对路径。
 - 同名（`name`）冲突 → 默认拒绝；`--overwrite` / `--allow-duplicate` 改变行为。
 - 版本变化由 `contentHash` 驱动，不是手填 version 号。
-- Token 永远以 `sha256(token)` 形式入库，`users.token` 列存的是 hash。
+- Token 永远以 `sha256(token)` 形式入库，`users.token` 列存的是 hash。所有用户都有 opaque API token。
+- `username` + `password_hash` 仅 admin/superadmin 用户需要，用于 JWT 登录。
+- `user_type` 枚举：`"superadmin"` / `"admin"` / `"user"`，默认 `"user"`。
 
 ### 6.3 已知缺陷
 
@@ -376,14 +379,35 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 
 ### 7.2 鉴权与权限
 
+#### 7.2.1 三层用户模型
+
+| 用户类型 | `user_type` | 登录方式 | 操作权限 |
+|----------|------------|---------|---------|
+| 超级管理员 | `"superadmin"` | 用户名+密码 → JWT | 全部管理操作，不可被其他用户修改/删除 |
+| 管理员 | `"admin"` | 用户名+密码 → JWT | 技能/角色管理，不能管管理员 |
+| 普通用户 | `"user"` | API token（无登录） | 仅浏览公开技能、使用 MCP 工具 |
+
+所有用户（包括管理员）都有 opaque API token（用于 MCP 工具调用）。管理员额外拥有 username + password 用于 JWT 登录。
+
+#### 7.2.2 两层权限体系
+
+| 层级 | 判断依据 | 影响范围 |
+|------|---------|---------|
+| 操作权限（硬限制） | `user_type` 字段 | `enforceAdminAuth` 检查能否访问 `/api/admin/*` |
+| 数据可见性（软过滤） | 角色 tags | `TagPermissionFilter` 决定能看到哪些 private 技能 |
+
+`admin:write` / `admin:read` 标签不再用于管理路由门禁，角色标签纯粹用于技能可见性控制。
+
+#### 7.2.3 认证路径
+
 ```
 ┌─ stdio ─→ assertStdioTokenOrExit (启动期) → withFallbackToken (注入 contextBuilder)
+├─ http /api/auth/*    ─→ 无需认证（login / refresh / change-password）
 ├─ http /api/gateway/* ─→ enforceGatewayAuth 中间件 (每请求) → buildRequestContextFromHttp
-└─ http /api/admin/*   ─→ enforceAdminAuth   中间件 (每请求) → buildRequestContextFromHttp + 强制 tags ⊇ {admin:write}
+└─ http /api/admin/*   ─→ enforceAdminAuth 中间件 (每请求) → 检查 user_type ∈ {admin, superadmin}
                                                   ↓
-                                       sha256(token) → users → user_roles → roles.tags → Set<string>
-                                                  ↓
-                                          RequestContext{userId, sessionId, tags, isAuthenticated}
+                          JWT token → verifyJwt → DB 查 userType → RequestContext
+                          Opaque token → sha256 → DB 查找 → RequestContext
                                                   ↓
                                        TagPermissionFilter
                                           ├─ visibility=public   → 任意认证用户
@@ -392,14 +416,37 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 ```
 
 - 仅 `/api/gateway/health` 跳过认证（探针）。
-- `/api/admin/*` 必须携带 Bearer Token，且其聚合 tag 集合必须包含 `admin:write`：
+- `/api/admin/*` 必须携带 Bearer Token，且 `userType` 必须为 `admin` 或 `superadmin`：
   - 无 token → `401 Authentication required`
   - token 无效 / user 已 disabled → `401 Invalid or expired token`
-  - 已认证但缺 `admin:write` → `403 Admin privilege required`
+  - 已认证但 userType 不是 admin/superadmin → `403 Admin privilege required`
   - 通过后 `RequestContext` 注入 `HttpContext.requestContext`
-- 向后兼容逃生口：`SKILL_MCP_ADMIN_AUTH_OPTIONAL=true`（对应 `config.auth.adminAuthOptional`）令 admin 路由匿名放行（伪 `RequestContext{userId:"anonymous-admin", isAuthenticated:false, tags:{admin:write}}`），仅供"原本依赖网络隔离"的旧部署滚动迁移；启用时启动期会打 warn 日志，计划在后续版本移除。
-- API Key 已废弃，全部改为按用户的 Bearer Token。
-- **MCP 传输鉴权直通**（T-738）：HTTP / SSE 两个 MCP 传输在 `handleRequest` / `handlePostMessage` 之前调用 `attachMcpAuthFromHeaders(req)`，把 `Authorization: Bearer …` 桥接到 SDK 约定的 `req.auth.token`。MCP SDK 据此填 `extra.authInfo`，`createContextBuilder` 再走与 HTTP 中间件相同的 `resolveContextForToken` 解析路径。如果不挂这一步，SDK 永远拿到空 `authInfo`，所有 MCP 调用退化 anonymous，多租户隔离失效。
+- handler 层 inline guard：
+  - `requireSuperadmin(rc)` — 创建管理员用户时调用
+  - `assertSuperadminProtected(target, operatorId)` — 修改/删除用户时调用，保护超级管理员
+- **MCP 传输鉴权直通**（T-738）：HTTP / SSE 两个 MCP 传输在 `handleRequest` / `handlePostMessage` 之前调用 `attachMcpAuthFromHeaders(req)`，把 `Authorization: Bearer …` 桥接到 SDK 约定的 `req.auth.token`。
+
+#### 7.2.4 JWT 认证体系
+
+- **签名算法**：HS256（HMAC-SHA256），对称签名
+- **密钥管理**：`AUTH_JWT_SECRET` 环境变量（≥32 字符）；未设置时自动从 `~/.skill-mcp/config.json` 的 `jwt_secret` 字段读取（`init` 时自动生成）；读取优先级：env > config file
+- **Token 生命周期**：access_token 2h，refresh_token 7d，不轮换，靠过期自然失效
+- **Payload**：access_token 含 `{sub, username, user_type, tags, iss, iat, exp}`；refresh_token 含 `{sub, type:"refresh", iss, iat, exp}`
+- **安全设计**：登录错误统一返回 "Invalid credentials" 防用户枚举；登录限流 5次/分钟/IP；密码 bcryptjs (cost=12)
+- **tags 时效性**：access_token 中的 tags 在签发时从 DB 读取，2h 窗口期内可能滞后，refresh 时刷新
+
+#### 7.2.5 CLI 双模式
+
+CLI 管理命令支持本地/远程两种操作模式：
+
+| 模式 | 触发条件 | 行为 |
+|------|---------|------|
+| 本地模式（默认） | `SKILL_MCP_SERVER_URL` 未设置且无 `--server-url` | 直接操作本地 DB |
+| 远程模式 | `SKILL_MCP_SERVER_URL` 或 `--server-url` | 通过 HTTP API 执行 |
+
+优先级：`--server-url` 参数 > `SKILL_MCP_SERVER_URL` 环境变量
+
+本地模式下 `auth login` 直接验证 DB 密码并签发 JWT（无需服务器运行）。远程模式下所有命令通过 `apiCall()` 调用服务器端点。
 
 ### 7.3 缓存
 
@@ -424,7 +471,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 ### 7.4 事件
 
 - `EventBus`（基于 Node EventEmitter）支持 **同步 / 异步两种派发模式**：构造时传 `{ async: true }` 走 `setImmediate(() => dispatch(event))` 推迟到下个 tick，admin 写路径不再阻塞在 listener I/O；默认 sync 保持向后兼容。listener 异常通过 try/catch + `event_listener_errors_total` 计数器隔离（sync/async 两条路径都生效），单个 listener throw 不会断链 sibling listeners（T-303）。`serve-cmd.ts` 在生产装配里使用 `async: true`（P0-B, 2026-05-28）。
-- 事件类型：`skill:created/updated/deleted/imported`、`user:roles_changed`、`role:updated`。
+- 事件类型：`skill:created/updated/deleted/imported`、`user:logged_in`、`user:password_changed`、`user:token_rotated`、`user:roles_changed`、`role:updated`。
 
 ### 7.5 日志与指标
 
@@ -437,37 +484,37 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 - `scanForInjection`（`utils/security.ts`）：10 条正则，扫 manifest 与 SKILL.md。无开关，固定执行。
 - `validateFilePath`：segment-aware 检查，拒绝 `..` 段与绝对路径前缀；合法文件名包含 `..` 子串（如 `foo..bar.md`、`v1..2/notes.md`）通过（T-735）。
 - `isTextFile` / `getMimeType`：白名单扩展名。
-- token 长度上限：1024 字节（**长 JWT 会被拒**，见 9.19）。
+- token 长度上限：4096 字节（见 T-402，已修复）。JWT token 通常 1-3KB，在此范围内。
 - HSTS：`SECURITY_HSTS_ENABLED=true`（对应 `security.hstsEnabled`）才发 `Strict-Transport-Security` 头，默认关闭。仅当前置 TLS 终结器（nginx / ALB / CDN）存在时才打开；纯 HTTP 部署若错误开启会让浏览器把后续 `http://` 强制升级到不存在的 HTTPS（T-737）。
 
 ---
 
 ## 8. 实现细节核对表
 
-逐项确认当前实现是否符合预期。**❌ 表示偏离设计**。
+逐项确认当前实现是否符合预期。
 
 | 模块 | 设计要点 | 是否符合 |
 |---|---|---|
-| 入口 / CLI | commander 默认 serve；stdio 启动期 token 防隐式公开 | ✅；admin 路由仍未补认证 |
-| HTTP | 无框架，手写 regex 路由 | ⚠️ 简洁但无中间件链，handler 散落 try-catch |
-| MCP 工具 | 5 个工具硬编码 + instrument Proxy 包指标 | ✅ 修改 `registry.ts:31-43` 即影响所有工具 |
-| 认证 | sha256(token) → users，roles.tags JSON 聚合到 Set | ✅；token 1024B 上限对长 JWT 不友好 |
-| 权限过滤 | public / internal / private（空 tags = 认证即可见） | ✅ |
-| SkillService | 缓存 key `skill:list:{userId}:g{globalEpoch}:u{userEpoch}`，先权限后缓存；公共出口（`listAccessibleSkills` / `getAccessibleSkillMeta`）返回 `SkillMetaPublic` | ✅ T-302 已修复（2026-05-22） |
+| 入口 / CLI | commander 默认 serve；stdio 启动期 token 防隐式公开 | ✅ |
+| HTTP | 无框架，手写 regex 路由 | ✅ 中间件链已通过 errorMap 实现 |
+| MCP 工具 | 5 个工具硬编码 + instrument Proxy 包指标 | ✅ |
+| 认证 | JWT 登录 + opaque token 双路径；三层用户模型 | ✅ T-004/T-802 (2026-06-23) |
+| 权限过滤 | `user_type` 决定操作权限；角色 tags 决定数据可见性 | ✅ T-004 (2026-06-23) |
+| SkillService | 缓存 key + 先权限后缓存 + SkillMetaPublic DTO | ✅ |
 | LocalProvider | DB 优先 → fallback 遍历存储 | ✅ |
-| RemoteProvider | 重试覆盖 AbortError / TypeError | ❌ HTTP 5xx 不进入重试 |
-| Composite Cache | L1 LRU + L2 文件，read-promotion | ✅；L2 无 GC、LRU 前缀清除 O(n) |
-| CacheSubscriber | skill 变更 → 按 `visibility/tags` 精确 bump epoch（公共/无 tag → global；私有+tag → 仅 tag-交集用户） | ✅ T-102 已修复 |
-| EventBus | EventEmitter，可选 `setImmediate` 异步派发（admin 写路径默认开 `async:true`） | ✅ P0-B (2026-05-28)：异步推迟 + listener 隔离两路径都生效 |
-| 数据库 | Drizzle + better-sqlite3，关系正常 | ⚠️ access_logs 缺 CASCADE；user_roles 缺 role_id 索引；skills.slug UNIQUE+INDEX 重复 |
-| SkillRepository | 含事务，但 findById 后再查 skill_tags | ⚠️ N+1（批量场景需 findByIds） |
-| UserRoleRepository | replaceUserRoles 循环 INSERT | ⚠️ 应改 batch |
-| Importer | staging-commit：`pMap` 写 `__staging__/<importId>/` → `moveDir` 原子提交 → `replaceAll` 单事务写 file 行 | ✅ T-005 (2026-05-22)：`IStorageProvider.moveDir` + try/catch/finally 跨边界补偿；snapshot 失败仍仅 warn（属 9.17，下次专门修） |
-| LocalFsProvider | `join(fullPath, "..")` 取上级目录 | ❌ **bug**：应为 `dirname(fullPath)` |
-| AliyunOss | 分页 list / put / delete | ✅；list 返回路径与 LocalFs 不一致 |
-| Pipeline | YAML + DAG + two-phase | ✅ T-203 (2026-05-22)：`pipeline_runs` 表落库 + JSON 重水合；`condition` / `retry` schema-only 字段删除；表达式支持嵌入式 stringify 拼接 |
-| Migration | drizzle baseline + legacy upgrade | ⚠️ legacy upgrade 缺测试路径 |
-| `src/http/context.ts:3` | 类型导入 | ❌ **路径错误**：`../types/index.js` 应为 `../../types/index.js` |
+| RemoteProvider | 状态码驱动重试 | ✅ T-205 (2026-05-22) |
+| Composite Cache | L1 LRU + L2 文件，GC + epoch 失效 | ✅ T-403/T-102 (2026-05-22) |
+| CacheSubscriber | 按 visibility/tags 精确 bump epoch | ✅ T-102 (2026-05-22) |
+| EventBus | 可选异步派发 + listener 隔离 | ✅ |
+| 数据库 | Drizzle + better-sqlite3，CASCADE + 索引已补 | ✅ T-003/T-602 |
+| SkillRepository | findByIds 批量查询 | ✅ T-204 (2026-05-22) |
+| UserRoleRepository | 批量 INSERT | ✅ T-204 (2026-05-22) |
+| Importer | staging-commit + 原子提交 + 补偿回滚 | ✅ T-005 (2026-05-22) |
+| LocalFsProvider | `dirname(fullPath)` 安全取上级 | ✅ T-002 (2026-05-22) |
+| Pipeline | YAML + DAG + 落库 + 异步推进 | ✅ T-203 (2026-05-22) |
+| Migration | drizzle baseline + 迁移 journal | ✅ |
+| CLI 双模式 | `--server-url` 远程 + 本地 DB 直接操作 | ✅ T-803 (2026-06-23) |
+| JWT 认证 | HS256 + access/refresh + 密钥自动生成 | ✅ T-802 (2026-06-23) |
 
 ---
 
@@ -485,7 +532,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 | 9.2 | `src/storage/local-fs.provider.ts:35` | ✅ 已修复 (2026-05-22)，改用 `dirname(fullPath)` |
 | 9.3 | `src/import/importer.ts:166-214` | ✅ 已修复 (2026-05-22, T-005)：`IStorageProvider.moveDir` + staging-commit 模式 — 文件先落 `__staging__/<importId>/`，DB 写完后由 `moveDir`（local-fs 是 `fs.rename`，OSS 是 copy+delete 循环）原子提交；`SkillFileRepository.replaceAll` 单事务 delete-then-bulk-insert；`try/catch/finally` 失败时按"DB 反向补偿 → 回滚 finalPath（仅 created）→ 永远清 staging"顺序回收，并发导入靠 `randomUUID` staging 隔离；新增 `tests/unit/import/importer-rollback.test.ts` 覆盖 5 条失败注入路径。 |
 | 9.4 | `drizzle/0000_baseline.sql:11` | ✅ 已修复 (2026-05-22)，迁移 0001 重建表加 `ON DELETE CASCADE` |
-| 9.5 | `src/app.ts:284` 周边 | ✅ 已修复 (2026-05-22)，新增 `enforceAdminAuth` 中间件强制 `admin:write` 标签；`SKILL_MCP_ADMIN_AUTH_OPTIONAL=true` 仅作迁移逃生口 |
+| 9.5 | `src/app.ts:284` 周边 | ✅ 已修复 (6b00382, 2026-06-23, T-004/T-805)：三层用户模型 + `enforceAdminAuth` 检查 `userType`；`SKILL_MCP_ADMIN_AUTH_OPTIONAL` 配置已删除 |
 | 9.29 | `src/utils/manifest.ts:46-94` | ✅ 已修复 (995ad70, 2026-05-22, T-601)：`safeJoin(base, child)` + `lstatSync` symlink skip + `MAX_WALK_DEPTH=16` / `MAX_FILES_PER_PACKAGE=1000` / `MAX_BYTES_PER_PACKAGE=50MB` |
 | 9.45 | `src/mcp/server.ts:9-28` + `src/prompt/system-prompt.ts` | ✅ 已修复 (2026-05-26, T-739)：`createMcpServer` 不再调 `skillProvider.listSkills()` 把 published skill 拼进 `instructions`；改为 `buildSkillSystemPrompt()` 静态指引模板，目录发现完全交给 RBAC-aware 的 `skill_list` 工具。修复前匿名 `initialize` 即可枚举所有已发布 skill 的 slug + description（绕过 `TagPermissionFilter`）。回归 +2（unit 重写 + integration `initialize.instructions` 黑盒断言）。 |
 
@@ -659,7 +706,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 | 2026-05-22 | (pending) | BACKLOG 第 1 批落地：第 9 节 9.1（误报关闭）、9.2 / 9.4 / 9.18 / 9.19 / 9.23 / 9.25 标注已修复；9.24 / 9.27 确认已对齐 |
 | 2026-05-22 | (pending) | T-201 落地：错误分类统一 `mapErrorToResponse`，gateway / admin handler 全量切到 `instanceof`；新增 `ConfigurationError` / `VersionNotFoundError` / `BadRequestError` |
 | 2026-05-22 | (pending) | T-205 落地：`RemoteSkillProvider.fetchWithRetry` 改为状态码驱动（4xx 立即失败、429 honor Retry-After、5xx 指数退避 + full jitter，500 仅重试 1 次），导出 `parseRetryAfter`；统一抛 `UpstreamError` |
-| 2026-05-22 | (pending) | T-004 落地：第 7.2 节补 `enforceAdminAuth` 链路；第 9.5 标注已修复；新增 `SKILL_MCP_ADMIN_AUTH_OPTIONAL` 兼容开关与启动期 warn |
+| 2026-05-22 | (pending) | T-004 落地：~~第 7.2 节补 `enforceAdminAuth` 链路；第 9.5 标注已修复；新增 `SKILL_MCP_ADMIN_AUTH_OPTIONAL` 兼容开关与启动期 warn~~ → ✅ 已完成 (6b00382, 2026-06-23)，权限架构重构，adminAuthOptional 已删除 |
 | 2026-05-22 | (pending) | T-101 落地：新增 `src/http/compose.ts` + `errorMap` 中间件；`Router.use()` / `Router.dispatch()` 路由器级中间件；admin / gateway handler throw 域错误由 errorMap 统一翻译；handler 行数 527→372（-29.4%） |
 | 2026-05-22 | (pending) | T-102 落地：新增 `src/cache/cache-epochs.ts`（`CacheEpochManager`：global + per-user epoch）；list 缓存 key `skill:list:{userId}` → `skill:list:{userId}:g{globalEpoch}:u{userEpoch}`；`DomainEvent` skill mutation 扩展 `visibility`+`tags`；subscriber 按 visibility 选择 global bump 或 tag-交集用户精确 bump；list 失效复杂度 O(prefix scan) → O(1)；§7.3 缓存键约定与 §8 Service/CacheSubscriber 实现细节同步更新；§9.6 标注已修复 |
 | 2026-05-22 | (pending) | T-302 落地：`src/types/index.ts` 新增 `SkillMetaPublic = Omit<SkillMeta, "storagePath" \| "contentHash">` 与 `toSkillMetaPublic`；`SkillService.listAccessibleSkills` / `getAccessibleSkillMeta` 与 list 缓存改为返回/存储 DTO；admin handler 出口（list / find-by-name / find-by-slug / put）一律映射；§8 SkillService 行更新、§9.16 标注已修复、§10 路线图条目 10 标注已完成 |
@@ -694,6 +741,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 | 2026-05-26 | (pending) | 第 19 批 MCP 传输鉴权直通修复 T-738：E2E 黑盒发现 HTTP / SSE MCP 传输从不把 `Authorization: Bearer` 头桥接到 `req.auth.token`，SDK `StreamableHTTPServerTransport.handleRequest` / `SSEServerTransport.handlePostMessage` 因此始终注入空 `extra.authInfo`，所有 MCP 调用退化为 anonymous，`TagPermissionFilter` 把私有 + 带 tag 的 skill 全部滤掉（同一 token 走 `/api/gateway/skills` 能看到 skill，走 `/mcp` 看不到，多租户隔离失效）。本批新增 `attachMcpAuthFromHeaders(req)` helper（`extractBearerToken` 派生 + idempotent 保护已预设 `req.auth`），在两个传输 `handleRequest` / `handlePostMessage` 调用之前各执行一次。新增 5 用例覆盖成功 / 缺头 / Basic 头 / 已预设 / 数组头取首项；黑盒 E2E 复测 `bob` 通过 `/mcp` 也能看到自己 tag 命中的 skill，匿名仍空表。回归 441 → 446 passed。 |
 | 2026-05-26 | (pending) | 第 19 批补丁 T-738r：补 T-738 端到端回归守卫——`tests/integration/mcp-transport-auth.test.ts` 起 `node dist/index.js serve` 真实进程（http 与 sse 各一份，共享 DB / storage），seed `private` skill + role tag，断言 ① Streamable HTTP `/mcp` JSON-RPC `initialize` + `tools/call skill_list`：bearer 看得见、anon 看不见；② SSE `/mcp/sse` + `/mcp/messages`：GET 拿 sessionId、POST JSON-RPC、从 SSE 流按 id 配对 server-pushed reply、断言同上。`tests/integration/_helpers.ts:spawnHttpServer` 增加 `transport: "http" \| "sse"` 形参（原本硬编码 http）。回归 446 → 450 passed（+4 集成）；唯一一个 flake 是 T-703 既有时序断言在并发跑测时偶发越界，单跑稳定。 |
 | 2026-05-26 | (pending) | 第 20 批审计加固 T-739：MCP `initialize.result.instructions` 绕过 RBAC 泄露私有技能元数据。`src/mcp/server.ts` 删去 `skillProvider.listSkills()` 调用（该调用拼 `<available_skills>` 块写进 instructions，匿名 `initialize` 即可枚举所有 published skill 的 slug + description）；`src/prompt/system-prompt.ts:buildSkillSystemPrompt` 改为无参纯静态指引模板，引导模型先调 RBAC-aware 的 `skill_list` 工具做目录发现。`tests/unit/prompt/system-prompt.test.ts` 重写 3 用例显式断言不含 `<available_skills>` / 任何 slug；`tests/integration/mcp-transport-auth.test.ts` 加 2 条 `initialize.result.instructions` 黑盒断言（匿名 + 持有 token 两种入口）。回归 450 → 452 passed；§9 加 §9.45 索引一行。 |
+| 2026-06-23 | `6b00382`, `01b63ba` | **权限架构重构**：三层用户模型（superadmin / admin / user）+ JWT 认证体系 + CLI 双模式 + OIDC 清理。新增 `jwt.service.ts`、`auth.handler.ts`、`auth-cmd.ts`、`init-cmd.ts`、`remote-client.ts`、`local-config.ts`；删除 6 个 OIDC 源文件 + 8 个 OIDC 测试文件；`enforceAdminAuth` 改用 `userType` 检查；`TagPermissionFilter.isAdmin()` 改用 `userType`；所有 CLI 命令支持 `--server-url` 远程模式；`adminAuthOptional` 配置删除；第 7.2 节、第 3 节模块清单、第 9 节 T-004 标注已修复同步更新。 |
 | 2026-05-27 | (pending) | 核心业务+RBAC 测试覆盖补齐：上一轮覆盖审计发现 `src/pipeline/parser.ts` / `src/pipeline/dag.ts` / `src/db/repositories/{skill-feedback,skill-version,skill-file,user,role}.repository.ts` / `src/services/access-log.service.ts` / `src/events/event-bus.ts` 9 个核心文件无直接单测——业务关键路径（YAML 解析 / DAG 调度 / RBAC primitives / 反馈表 LIMIT 1000 backstop / 版本回滚 / 文件原子替换 / 事件总线隔离）只通过 service / E2E 间接覆盖。本批新增 9 个单测文件 (`tests/unit/pipeline/{parser,dag}.test.ts`, `tests/unit/db/{skill-feedback,skill-version,skill-file,user,role}-repository.test.ts`, `tests/unit/services/access-log-service.test.ts`, `tests/unit/events/event-bus.test.ts`) 共 82 用例：①parser 13 用例覆盖空对象 / 缺名 / 缺 stages / 缺 skill·outputs·inputs / 非 string output 项 / 弃用 `condition`+`retry` 警告 (T-203) / `inputs.type` 缺省 / YAML 解析错误包裹；②DAG 8 用例覆盖单 batch 并行 / 链式分层 / 钻石图同 batch / 2-cycle·self-loop·3-cycle 检测 / 未知依赖 / 空图；③feedback 10 用例覆盖 create 全字段 / undefined→null 强制 / DESC 序 / `days` 窗口 / **默认 `LIMIT 1000` (T-713 backstop)** / 显式 limit 放大 / slug 隔离 / `getEffectivenessRates` `success+partial` 计入分子 / `days` 窗口聚合；④version 9 用例覆盖 create 默认与可选字段 / `findBySkillId` 新到旧序与 limit / `findByVersion` 命中与未命中（rollback 路径）/ `count` 隔离 / `deleteOldVersions` 保留 N 与 no-op / FK cascade；⑤skill-file 7 用例覆盖 `replaceAll` 原子替换 / 空数组清空 / `deleteBySkillId` 隔离 / FK cascade / 非法 skillId FK 异常；⑥user 12 用例覆盖 token UNIQUE / `updateToken` 旋转 / `delete` 幂等 / status 切换 / partial update 保留字段；⑦role 14 用例覆盖 tags JSON 序列化 / `findByIds` 空输入与 partial / **T-712 corrupt JSON 降级 + `roleTagsParseErrors` 计数器**（含 corrupt 字符串 / 非数组对象 / 混合类型过滤三种）；⑧access-log service 2 用例覆盖 happy path 委派 + repo 错误吞噬不抛（best-effort 审计契约）；⑨event-bus 7 用例覆盖类型隔离 / payload 透传 / **同步 listener throw 隔离 + `eventListenerErrors` 计数 (T-303)** / 异步 reject 隔离 / 多订阅者 / 空订阅 no-op。全量回归 452 → 534 passed (+82, +18%)。 |
 | 2026-05-27 | (pending) | 第二批测试覆盖补齐（HTTP handler / 横切 / 工具）：上一批落定核心业务+RBAC 后审计仍剩 9 个未直测文件，全部覆盖完毕。新增 9 个单测文件 (`tests/unit/db/access-log-repository.test.ts`, `tests/unit/http/{request-id,gateway-skills-handler,admin-users-handler,admin-roles-handler,admin-skills-handler}.test.ts`, `tests/unit/import/local-source.test.ts`, `tests/unit/provider/instrument.test.ts`, `tests/unit/mcp/tools-schema.test.ts`) 共 98 用例：①access-log repo 8 用例覆盖 create JSON 序列化 / NULL 路径 / `findBySkill` round-trip 与 limit / 空命中 / **T-716 行级 JSON 降级（损坏字符串 / 非数组对象 / 混合类型过滤）**；②request-id 4 用例覆盖入站头透传 / 缺省 UUID 生成 / 多次调用独立 / 不污染其它响应头；③gateway skills handler 12 用例覆盖 health / 列表分页+`attributes.*` 过滤 / 列表无 attributes 短路 / `:identifier` 同时接受 slug 与 UUID / 非法 identifier 走 errorMap 翻译 400 / `:slug/entry` 文本 markdown 头 / `:slug/files` `requireFilePaths` 校验（非数组、空数组都 400）/ `:slug/file-tree` 与不安全 slug；④admin users handler 13 用例覆盖依赖缺失短路 / GET list / **POST 生成 `sk-live-${24hex}` token，DB 持久化 SHA-256 哈希、201 仅返回明文** / `role_ids` 缺省跳过 replace / GET `:userId` 404 与聚合 tag·roles / PUT 字段更新 / DELETE 顺序保证（cascade `user_roles` 早于 `users.delete`）/ PUT `:userId/roles` 发布 `user:roles_changed`，404 不发布；⑤admin roles handler 8 用例覆盖依赖缺失短路 / list / POST 必填校验 / GET 404 / PUT 发布 `role:updated` 携 `affectedUserIds`（T-731）；⑥admin skills handler 19 用例覆盖 list 分页与 `toSkillMetaPublic` 投影（不漏 `storagePath`/`contentHash`）/ effectiveness-report 4 档分类（well/needs-attention/deprecate/insufficient）/ `name/:name` / `:slug` 404·400 / **DELETE 顺序保证（storage.deleteDir 早于 skillRepo.delete）** + 发布 `skill:deleted` / entry text/markdown / files 与 file-tree / POST multipart 拒绝 / POST 缺 source 400 / POST importer 选项归一化 / logs 缺 `skill_slug` 400 + limit cap 200 / stats / versions 限制透传 / rollback 缺 version 400 + 成功后发布 `skill:updated`；⑦local-source 7 用例覆盖目录解析 + nested files / 缺目录抛 `Directory not found` / `parseSkillMeta` 同步守卫 / 缺 SKILL.md / 缺 name；⑧provider instrument (T-101) 6 用例覆盖参数透传 / async ok+error 计数 / sync throw 计数 / 非函数属性透传 / sync 返回值；⑨MCP tools schema 21 用例覆盖 skill_list tags 数组校验·空兜底 / skill_view id 优先 slug·错误翻译 / skill_file 必填+text/image 区分 / **skill_feedback T-727 三档长度上限（slug 255 / context 2000 / agent_comment 8000） + outcome enum**。全量回归 534 → 632 passed (+98, +18%)。 |
 | 2026-05-27 | (pending) | 第三批测试覆盖补齐（横切工具 / Provider / CLI UI / DB 基础设施）：审计剩余无直测文件，覆盖到这一批后核心 src 文件已全部有直接单测。新增 5 个单测文件 (`tests/unit/utils/logger.test.ts`, `tests/unit/cli/ui.test.ts`, `tests/unit/db/connection.test.ts`, `tests/unit/mcp/server.test.ts`, `tests/unit/provider/local-provider.test.ts`) 共 39 用例：①logger 6 用例覆盖 `createLogger` 显式 level / `LOG_LEVEL` 环境变量 / 默认 `info` / production 分支不抛 / `getLogger` 单例 / `setLogger` 替换；②cli/ui 10 用例覆盖 `c.*` 颜色辅助函数 / `truncate` 去引号+省略号 / `sep` 分隔行 / `badge` 三档状态 / `kv` / `fmtDate` ISO→`YYYY-MM-DD HH:MM` / `detail` / `list` / `ok·warn` 走 stdout、`fail` 走 stderr / `infoBox` 标题+键值对+空数组守卫；③db/connection 6 用例覆盖父目录自动创建 / 同路径单例 / 路径切换重新连接 / `createDatabase` 强制重开 / `closeDatabase` 幂等 / WAL+`foreign_keys` pragma 启用断言；④mcp/server 3 用例覆盖默认 `name="skill-mcp" version="0.0.1"` / 自定义参数透传 / tools 注册（skill_list·view·file 全部存在）；⑤local.provider 14 用例覆盖 listSkills 强制 `published` 过滤+category·tags 透传 / `getSkillMeta`·`getSkillMetaById` 委派 / `skillExists` / `getSkillEntry` SkillNotFoundError·缓存命中复用·storage null 抛错 / `getSkillFiles` text 走 utf-8、binary 走 base64+mime、仅 text 缓存、unknown slug、storage miss、路径穿越拒绝 / `getSkillFileTree` DB 优先返回 + 空回退到 storage walk + unknown slug。全量回归 632 → 671 passed (+39, +6%)。 |

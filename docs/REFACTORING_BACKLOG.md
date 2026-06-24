@@ -159,24 +159,15 @@
 
 ### T-004 admin 路由补强鉴权
 
-- **状态**：✅ 已完成 (2026-05-22)：新增 `src/http/middleware/admin-auth.ts`（`enforceAdminAuth` + `ADMIN_WRITE_TAG="admin:write"`）；`src/app.ts` admin 路由分支前置该中间件，401（无 token）/ 401（无效 token）/ 403（缺 admin:write）/ 200（带 admin:write）四态闭环；`config.auth.adminAuthOptional`（env: `SKILL_MCP_ADMIN_AUTH_OPTIONAL`）做向后兼容逃生口，默认 `false`，启用时启动期 `logger.warn` 提示 deprecation；新增 `tests/unit/http/admin-auth.test.ts`（7 用例覆盖验收 1-4 + authOptional bypass + 缺仓库 500 + x-session-id）；不另引入 admin 角色 fixture，由现有 `skill-mcp role create --tags admin:write` + `user role assign` 组合即可发放，README 后续补充。第 5 条 CLI 一键发 admin 标志暂未做（不阻断验收，已记录到 README sync 待办）。
-- ~~**状态**：⬜ 未开始~~
+- **状态**：✅ 已完成 (6b00382, 2026-06-23)
 - **优先级**：🔴 高危
-- **位置**：
-  - `src/app.ts:280-288`（admin 路由分支无 enforceGatewayAuth）
-  - `src/http/handlers/admin/*.handler.ts`（所有 handler 假设调用方已授权）
-- **问题**：`/api/admin/*` 完全不鉴权，仅依赖部署时的网络隔离（k8s NetworkPolicy / 内网防火墙）。代码层面无任何保护。一旦部署配置失误（误把 admin 端口暴露到公网），即可被任意调用方创建/删除 skill、用户、角色。Gateway 路由 `/api/gateway/*` 已经在 `gateway-auth` 中间件强制 Bearer 校验，admin 应同等或更严格。
-- **影响**：高 — 安全风险。
-- **修复方案**：
-  1. 引入 `admin` 角色（约定：role 名 `admin`，tags 包含 `admin:write`）。
-  2. 新增 `src/http/middleware/admin-auth.ts`：复用 `extractBearerToken` + `buildRequestContextFromHttp`，但要求 `ctx.tags.has("admin:write")`，否则 403。
-  3. 在 `src/app.ts` admin 路由分支前置该中间件。
-  4. 仅 `GET /api/admin/health` 类探针放行（如果有的话）。
-  5. 增加 `--allow-anonymous-admin` CLI 标志或 `ADMIN_AUTH_OPTIONAL=true` 环境变量做向后兼容（**默认关闭**），并在 README 标注 deprecated。
+- **问题**：`/api/admin/*` 完全不鉴权，仅依赖部署时的网络隔离。
+- **修复方案**：三层用户模型（superadmin/admin/user）+ `enforceAdminAuth` 检查 `userType` + handler 内 `requireSuperadmin` / `assertSuperadminProtected` inline guard + 删除 `adminAuthOptional` + 删除 OIDC + 新增 JWT 认证体系 + CLI `--server-url` 远程模式。详见 `docs/ARCHITECTURE.md` 第 7.2 节。
 - **验收标准**：
-  1. 不带 token 请求 `/api/admin/skills` → 401。
-  2. 普通用户 token 请求 → 403。
-  3. 带 admin 标签的 token → 200。
+  1. 不带 token 请求 `/api/admin/skills` → 401
+  2. 普通用户 token 请求 → 403
+  3. admin userType → 200
+  4. `skill-mcp user create --user-type admin` 需 superadmin 登录
   4. 单测：`tests/unit/http/admin-auth.test.ts` 覆盖以上三种。
   5. CLI `skill-mcp user create --admin` 一键发 admin token（或文档说明如何配 role）。
   6. 更新 `docs/ARCHITECTURE.md` 第 7.2 节说明 admin 鉴权。
@@ -1515,6 +1506,23 @@
 | T-606 | `src/provider/remote.provider.ts` | T-605 引入 zod 边界校验时把 `storagePath`/`contentHash` 列为必填，但 `/api/gateway/skills*` 返回的是 `SkillMetaPublic`（裁剪过这两字段），导致 gateway 模式 502。修复：boundary schema 与公共 DTO 对齐，返回处 `as unknown as SkillMeta[]` 走双重断言；scenario-b 9/9 集成测试恢复。|
 
 回归：`npm run build` ✓；`npm test` 386 passed / 0 skipped。
+
+---
+
+### 2026-06-23 权限架构重构
+
+| ID | 范围 | 关键改动 |
+|---|---|---|
+| T-801 | OIDC 清理 | 删除 6 个 OIDC 源文件 + 8 个测试文件，清除所有 OIDC 引用（`oidc-verifier.ts`、`oidc-provisioner.ts`、`jwks-provider.ts`、oidc repositories、oidc handler） |
+| T-802 | JWT 认证体系 | 新增 `jwt.service.ts`（signAccessToken / signRefreshToken / verifyJwt / looksLikeJwt）、`auth.handler.ts`（login / refresh / change-password）、`auth-cmd.ts`（CLI 认证命令）、`init-cmd.ts`（系统初始化） |
+| T-803 | CLI 远程模式 | 新增 `remote-client.ts`（apiCall / uploadFile）、`local-config.ts`（配置读写）；所有 CLI 命令支持 `--server-url` 远程模式；`cli/index.ts` 全局 serverUrl 传递 |
+| T-804 | 三层用户模型 | `users` 表新增 `username`、`password_hash`、`user_type` 列；`UserEntity` 新增对应字段；`findByUsername()`、`updatePassword()` 方法 |
+| T-805 | adminAuthOptional 清理 | 删除 `SKILL_MCP_ADMIN_AUTH_OPTIONAL` 配置项、启动警告代码、测试 fixtures 中的引用 |
+| T-806 | 权限守卫 | `enforceAdminAuth` 改用 `userType` 检查；新增 `requireSuperadmin`、`assertSuperadminProtected`；handler 内 inline guard |
+| T-807 | TagPermissionFilter | `isAdmin()` 改用 `userType` 判断，`ADMIN_TAGS` 常量删除 |
+| T-004 | admin 路由补强鉴权 | 完整重构（见主列表） |
+
+回归：`npm run build` ✓；`npm test` 142 passed / 0 skipped。
 
 ---
 
