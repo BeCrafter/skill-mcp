@@ -78,27 +78,43 @@ export async function roleCreateAction(opts: { name: string; description?: strin
 
   if (serverUrl) {
     const creds = readCredentials()!;
-    const role = await apiCall<{ id: string; name: string; description: string | null; tags: string[] }>(
-      serverUrl, "POST", "/api/admin/roles", { body: { name: opts.name, description: opts.description, tags: opts.tags }, credentials: creds },
-    );
-    ok(`Role created: ${c.bold(role.name)}`);
-    console.log(kv("id", c.dim(role.id)));
-    console.log(kv("tags", role.tags?.join(", ") || c.dim("(none)")));
+    try {
+      const role = await apiCall<{ id: string; name: string; description: string | null; tags: string[] }>(
+        serverUrl, "POST", "/api/admin/roles", { body: { name: opts.name, description: opts.description, tags: opts.tags }, credentials: creds },
+      );
+      ok(`Role created: ${c.bold(role.name)}`);
+      console.log(kv("id", c.dim(role.id)));
+      console.log(kv("tags", role.tags?.join(", ") || c.dim("(none)")));
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("UNIQUE")) {
+        fail(`Role "${opts.name}" already exists`);
+      } else {
+        throw err;
+      }
+    }
     return;
   }
 
   // Local mode
   const { roleRepo } = initRepos();
-  const role = await roleRepo.create(opts);
+  try {
+    const role = await roleRepo.create(opts);
 
-  console.log(section("role created", undefined, kvWidth(12, c.dim(role.id), role.name, role.description ?? "(none)", role.tags.join(", "))));
-  console.log();
-  console.log(kv("id", c.dim(role.id)));
-  console.log(kv("name", role.name));
-  console.log(kv("description", role.description ?? c.dim("(none)")));
-  console.log(kv("tags", role.tags.join(", ") || c.dim("(none)")));
+    console.log(section("role created", undefined, kvWidth(12, c.dim(role.id), role.name, role.description ?? "(none)", role.tags.join(", "))));
+    console.log();
+    console.log(kv("id", c.dim(role.id)));
+    console.log(kv("name", role.name));
+    console.log(kv("description", role.description ?? c.dim("(none)")));
+    console.log(kv("tags", role.tags.join(", ") || c.dim("(none)")));
 
-  console.log();
+    console.log();
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("UNIQUE")) {
+      fail(`Role "${opts.name}" already exists`);
+    } else {
+      throw err;
+    }
+  }
   closeDatabase();
 }
 

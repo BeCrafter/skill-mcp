@@ -5,6 +5,7 @@ import { registerAdminSkillRoutes } from "@/http/handlers/admin/skills.handler.j
 import type { HttpContext } from "@/http/context.js";
 import type { AppDependencies } from "@/app-dependencies.js";
 import { SkillNotFoundError } from "@/utils/errors.js";
+import { IllegalTransitionError } from "@/services/skill-lifecycle.js";
 
 function makeRes() {
   let body = "";
@@ -319,7 +320,6 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
 
     it("POST /api/admin/skills/:slug/publish returns 409 when service throws IllegalTransitionError", async () => {
       const { router, skillService } = setup();
-      const { IllegalTransitionError } = await import("@/services/skill.service.js");
       skillService.adminTransitionLifecycle = vi.fn().mockRejectedValue(new IllegalTransitionError("archived", "published"));
       const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams(), {});
       await router.dispatch(ctx);

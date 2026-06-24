@@ -112,25 +112,6 @@ describe("AliyunOssProvider", () => {
     });
   });
 
-  describe("exists", () => {
-    it("should return true when file exists", async () => {
-      mockClient.head.mockResolvedValue({});
-
-      const result = await provider.exists("exists.txt");
-
-      expect(result).toBe(true);
-      expect(mockClient.head).toHaveBeenCalledWith("exists.txt");
-    });
-
-    it("should return false for any error", async () => {
-      mockClient.head.mockRejectedValue({ code: "NoSuchKey" });
-
-      const result = await provider.exists("nonexistent.txt");
-
-      expect(result).toBe(false);
-    });
-  });
-
   describe("put", () => {
     it("should put buffer to OSS", async () => {
       mockClient.put.mockResolvedValue({});
@@ -251,78 +232,6 @@ describe("AliyunOssProvider", () => {
     });
   });
 
-  describe("list", () => {
-    it("should list immediate children under prefix", async () => {
-      mockClient.list.mockResolvedValue({
-        objects: [
-          { name: "skills/file1.txt" },
-          { name: "skills/file2.txt" },
-          // Note: OSS with delimiter "/" would filter out subdir objects
-          // This is a simplified test assuming OSS returns correct results
-        ],
-        nextMarker: undefined,
-      });
-
-      const result = await provider.list("skills");
-
-      expect(result).toHaveLength(2);
-      expect(result).toContain("skills/file1.txt");
-      expect(result).toContain("skills/file2.txt");
-    });
-
-    it("should return empty array for non-existent prefix", async () => {
-      mockClient.list.mockResolvedValue({
-        objects: undefined,
-      });
-
-      const result = await provider.list("nonexistent");
-
-      expect(result).toEqual([]);
-    });
-
-    it("should use delimiter to get immediate children only", async () => {
-      mockClient.list.mockResolvedValue({
-        objects: [],
-      });
-
-      await provider.list("skills");
-
-      expect(mockClient.list).toHaveBeenCalledWith(
-        { prefix: "skills", delimiter: "/", marker: undefined, "max-keys": 1000 },
-        {}
-      );
-    });
-
-    // T-706 — paginate through nextMarker; legacy single-page implementation
-    // silently truncated callers when a prefix had > 1000 entries.
-    it("should follow nextMarker across multiple pages", async () => {
-      mockClient.list
-        .mockResolvedValueOnce({
-          objects: [{ name: "skills/p1-a.txt" }, { name: "skills/p1-b.txt" }],
-          nextMarker: "page-2-cursor",
-        })
-        .mockResolvedValueOnce({
-          objects: [{ name: "skills/p2-a.txt" }],
-          nextMarker: undefined,
-        });
-
-      const result = await provider.list("skills");
-
-      expect(result).toEqual(["skills/p1-a.txt", "skills/p1-b.txt", "skills/p2-a.txt"]);
-      expect(mockClient.list).toHaveBeenCalledTimes(2);
-      expect(mockClient.list).toHaveBeenNthCalledWith(
-        1,
-        { prefix: "skills", delimiter: "/", marker: undefined, "max-keys": 1000 },
-        {},
-      );
-      expect(mockClient.list).toHaveBeenNthCalledWith(
-        2,
-        { prefix: "skills", delimiter: "/", marker: "page-2-cursor", "max-keys": 1000 },
-        {},
-      );
-    });
-  });
-
   describe("listRecursive", () => {
     it("should list all files recursively", async () => {
       mockClient.list.mockResolvedValue({
@@ -394,42 +303,6 @@ describe("AliyunOssProvider", () => {
         { prefix: "dir/", marker: undefined, "max-keys": 1000 },
         {}
       );
-    });
-  });
-
-  describe("isDirectory", () => {
-    it("should return true when prefix has objects", async () => {
-      mockClient.list.mockResolvedValue({
-        objects: [{ name: "dir/file.txt" }],
-      });
-
-      const result = await provider.isDirectory("dir");
-
-      expect(result).toBe(true);
-      expect(mockClient.list).toHaveBeenCalledWith(
-        { prefix: "dir/", "max-keys": 1 },
-        {}
-      );
-    });
-
-    it("should return false when prefix has no objects", async () => {
-      mockClient.list.mockResolvedValue({
-        objects: [],
-      });
-
-      const result = await provider.isDirectory("empty");
-
-      expect(result).toBe(false);
-    });
-
-    it("should return false when objects is undefined", async () => {
-      mockClient.list.mockResolvedValue({
-        objects: undefined,
-      });
-
-      const result = await provider.isDirectory("empty");
-
-      expect(result).toBe(false);
     });
   });
 

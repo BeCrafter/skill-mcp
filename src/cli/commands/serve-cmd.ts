@@ -13,7 +13,7 @@ import { SkillService } from "../../services/skill.service.js";
 import { SkillSearchService } from "../../services/skill-search.service.js";
 import { AccessLogService } from "../../services/access-log.service.js";
 import { createMcpServer } from "../../mcp/server.js";
-import { createTransport } from "../../mcp/transport/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createApp } from "../../app.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { SkillFileRepository } from "../../db/repositories/skill-file.repository.js";
@@ -167,7 +167,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // invalidation latency (see review §3.2). Listener errors still go
   // through the same try/catch isolation as in sync mode.
   const eventBus = new DomainEventBus({ async: true });
-  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo, usageMeter, evalRepo);
+  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo, usageMeter, evalRepo, config.security.enableInjectionScan);
   // P1-11 stages 2b + 3 — in-process BM25 retrieval, plus optional cosine
   // sidecar when an embedding provider is configured. Initialised after
   // the repo is hydrated so the first import / view sees a populated
@@ -225,7 +225,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
     await assertStdioTokenOrExit(stdioToken, { userRepo, skillRepo, logger });
     const stdioContextBuilder = withFallbackToken(contextBuilder, stdioToken);
     stdioMcpServer = await createMcpServer(skillService, skillProvider, config.app.name, config.app.version, stdioContextBuilder, pipelineRunStore, usageMeter);
-    const { transport } = createTransport({ type: "stdio" });
+    const transport = new StdioServerTransport();
     await stdioMcpServer.connect(transport);
   } else {
     // SSE or Streamable HTTP: handled by raw Node.js HTTP server

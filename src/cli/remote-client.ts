@@ -10,13 +10,6 @@ export function getServerUrl(opts: { serverUrl?: string } = {}): string | null {
 }
 
 /**
- * Check if CLI should operate in remote mode.
- */
-export function isRemoteMode(opts: { serverUrl?: string } = {}): boolean {
-  return getServerUrl(opts) !== null;
-}
-
-/**
  * Make an authenticated HTTP API call to the server.
  */
 export async function apiCall<T>(

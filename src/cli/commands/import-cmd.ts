@@ -107,7 +107,7 @@ export async function importAction(
   const cacheEpochs = new CacheEpochManager();
   setupCacheSubscribers(eventBus, cache, cacheEpochs);
 
-  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo, undefined, evalRepo);
+  const importer = new SkillImporter(storage, skillRepo, skillFileRepo, cache, logger, eventBus, versionRepo, undefined, evalRepo, config.security.enableInjectionScan);
 
   try {
     const r = await importer.import(source, options);

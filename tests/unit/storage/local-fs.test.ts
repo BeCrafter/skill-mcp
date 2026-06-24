@@ -31,16 +31,10 @@ describe("LocalFileSystemProvider", () => {
     expect(result).toBeNull();
   });
 
-  it("should check file existence", async () => {
-    await provider.put("exists.txt", Buffer.from("data"));
-    expect(await provider.exists("exists.txt")).toBe(true);
-    expect(await provider.exists("nope.txt")).toBe(false);
-  });
-
   it("should delete a file", async () => {
     await provider.put("to-delete.txt", Buffer.from("data"));
     await provider.delete("to-delete.txt");
-    expect(await provider.exists("to-delete.txt")).toBe(false);
+    expect(await provider.get("to-delete.txt")).toBeNull();
   });
 
   it("should not throw when deleting non-existent file", async () => {
@@ -53,23 +47,8 @@ describe("LocalFileSystemProvider", () => {
     await provider.put("dir/sub/c.txt", Buffer.from("c"));
 
     await provider.deleteDir("dir");
-    expect(await provider.exists("dir/a.txt")).toBe(false);
-    expect(await provider.exists("dir/sub/b.txt")).toBe(false);
-  });
-
-  it("should list files in a directory", async () => {
-    await provider.put("list/file1.txt", Buffer.from("a"));
-    await provider.put("list/file2.txt", Buffer.from("b"));
-
-    const files = await provider.list("list");
-    expect(files).toHaveLength(2);
-    expect(files).toContain("list/file1.txt");
-    expect(files).toContain("list/file2.txt");
-  });
-
-  it("should return empty array for non-existent directory", async () => {
-    const files = await provider.list("nonexistent");
-    expect(files).toEqual([]);
+    expect(await provider.get("dir/a.txt")).toBeNull();
+    expect(await provider.get("dir/sub/b.txt")).toBeNull();
   });
 
   it("should get file size", async () => {

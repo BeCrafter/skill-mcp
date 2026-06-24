@@ -44,7 +44,7 @@ export function registerAuthRoutes(router: Router, deps: AppDependencies): void 
 
     const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
 
-    const accessToken = signAccessToken({
+    const accessToken = await signAccessToken({
       userId: user.id,
       username: user.username ?? "",
       userType: user.userType,
@@ -54,7 +54,7 @@ export function registerAuthRoutes(router: Router, deps: AppDependencies): void 
       issuer: jwtIssuer,
     });
 
-    const refreshToken = signRefreshToken({
+    const refreshToken = await signRefreshToken({
       userId: user.id,
       secret: jwtSecret,
       expiresInSec: refreshExpiresIn,
@@ -91,7 +91,7 @@ export function registerAuthRoutes(router: Router, deps: AppDependencies): void 
 
     let payload: JwtPayload;
     try {
-      payload = verifyJwt(data.refresh_token, jwtSecret, jwtIssuer);
+      payload = await verifyJwt(data.refresh_token, jwtSecret, jwtIssuer);
     } catch (err) {
       logger.warn({ err }, "Refresh token verification failed");
       throw new AppError("Invalid or expired refresh token", "INVALID_REFRESH_TOKEN", 401);
@@ -108,7 +108,7 @@ export function registerAuthRoutes(router: Router, deps: AppDependencies): void 
 
     const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
 
-    const accessToken = signAccessToken({
+    const accessToken = await signAccessToken({
       userId: user.id,
       username: user.username ?? "",
       userType: user.userType,
@@ -136,7 +136,7 @@ export function registerAuthRoutes(router: Router, deps: AppDependencies): void 
 
     let payload: JwtPayload;
     try {
-      payload = verifyJwt(token, jwtSecret, jwtIssuer);
+      payload = await verifyJwt(token, jwtSecret, jwtIssuer);
     } catch {
       throw new AppError("Authentication required", "AUTH_REQUIRED", 401);
     }

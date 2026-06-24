@@ -50,8 +50,11 @@ export async function loginAction(opts: { serverUrl?: string } = {}): Promise<vo
     new Promise((resolve) => { rl.question(prompt, (answer) => resolve(answer)); });
 
   const username = await question("Username: ");
-  const password = await question("Password: ");
+
+  // Password input with masking (no echo)
   rl.close();
+  process.stderr.write("Password: ");
+  const password = await readPassword();
   process.stderr.write("\n");
 
   const serverUrl = getServerUrl(opts);
@@ -60,6 +63,49 @@ export async function loginAction(opts: { serverUrl?: string } = {}): Promise<vo
   } else {
     await loginViaLocal(username, password);
   }
+}
+
+/** Read password from stdin with masked output (prints * for each character) */
+function readPassword(): Promise<string> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+
+    if (stdin.isTTY) {
+      stdin.setRawMode(true);
+    }
+    stdin.resume();
+    stdin.setEncoding("utf-8");
+
+    let password = "";
+
+    const onData = (char: string) => {
+      if (char === "\n" || char === "\r" || char === "") {
+        // Enter or Ctrl+D — finish
+        if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
+        stdin.pause();
+        stdin.removeListener("data", onData);
+        resolve(password);
+      } else if (char === "") {
+        // Ctrl+C — abort
+        if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
+        stdin.pause();
+        stdin.removeListener("data", onData);
+        process.exit(130);
+      } else if (char === "" || char === "\b") {
+        // Backspace
+        if (password.length > 0) {
+          password = password.slice(0, -1);
+          process.stderr.write("\b \b");
+        }
+      } else {
+        password += char;
+        process.stderr.write("*");
+      }
+    };
+
+    stdin.on("data", onData);
+  });
 }
 
 /** Local mode: verify password against local DB, sign JWT locally */
@@ -101,11 +147,11 @@ async function loginViaLocal(username: string, password: string): Promise<void> 
   const accessExpiresIn = config.auth?.jwt?.accessExpiresIn ?? 7200;
   const refreshExpiresIn = config.auth?.jwt?.refreshExpiresIn ?? 604800;
 
-  const accessToken = signAccessToken({
+  const accessToken = await signAccessToken({
     userId: user.id, username: user.username ?? "", userType: user.userType,
     tags, secret: jwtSecret, expiresInSec: accessExpiresIn, issuer: jwtIssuer,
   });
-  const refreshToken = signRefreshToken({
+  const refreshToken = await signRefreshToken({
     userId: user.id, secret: jwtSecret, expiresInSec: refreshExpiresIn, issuer: jwtIssuer,
   });
 
@@ -177,7 +223,7 @@ export async function whoamiAction(): Promise<void> {
   // Try to read from JWT if not expired
   if (!expired) {
     try {
-      const payload = verifyJwt(creds.accessToken, config.auth?.jwt?.secret ?? "", jwtIssuer);
+      const payload = await verifyJwt(creds.accessToken, config.auth?.jwt?.secret ?? "", jwtIssuer);
       username = payload.username ?? username;
       userType = payload.user_type ?? userType;
     } catch {

@@ -37,7 +37,7 @@ async function resolveContextForToken(
     // JWT path: local HMAC-SHA256 verification
     if (looksLikeJwt(token) && jwtSecret && expectedIssuer) {
       try {
-        const payload = verifyJwt(token, jwtSecret, expectedIssuer);
+        const payload = await verifyJwt(token, jwtSecret, expectedIssuer);
         // DB verification for userType (don't trust payload alone)
         let userType: "superadmin" | "admin" | "user" | undefined;
         if (userRepo) {

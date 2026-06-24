@@ -34,15 +34,6 @@ export class AliyunOssProvider implements IStorageProvider {
     });
   }
 
-  async exists(path: string): Promise<boolean> {
-    try {
-      await this.client.head(path);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async put(path: string, data: Buffer): Promise<void> {
     await this.client.put(path, data);
   }
@@ -90,23 +81,6 @@ export class AliyunOssProvider implements IStorageProvider {
     } while (marker);
   }
 
-  async list(prefix: string): Promise<string[]> {
-    // T-706 — paginate through nextMarker. Single-page cap at 1000 silently
-    // truncated callers when a prefix had > 1000 entries (LocalFileSystemProvider
-    // has no such cap, so the two backends diverged). Mirrors listRecursive's
-    // do-while but keeps `delimiter: "/"` for current-level-only semantics.
-    const items: string[] = [];
-    let marker: string | undefined;
-    do {
-      const result = await this.client.list({ prefix, delimiter: "/", marker, "max-keys": 1000 }, {});
-      if (result.objects) {
-        items.push(...result.objects.map(o => o.name));
-      }
-      marker = result.nextMarker;
-    } while (marker);
-    return items;
-  }
-
   async listRecursive(prefix: string): Promise<string[]> {
     const normalizedPrefix = prefix.endsWith("/") ? prefix : prefix + "/";
     const items: string[] = [];
@@ -124,11 +98,6 @@ export class AliyunOssProvider implements IStorageProvider {
       marker = result.nextMarker;
     } while (marker);
     return items;
-  }
-
-  async isDirectory(path: string): Promise<boolean> {
-    const result = await this.client.list({ prefix: path + "/", "max-keys": 1 }, {});
-    return (result.objects?.length ?? 0) > 0;
   }
 
   async size(path: string): Promise<number> {

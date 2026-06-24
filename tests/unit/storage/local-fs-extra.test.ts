@@ -22,16 +22,9 @@ describe("LocalFileSystemProvider — additional surface", () => {
     await p.put("a/x.txt", Buffer.from("hi"));
     await p.put("a/sub/y.txt", Buffer.from("there"));
     await p.moveDir("a", "b");
-    expect(await p.exists("a/x.txt")).toBe(false);
+    expect(await p.get("a/x.txt")).toBeNull();
     expect((await p.get("b/x.txt"))?.toString()).toBe("hi");
     expect((await p.get("b/sub/y.txt"))?.toString()).toBe("there");
-  });
-
-  it("isDirectory distinguishes directories from files and missing paths", async () => {
-    await p.put("dir/keep.txt", Buffer.from("k"));
-    expect(await p.isDirectory("dir")).toBe(true);
-    expect(await p.isDirectory("dir/keep.txt")).toBe(false);
-    expect(await p.isDirectory("totally-missing")).toBe(false);
   });
 
   it("listRecursive walks subtrees and skips dotfiles", async () => {

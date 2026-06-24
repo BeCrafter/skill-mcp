@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { parseTransportType, createTransport } from "@/mcp/transport/index.js";
+import { parseTransportType } from "@/mcp/transport/index.js";
 
 describe("parseTransportType", () => {
   it("defaults to stdio when undefined", () => {
@@ -17,18 +17,5 @@ describe("parseTransportType", () => {
     expect(parseTransportType("ws")).toBe("stdio");
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
-  });
-});
-
-describe("createTransport", () => {
-  it("creates a stdio transport", () => {
-    const t = createTransport({ type: "stdio" });
-    expect(t.type).toBe("stdio");
-    expect(t.transport).toBeDefined();
-  });
-
-  it("rejects unsupported types (sse / http live in app.ts)", () => {
-    expect(() => createTransport({ type: "http" } as never)).toThrow(/only supports stdio/);
-    expect(() => createTransport({ type: "sse" } as never)).toThrow(/only supports stdio/);
   });
 });

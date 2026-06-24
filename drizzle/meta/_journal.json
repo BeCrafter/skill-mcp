@@ -127,6 +127,13 @@
       "when": 1779443000000,
       "tag": "0018_user_type_and_login",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1779444000000,
+      "tag": "0019_drop_orphaned_tables",
+      "breakpoints": true
     }
   ]
 }

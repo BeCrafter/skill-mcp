@@ -91,6 +91,7 @@ export class SkillImporter {
      * that don't need eval support so we don't have to update every call site.
      */
     private evalRepo?: SkillEvalRepository,
+    private enableInjectionScan: boolean = true,
   ) {}
 
   async import(source: string, options: ImportOptions): Promise<ImportResult> {
@@ -135,7 +136,7 @@ export class SkillImporter {
     // 3. Validate
     const entryFile = skillFiles.find(f => f.path === (meta.entry ?? "SKILL.md"));
     const entryContent = entryFile ? entryFile.buffer.toString("utf-8") : null;
-    const validation = validateSkillPackage(meta, entryContent);
+    const validation = validateSkillPackage(meta, entryContent, this.enableInjectionScan);
     if (!validation.valid) {
       if (validation.scanResult && !validation.scanResult.safe) {
         throw new SecurityError(validation.scanResult.issues);

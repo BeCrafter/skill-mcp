@@ -1,5 +1,5 @@
-import { readFile, writeFile, unlink, access, readdir, stat, mkdir, rm, rename } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { readFile, writeFile, unlink, readdir, stat, mkdir, rm, rename } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
 import type { Dirent } from "node:fs";
 import { existsSync } from "node:fs";
 import type { IStorageProvider } from "./provider.interface.js";
@@ -45,15 +45,6 @@ export class LocalFileSystemProvider implements IStorageProvider {
     });
   }
 
-  async exists(path: string): Promise<boolean> {
-    try {
-      await access(this.safeResolve(path));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async put(path: string, data: Buffer): Promise<void> {
     const fullPath = this.safeResolve(path);
     await mkdir(dirname(fullPath), { recursive: true });
@@ -85,33 +76,10 @@ export class LocalFileSystemProvider implements IStorageProvider {
     }
   }
 
-  async list(prefix: string): Promise<string[]> {
-    const fullPath = this.safeResolve(prefix);
-    try {
-      const entries = await readdir(fullPath);
-      return entries.map(e => {
-        const p = join(prefix, e);
-        return p.replace(/\\/g, "/");
-      });
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
-  }
-
   async listRecursive(prefix: string): Promise<string[]> {
     const results: string[] = [];
     await this.walkRecursive(prefix, results);
     return results;
-  }
-
-  async isDirectory(path: string): Promise<boolean> {
-    try {
-      const s = await stat(this.safeResolve(path));
-      return s.isDirectory();
-    } catch {
-      return false;
-    }
   }
 
   async size(path: string): Promise<number> {

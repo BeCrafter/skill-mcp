@@ -35,7 +35,7 @@ function loadConfig(): AppConfig {
       env: process.env.NODE_ENV ?? "development",
     },
     deployment: {
-      mode: (process.env.DEPLOYMENT_MODE as "standalone" | "gateway") ?? "standalone",
+      mode: (process.env.DEPLOYMENT_MODE as "standalone" | "gateway" | "cloud") ?? "standalone",
     },
     gateway: process.env.CLOUD_SERVICE_URL
       ? {
@@ -160,15 +160,7 @@ export function getConfig(): AppConfig {
   return _config;
 }
 
-export function resetConfig(): void {
-  _config = null;
-}
-
-/**
- * Build a fresh AppConfig from the current process environment, bypassing
- * the module-level singleton cache. Use this in tests so cases never need
- * to reach into the shared `_config` slot via `resetConfig()`.
- */
+/** Fresh config bypassing the singleton. Used by tests. */
 export function createConfig(): AppConfig {
   return loadConfig();
 }

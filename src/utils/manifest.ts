@@ -148,9 +148,6 @@ export function parseSkillMeta(dirPath: string): SkillFrontmatter {
   };
 }
 
-/** @deprecated Use parseSkillMeta instead */
-export const parseManifest = parseSkillMeta;
-
 /**
  * T-722 — enforce frontmatter field caps + tag-array shape independently of
  * the local-fs path's filesystem checks. Reused by `validateSkillMeta`
@@ -312,9 +309,6 @@ export function validateSkillMeta(meta: SkillFrontmatter, dirPath: string): void
   // listing API response.
   validateSkillMetaFields(meta);
 }
-
-/** @deprecated Use validateSkillMeta instead */
-export const validateManifest = validateSkillMeta;
 
 /**
  * Read all files from a skill directory.

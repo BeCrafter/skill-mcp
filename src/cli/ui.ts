@@ -54,7 +54,7 @@ export const c = {
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
 
 /** Strip ANSI escape sequences and return visible character count. */
-export function lineWidth(str: string): number {
+function lineWidth(str: string): number {
   return str.replace(ANSI_RE, "").length;
 }
 

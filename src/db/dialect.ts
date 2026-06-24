@@ -65,20 +65,3 @@ export function parseDatabaseUrl(input: string): DialectConfig {
     `Unsupported database scheme in "${trimmed}". Supported: sqlite:// (or bare path), postgres://, postgresql://.`,
   );
 }
-
-/**
- * Resolve the active dialect from environment + config. Precedence:
- *   1. `DATABASE_URL` env var (if set, wins — explicit user intent)
- *   2. Config-provided `database.path` (legacy; treated as sqlite path)
- *
- * Centralizing this keeps the precedence rule out of CLI / app bootstrap.
- */
-export function resolveDialect(opts: { databaseUrl?: string; databasePath?: string }): DialectConfig {
-  if (opts.databaseUrl && opts.databaseUrl.trim().length > 0) {
-    return parseDatabaseUrl(opts.databaseUrl);
-  }
-  if (opts.databasePath && opts.databasePath.trim().length > 0) {
-    return parseDatabaseUrl(opts.databasePath);
-  }
-  throw new Error("Neither DATABASE_URL nor DATABASE_PATH is set.");
-}

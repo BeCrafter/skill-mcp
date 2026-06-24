@@ -32,11 +32,6 @@ export class TagPermissionFilter implements IPermissionFilter {
     );
   }
 
-  async check(_skillId: string): Promise<boolean> {
-    // Without skill metadata, cannot check tags — use canAccess(skillMeta) instead
-    return true;
-  }
-
   /**
    * P0-9 — admin callers (userType=admin or superadmin) see every
    * lifecycle state so they can manage drafts and archives. Everyone else

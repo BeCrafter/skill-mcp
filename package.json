@@ -50,6 +50,7 @@
     "better-sqlite3": "^11.8.1",
     "commander": "^13.1.0",
     "drizzle-orm": "^0.39.3",
+    "jose": "^6.2.3",
     "js-yaml": "^4.1.1",
     "nanoid": "^5.1.11",
     "pino": "^9.6.0",

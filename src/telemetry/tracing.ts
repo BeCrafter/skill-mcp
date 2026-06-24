@@ -79,11 +79,6 @@ export function getTracer(): Tracer {
   return trace.getTracer(TRACER_NAME);
 }
 
-/** Visible for tests so they can hot-swap the SDK without leaking globals. */
-export function isTracingStarted(): boolean {
-  return started;
-}
-
 /**
  * Build TracingOptions from the current environment.
  *
