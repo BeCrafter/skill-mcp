@@ -2,6 +2,7 @@ import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
 import { json, readJsonBody } from "../../helpers.js";
 import { BadRequestError, AppError } from "../../../utils/errors.js";
+import { requireSuperadmin } from "../../middleware/admin-auth.js";
 import {
   DEFAULT_TIER_LIMITS,
   type Tier,
@@ -140,6 +141,7 @@ export function registerAdminQuotaRoutes(router: Router, deps: AppDependencies):
   });
 
   router.put("/api/admin/tenants/:tenantId/quota", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const tenantId = requireTenantId(ctx.params.tenantId);
     const data = await readJsonBody<PutQuotaBody>(ctx.req);
     const tier = requireTier(data.tier);
@@ -178,6 +180,7 @@ export function registerAdminQuotaRoutes(router: Router, deps: AppDependencies):
   });
 
   router.post("/api/admin/tenants/:tenantId/overrides", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const tenantId = requireTenantId(ctx.params.tenantId);
     const data = await readJsonBody<PostOverrideBody>(ctx.req);
     const fieldName = requireQuotaField(data.field_name);
@@ -208,6 +211,7 @@ export function registerAdminQuotaRoutes(router: Router, deps: AppDependencies):
   });
 
   router.delete("/api/admin/quota-overrides/:overrideId", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const overrideId = requireOverrideId(ctx.params.overrideId);
     // Look up the row first so we can invalidate the right tenant's cache.
     // listAllOverrides on every tenant would be wasteful; instead the body

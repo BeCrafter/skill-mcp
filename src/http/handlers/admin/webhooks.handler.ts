@@ -5,6 +5,7 @@ import { BadRequestError, AppError } from "../../../utils/errors.js";
 import type { WebhookEntity } from "../../../db/repositories/webhook.repository.js";
 import type { WebhookDeliveryEntity } from "../../../db/repositories/webhook-delivery.repository.js";
 import { DEFAULT_TENANT_ID } from "../../../types/index.js";
+import { requireSuperadmin } from "../../middleware/admin-auth.js";
 
 // P1-16 — Admin webhook CRUD + delivery audit + replay (review §5.5.1).
 //
@@ -98,6 +99,7 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
   });
 
   router.post("/api/admin/webhooks", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const data = await readJsonBody<PostWebhookBody>(ctx.req);
     if (typeof data.url !== "string") throw new BadRequestError("url is required");
     const tenantId = data.tenant_id ?? DEFAULT_TENANT_ID;
@@ -118,6 +120,7 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
   });
 
   router.put("/api/admin/webhooks/:id", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const id = requireWebhookId(ctx.params.id);
     const data = await readJsonBody<PatchWebhookBody>(ctx.req);
     const updated = webhookService.update(id, {
@@ -130,12 +133,14 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
   });
 
   router.post("/api/admin/webhooks/:id/rotate", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const id = requireWebhookId(ctx.params.id);
     const w = webhookService.rotateSecret(id);
     json(ctx.res, 200, { success: true, data: webhookToJson(w, true) });
   });
 
   router.delete("/api/admin/webhooks/:id", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const id = requireWebhookId(ctx.params.id);
     webhookService.delete(id);
     json(ctx.res, 200, { success: true });
@@ -153,6 +158,7 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
   });
 
   router.post("/api/admin/webhook-deliveries/:id/replay", async (ctx) => {
+    requireSuperadmin(ctx.requestContext!);
     const id = ctx.params.id;
     if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) throw new BadRequestError("Invalid delivery id");
     const existing = webhookDeliveryRepo.findById(id);

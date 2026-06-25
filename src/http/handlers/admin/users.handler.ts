@@ -154,6 +154,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
 
   router.put("/api/admin/users/:userId", async (ctx) => {
     const rc = ctx.requestContext!;
+    requireSuperadmin(rc);
     const userId = ctx.params.userId;
     const data = await readJsonBody<{ name?: string; status?: string; user_type?: string }>(ctx.req);
     const target = await userRepo.findById(userId);
@@ -183,6 +184,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
 
   router.delete("/api/admin/users/:userId", async (ctx) => {
     const rc = ctx.requestContext!;
+    requireSuperadmin(rc);
     const userId = ctx.params.userId;
     const target = await userRepo.findById(userId);
     if (!target) throw new UserNotFoundError();
@@ -195,6 +197,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
 
   router.put("/api/admin/users/:userId/roles", async (ctx) => {
     const rc = ctx.requestContext!;
+    requireSuperadmin(rc);
     const userId = ctx.params.userId;
     const data = await readJsonBody<{ role_ids?: string[] }>(ctx.req);
     const user = await userRepo.findById(userId);

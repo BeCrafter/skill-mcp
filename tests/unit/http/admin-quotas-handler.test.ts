@@ -53,6 +53,7 @@ function makeCtx(method: string, url: string, body?: string): HttpContext {
     req, res: makeRes(),
     url, method, params: {}, query: new URLSearchParams(),
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+    requestContext: { userId: "admin-1", userType: "superadmin" } as never,
   };
 }
 

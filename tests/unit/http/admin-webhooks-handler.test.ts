@@ -49,6 +49,7 @@ function makeCtx(method: string, url: string, body?: string): HttpContext {
     url: queryParts[0], method, params,
     query: new URLSearchParams(queryParts[1] ?? ""),
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+    requestContext: { userId: "admin-1", userType: "superadmin" } as never,
   };
 }
 
