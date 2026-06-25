@@ -3,7 +3,7 @@ import { runMigrations } from "../../db/migrate.js";
 import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { c, badge, truncate, table, section, warn } from "../ui.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 interface SkillRow { slug: string; name: string; version: string; status: string; description: string; }

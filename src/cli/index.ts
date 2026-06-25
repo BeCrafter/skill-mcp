@@ -1,6 +1,6 @@
-import { Command } from "commander";
+import { Command, Help } from "commander";
 import { getConfig } from "../config/index.js";
-import { banner, c } from "./ui.js";
+import { banner, c, sep } from "./ui.js";
 import { serveAction } from "./commands/serve-cmd.js";
 import { importAction } from "./commands/import-cmd.js";
 import { listAction } from "./commands/list-cmd.js";
@@ -20,6 +20,29 @@ import { evalListAction, evalRunAction, evalResultsAction } from "./commands/eva
 import { loginAction, logoutAction, whoamiAction, resetPasswordAction } from "./commands/auth-cmd.js";
 import { initAction } from "./commands/init-cmd.js";
 
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1B\[[0-9;]*m/g;
+function visLen(s: string): number { return s.replace(ANSI_RE, "").length; }
+function padTo(s: string, width: number): string { return s + " ".repeat(Math.max(0, width - visLen(s))); }
+
+/** Colorize a usage string: command=cyan, [options]=dim, <arg>=yellow. */
+function styleUsage(raw: string): string {
+  return raw
+    .replace(/\[options\]/g, c.dim("[options]"))
+    .replace(/<[^>]+>/g, m => c.yellow(m));
+}
+
+/** Format a single command row with aligned description. */
+function cmdRow(name: string, desc: string, indent: number, colWidth: number): string {
+  const styled = styleUsage(name);
+  return " ".repeat(indent) + padTo(styled, colWidth) + c.dim(desc);
+}
+
+/** Format an option row with aligned description. */
+function optRow(flags: string, desc: string, indent: number): string {
+  return " ".repeat(indent) + padTo(c.cyan(flags), 28) + c.dim(desc);
+}
+
 export async function createCli(): Promise<Command> {
   const config = getConfig();
   const program = new Command()
@@ -28,16 +51,135 @@ export async function createCli(): Promise<Command> {
     .version(config.app.version, "-v, --version")
     .option("--server-url <url>", "Remote server URL (overrides SKILL_MCP_SERVER_URL env)")
     .addHelpText("before", `\n${banner("skill-mcp", config.app.version, "Cloud Skill File System & MCP Permission Gateway")}\n`)
-    .addHelpText("after", `\n  ${c.dim("Examples:")}\n\n    ${c.dim("$")}  skill-mcp serve --port 3001\n    ${c.dim("$")}  skill-mcp list\n    ${c.dim("$")}  skill-mcp info my-skill\n    ${c.dim("$")}  skill-mcp import ./my-skill\n`)
     .configureHelp({
-      styleTitle:       (str: string) => c.bold(str),
-      styleSubcommandText:  (str: string) => c.bold(str),
-      styleOptionText:      (str: string) => c.cyan(str),
-      styleDescriptionText: (str: string) => c.dim(str),
-      styleCommandText:     (str: string) => c.bold(str),
-      styleArgumentText:    (str: string) => c.yellow(str),
+      formatHelp(cmd: Command, helper: Help): string {
+        const isRoot = !cmd.parent;
+        const subs = helper.visibleCommands(cmd).filter(s => s.name() !== "help");
+        const opts = helper.visibleOptions(cmd).filter(o => o.flags !== "-h, --help");
+        const lines: string[] = [];
+
+        if (isRoot) {
+          // ── Root: grouped category layout ──
+          const CATEGORIES: Array<{ label: string; icon: string; names: string[] }> = [
+            { label: "Skills",    icon: "◆", names: ["serve", "import", "list", "info", "search", "remove", "update", "versions", "rollback"] },
+            { label: "Quality",   icon: "◆", names: ["lint", "eval"] },
+            { label: "Pipeline",  icon: "◆", names: ["pipeline"] },
+            { label: "System",    icon: "◆", names: ["init", "migrate:check", "manifest:migrate"] },
+            { label: "Admin",     icon: "◆", names: ["auth", "user", "role"] },
+          ];
+
+          const allCmds = subs;
+          const used = new Set<string>();
+
+          // Options
+          if (opts.length > 0) {
+            lines.push(`  ${c.bold("OPTIONS")}`);
+            for (const o of opts) lines.push(optRow(o.flags, o.description ?? "", 4));
+            lines.push("");
+          }
+
+          // Categories
+          for (const cat of CATEGORIES) {
+            const cmds = allCmds.filter(s => cat.names.includes(s.name()));
+            if (cmds.length === 0) continue;
+            lines.push(`  ${c.bold(cat.label.toUpperCase())}`);
+            for (const sub of cmds) {
+              used.add(sub.name());
+              const subCmds = helper.visibleCommands(sub).filter(s => s.name() !== "help");
+              if (subCmds.length > 0) {
+                // parent group — bold green to stand out from leaf commands
+                const styled = styleUsage(sub.name());
+                lines.push(`    ${c.boldGreen(styled)}${" ".repeat(Math.max(1, 18 - sub.name().length))}${c.dim(sub.description())}`);
+                for (const child of subCmds) {
+                  const usage = child.name() + (child.usage() ? " " + child.usage() : "");
+                  lines.push(cmdRow("  " + usage, child.description() ?? "", 6, 36));
+                }
+              } else {
+                const usage = sub.name() + (sub.usage() ? " " + sub.usage() : "");
+                lines.push(cmdRow("  " + usage, sub.description() ?? "", 4, 34));
+              }
+            }
+            lines.push("");
+          }
+
+          // Uncategorized
+          const rest = allCmds.filter(s => !used.has(s.name()));
+          if (rest.length > 0) {
+            lines.push(`  ${c.bold("OTHER")}`);
+            for (const sub of rest) {
+              const usage = sub.name() + (sub.usage() ? " " + sub.usage() : "");
+              lines.push(cmdRow("  " + usage, sub.description() ?? "", 4, 34));
+            }
+            lines.push("");
+          }
+
+          // Examples
+          lines.push(`  ${c.bold("EXAMPLES")}`);
+          const exs = [
+            ["skill-mcp serve",                "Start the MCP server"],
+            ["skill-mcp list",                 "List all skills"],
+            ["skill-mcp info my-skill",        "Show skill details"],
+            ["skill-mcp import ./my-skill",    "Import a skill package"],
+            ["skill-mcp user create --name u", "Create a user"],
+          ];
+          for (const [cmd, desc] of exs) {
+            lines.push(`    ${c.dim("$")}  ${c.cyan(cmd)}${" ".repeat(Math.max(1, 32 - cmd.length))}${c.dim(desc)}`);
+          }
+          lines.push("");
+
+        } else if (subs.length > 0) {
+          // ── Mid-level: parent with subcommands (user, role, auth, eval, pipeline) ──
+          lines.push("");
+          lines.push(`  ${c.bold(cmd.name().toUpperCase())}  ${c.dim(cmd.description())}`);
+          lines.push(`  ${sep(60)}`);
+          lines.push("");
+
+          // Show usage hint
+          const childNames = subs.map(s => s.name()).join("|");
+          lines.push(`  ${c.dim("Usage:")}  ${c.cyan(cmd.name())} ${c.yellow("<" + childNames + ">")} ${c.dim("[options]")}`);
+          lines.push("");
+
+          // Subcommands
+          lines.push(`  ${c.bold("COMMANDS")}`);
+          for (const s of subs) {
+            const usage = s.name() + (s.usage() ? " " + s.usage() : "");
+            lines.push(cmdRow("  " + usage, s.description() ?? "", 4, 36));
+          }
+          lines.push("");
+
+          // Global options
+          lines.push(`  ${c.bold("OPTIONS")}`);
+          lines.push(optRow("-h, --help", "display help for command", 4));
+          lines.push(optRow("--server-url <url>", "Remote server URL", 4));
+          lines.push("");
+
+        } else {
+          // ── Leaf: terminal command with options ──
+          const parentName = cmd.parent?.name() ?? "";
+          lines.push("");
+          lines.push(`  ${c.bold(cmd.name().toUpperCase())}  ${c.dim(cmd.description())}`);
+          lines.push(`  ${sep(60)}`);
+          lines.push("");
+
+          // Usage
+          const args = cmd.usage() || "";
+          lines.push(`  ${c.dim("Usage:")}  ${c.cyan(parentName + " " + cmd.name())} ${styleUsage(args)}`.trimEnd());
+          lines.push("");
+
+          // Options
+          if (opts.length > 0) {
+            lines.push(`  ${c.bold("OPTIONS")}`);
+            for (const o of opts) lines.push(optRow(o.flags, o.description ?? "", 4));
+            lines.push("");
+          }
+        }
+
+        return lines.join("\n");
+      },
     })
     .configureOutput({
+      getOutHasColors: () => !!process.stdout.isTTY,
+      getErrHasColors: () => !!process.stderr.isTTY,
       outputError: (str: string, write: (str: string) => void) => {
         const msg = str.replace(/^error:\s*/i, "").replace(/\n$/, "").trim();
         if (msg) {

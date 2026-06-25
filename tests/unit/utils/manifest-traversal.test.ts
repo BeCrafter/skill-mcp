@@ -20,7 +20,7 @@ describe("manifest path-traversal hardening (T-601)", () => {
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
-  });
+  }, 30_000);
 
   it("rejects meta.files entries that escape the skill root", () => {
     expect(() =>

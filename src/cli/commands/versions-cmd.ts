@@ -4,7 +4,7 @@ import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { SkillVersionRepository } from "../../db/repositories/skill-version.repository.js";
 import { c, kv, warn, fail, fmtDate, table, section } from "../ui.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 interface VersionInfo {

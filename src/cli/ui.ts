@@ -1,9 +1,9 @@
 import { styleText } from "node:util";
 
-const noColor = !process.stdout.isTTY || process.env.NO_COLOR !== undefined;
+const isColorEnabled = () => process.stdout.isTTY && process.env.NO_COLOR === undefined;
 
 function s(fmt: Parameters<typeof styleText>[0], text: string): string {
-  return noColor ? text : styleText(fmt, text);
+  return isColorEnabled() ? styleText(fmt, text, { validateStream: false }) : text;
 }
 
 // ── Colors ──────────────────────────────────────────────────────────

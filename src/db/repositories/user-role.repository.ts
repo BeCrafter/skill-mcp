@@ -5,6 +5,7 @@ import { userRoles, roles } from "../schema.js";
 import { getLogger } from "../../utils/logger.js";
 import { metrics } from "../../telemetry/metrics.js";
 import { withSpan } from "../../telemetry/spans.js";
+import { BadRequestError } from "../../utils/errors.js";
 
 export class UserRoleRepository {
   constructor(private db: DrizzleDB) {}
@@ -86,6 +87,13 @@ export class UserRoleRepository {
     // can never trip on a caller-side duplicate. The DB constraint stays as
     // the authoritative guard against concurrent duplicate assignments.
     const unique = [...new Set(roleIds)];
+    if (unique.length > 0) {
+      const found = this.db.select({ id: roles.id }).from(roles).where(inArray(roles.id, unique)).all();
+      if (found.length !== unique.length) {
+        const missing = unique.filter(id => !found.some(r => r.id === id));
+        throw new BadRequestError(`Invalid role_ids: ${missing.join(", ")}`);
+      }
+    }
     this.db.transaction((tx) => {
       tx.delete(userRoles).where(eq(userRoles.userId, userId)).run();
       if (unique.length === 0) return;

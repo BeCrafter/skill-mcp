@@ -3,7 +3,7 @@ import { runMigrations } from "../../db/migrate.js";
 import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { c, badge, kv, fail, fmtDate, section, maxLineWidth } from "../ui.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 interface SkillDetail {

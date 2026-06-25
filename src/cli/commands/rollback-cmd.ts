@@ -10,7 +10,7 @@ import { SkillFileRepository } from "../../db/repositories/skill-file.repository
 import { SkillService } from "../../services/skill.service.js";
 import { createLogger, setLogger } from "../../utils/logger.js";
 import { c, fail, kv, section, kvWidth, ok } from "../ui.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 export async function rollbackAction(

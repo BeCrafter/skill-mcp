@@ -6,7 +6,7 @@ import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { LocalFileSystemProvider } from "../../storage/local-fs.provider.js";
 import { CompositeCacheProvider } from "../../cache/composite.provider.js";
 import { c, kv, fail, warn, ok, section, kvWidth } from "../ui.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 export async function removeAction(slug: string, options: { force?: boolean; serverUrl?: string }): Promise<void> {

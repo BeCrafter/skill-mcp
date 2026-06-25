@@ -548,7 +548,7 @@ export class SkillService {
 
     await this.feedbackRepo.create({
       skillId: skill.id,
-      skillSlug: input.skill_slug,
+      skillSlug: skill.slug,
       userId: requestContext?.userId ?? null,
       sessionId: requestContext?.sessionId ?? null,
       outcome: input.outcome as "success" | "partial" | "failure" | "irrelevant",

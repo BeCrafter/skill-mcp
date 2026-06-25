@@ -15,7 +15,7 @@ import { createLogger, setLogger } from "../../utils/logger.js";
 import { c, badge, ok, fail, hint, kv } from "../ui.js";
 import { DuplicateSkillNameError } from "../../utils/errors.js";
 import type { ImportOptions } from "../../types/index.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall, uploadFile } from "../remote-client.js";
 
 export async function importAction(

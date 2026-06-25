@@ -4,7 +4,7 @@ import { getDatabase } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { CompositeCacheProvider } from "../../cache/composite.provider.js";
 import { c, ok, fail, warn } from "../ui.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 export async function updateAction(

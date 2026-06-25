@@ -7,7 +7,7 @@ import { EchoEvalProvider } from "../../eval/echo-provider.js";
 import { EvalRunner } from "../../eval/runner.js";
 import { c, fail, kv, fmtDate, table, section, warn } from "../ui.js";
 import { SkillNotFoundError } from "../../utils/errors.js";
-import { requireAuth, readCredentials } from "./auth-cmd.js";
+import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 interface EvalCase { caseName: string; input?: string; expectedTools: string[]; expectedOutputContains: string[]; }
