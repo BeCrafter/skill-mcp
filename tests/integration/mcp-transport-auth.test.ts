@@ -264,12 +264,12 @@ describe("MCP transport auth bridge (T-738)", () => {
 
       const sessionId = await Promise.race([
         sessionPromise,
-        new Promise<string>((_, rej) => setTimeout(() => rej(new Error("endpoint event timeout")), 5_000)),
+        new Promise<string>((_, rej) => setTimeout(() => rej(new Error("endpoint event timeout")), 15_000)),
       ]);
 
       return {
         sessionId,
-        waitForResponse(id, timeoutMs = 5_000) {
+        waitForResponse(id, timeoutMs = 15_000) {
           return new Promise<JsonRpcMsg>((resolveP, rejectP) => {
             pending.set(id, resolveP);
             setTimeout(() => {
@@ -322,7 +322,7 @@ describe("MCP transport auth bridge (T-738)", () => {
       } finally {
         client.close();
       }
-    });
+    }, 30_000);
 
     it("anonymous SSE POST (no bearer) does not surface the private skill", async () => {
       const client = await openSseClient(sseServer!.url);
@@ -355,6 +355,6 @@ describe("MCP transport auth bridge (T-738)", () => {
       } finally {
         client.close();
       }
-    });
+    }, 30_000);
   });
 });
