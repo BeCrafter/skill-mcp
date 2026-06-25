@@ -236,7 +236,7 @@ export async function whoamiAction(): Promise<void> {
   console.log(kv("userId", creds.userId));
   console.log(kv("username", username));
   console.log(kv("userType", userType));
-  console.log(kv("expires", new Date(creds.expiresAt).toISOString()));
+  console.log(kv("expires", creds.expiresAt ? new Date(creds.expiresAt).toISOString() : c.dim("(no expiry)")));
   console.log(kv("status", expired ? c.boldRed("EXPIRED") : c.boldGreen("VALID")));
 
   if (expired) {

@@ -324,8 +324,8 @@ export class SkillService {
       const published = ranked.map(h => h.skill).filter(s => s.status === "published");
       const lines = published.map((s) => {
         const desc = (s.description ?? "").length > 80
-          ? s.description.slice(0, 77) + "..."
-          : s.description;
+          ? (s.description ?? "").slice(0, 77) + "..."
+          : (s.description ?? "");
         return `    - ${s.slug} [id:${s.id}]: ${desc}`;
       });
       if (this.accessLog && published.length > 0) {
@@ -359,8 +359,8 @@ export class SkillService {
 
     const lines = sorted.map(s => {
       const desc = (s.description ?? "").length > 80
-        ? s.description.slice(0, 77) + "..."
-        : s.description;
+        ? (s.description ?? "").slice(0, 77) + "..."
+        : (s.description ?? "");
       return `    - ${s.slug} [id:${s.id}]: ${desc}`;
     });
 
@@ -612,7 +612,7 @@ export class SkillService {
     this.versionRepo.create({
       skillId: skill.id,
       version: skill.version,
-      contentHash: skill.contentHash!,
+      contentHash: skill.contentHash ?? "",
       storagePath: currentVersionPath,
       entryFile: skill.entryFile,
       fileCount: currentFileCount,

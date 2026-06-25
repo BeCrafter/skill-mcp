@@ -5,7 +5,7 @@ import type { AppDependencies } from "../../../app.js";
 import { json, readJsonBody } from "../../helpers.js";
 import { AppError } from "../../../utils/errors.js";
 import { TOKEN_ROTATION_GRACE_MS } from "../../../db/repositories/user.repository.js";
-import { requireSuperadmin, assertSuperadminProtected } from "../../middleware/admin-auth.js";
+import { requireSuperadmin } from "../../middleware/admin-auth.js";
 
 class UserNotFoundError extends AppError {
   constructor() { super("User not found", "USER_NOT_FOUND", 404); this.name = "UserNotFoundError"; }
@@ -31,6 +31,18 @@ function parseExpiry(input: { token_expires_at?: number | null; expires_in?: num
   return null;
 }
 
+const PRIVILEGED_ROLE_NAMES = new Set(["superadmin", "admin"]);
+
+/** Check if caller can operate on target. Superadmin targets are always protected from other superadmins. */
+function assertCanOperateOn(target: { userType: string; id: string }, operatorId: string, operatorUserType?: string): void {
+  if (target.userType === "superadmin") {
+    throw new AppError("Cannot modify or delete superadmin", "SUPERADMIN_PROTECTED", 403);
+  }
+  if (target.userType === "admin" && operatorUserType !== "superadmin") {
+    throw new AppError("Only superadmin can operate on admin users", "SUPERADMIN_REQUIRED", 403);
+  }
+}
+
 export function registerAdminUserRoutes(router: Router, deps: AppDependencies): void {
   if (!deps.userRepo || !deps.roleRepo || !deps.userRoleRepo) return;
   const { userRepo, roleRepo, userRoleRepo, eventBus } = deps;
@@ -45,13 +57,20 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     const data = await readJsonBody<{ name?: string; role_ids?: string[]; token_expires_at?: number | null; expires_in?: number | null; user_type?: string; username?: string; password?: string }>(ctx.req);
 
     // user_type enum validation
-    if (data.user_type && !["user", "admin"].includes(data.user_type)) {
-      throw new AppError("Invalid user_type. Must be 'user' or 'admin'", "INVALID_USER_TYPE", 400);
+    if (data.user_type && !["user", "admin", "superadmin"].includes(data.user_type)) {
+      throw new AppError("Invalid user_type. Must be 'user', 'admin', or 'superadmin'", "INVALID_USER_TYPE", 400);
     }
 
-    // Only superadmin can create admin users
-    if (data.user_type === "admin") {
+    // Only superadmin can create admin/superadmin users
+    if (data.user_type === "admin" || data.user_type === "superadmin") {
       requireSuperadmin(rc);
+    }
+
+    // role_ids containing privileged roles also requires superadmin
+    if (data.role_ids?.length) {
+      const roles = await roleRepo.findByIds(data.role_ids);
+      const hasPrivilegedRole = roles.some(r => PRIVILEGED_ROLE_NAMES.has(r.name));
+      if (hasPrivilegedRole) requireSuperadmin(rc);
     }
 
     // Password length validation
@@ -102,7 +121,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     const userId = ctx.params.userId;
     const target = await userRepo.findById(userId);
     if (!target) throw new UserNotFoundError();
-    assertSuperadminProtected(target, rc.userId);
+    assertCanOperateOn(target, rc.userId, rc.userType);
 
     type RotateBody = { token_expires_at?: number | null; expires_in?: number | null; grace_seconds?: number | null };
     const data = await readJsonBody<RotateBody>(ctx.req).catch(() => ({} as RotateBody));
@@ -136,7 +155,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     const userId = ctx.params.userId;
     const user = await userRepo.findById(userId);
     if (!user) throw new UserNotFoundError();
-    assertSuperadminProtected(user, rc.userId);
+    assertCanOperateOn(user, rc.userId, rc.userType);
     await userRepo.clearPreviousToken(userId);
     json(ctx.res, 200, { success: true });
   });
@@ -154,12 +173,11 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
 
   router.put("/api/admin/users/:userId", async (ctx) => {
     const rc = ctx.requestContext!;
-    requireSuperadmin(rc);
     const userId = ctx.params.userId;
     const data = await readJsonBody<{ name?: string; status?: string; user_type?: string }>(ctx.req);
     const target = await userRepo.findById(userId);
     if (!target) throw new UserNotFoundError();
-    assertSuperadminProtected(target, rc.userId);
+    assertCanOperateOn(target, rc.userId, rc.userType);
 
     const updateInput: { name?: string; status?: string; userType?: string } = {};
     if (data.name !== undefined) updateInput.name = data.name;
@@ -173,7 +191,6 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
       if (!["user", "admin"].includes(data.user_type)) {
         throw new AppError("Invalid user_type. Must be 'user' or 'admin'", "INVALID_USER_TYPE", 400);
       }
-      // Only superadmin can change user_type
       requireSuperadmin(rc);
       updateInput.userType = data.user_type;
     }
@@ -184,11 +201,10 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
 
   router.delete("/api/admin/users/:userId", async (ctx) => {
     const rc = ctx.requestContext!;
-    requireSuperadmin(rc);
     const userId = ctx.params.userId;
     const target = await userRepo.findById(userId);
     if (!target) throw new UserNotFoundError();
-    assertSuperadminProtected(target, rc.userId);
+    assertCanOperateOn(target, rc.userId, rc.userType);
     await userRoleRepo.deleteByUserId(userId);
     const deleted = await userRepo.delete(userId);
     if (!deleted) throw new UserNotFoundError();
@@ -197,18 +213,25 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
 
   router.put("/api/admin/users/:userId/roles", async (ctx) => {
     const rc = ctx.requestContext!;
-    requireSuperadmin(rc);
     const userId = ctx.params.userId;
     const data = await readJsonBody<{ role_ids?: string[] }>(ctx.req);
     const user = await userRepo.findById(userId);
     if (!user) throw new UserNotFoundError();
-    assertSuperadminProtected(user, rc.userId);
+    assertCanOperateOn(user, rc.userId, rc.userType);
+
+    // Check if privileged roles are being assigned
+    if (data.role_ids?.length) {
+      const roles = await roleRepo.findByIds(data.role_ids);
+      const hasPrivilegedRole = roles.some(r => PRIVILEGED_ROLE_NAMES.has(r.name));
+      if (hasPrivilegedRole) requireSuperadmin(rc);
+    }
+
     await userRoleRepo.replaceUserRoles(userId, data.role_ids ?? []);
     eventBus.publish({ type: "user:roles_changed", userId });
     json(ctx.res, 200, { success: true });
   });
 
-  // Reset password endpoint — admin+ can reset, but only superadmin can reset superadmin
+  // Reset password — admin can only reset own; superadmin can reset any admin
   router.post("/api/admin/users/:username/reset-password", async (ctx) => {
     const rc = ctx.requestContext!;
     const username = ctx.params.username;
@@ -221,9 +244,17 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     const target = await userRepo.findByUsername(username);
     if (!target) throw new UserNotFoundError();
 
-    // Only superadmin can reset another superadmin's password
-    if (target.userType === "superadmin" && rc.userType !== "superadmin") {
-      throw new AppError("Only superadmin can reset superadmin password", "SUPERADMIN_PROTECTED", 403);
+    // Superadmin target: only self can reset
+    if (target.userType === "superadmin" && target.id !== rc.userId) {
+      throw new AppError("Cannot reset another superadmin's password", "SUPERADMIN_PROTECTED", 403);
+    }
+    // Admin target: only superadmin can reset
+    if (target.userType === "admin" && rc.userType !== "superadmin") {
+      throw new AppError("Only superadmin can reset admin password", "SUPERADMIN_REQUIRED", 403);
+    }
+    // Non-admin target (shouldn't have password, but guard anyway)
+    if (target.userType !== "superadmin" && target.userType !== "admin" && target.id !== rc.userId) {
+      throw new AppError("Cannot reset this user's password", "FORBIDDEN", 403);
     }
 
     const { hashSync } = await import("bcryptjs");

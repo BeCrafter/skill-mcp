@@ -8,6 +8,8 @@ import { requireAuth, readCredentials } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 import { ConflictError } from "../../utils/errors.js";
 
+const BUILT_IN_ROLES = new Set(["superadmin", "admin", "user"]);
+
 function initRepos() {
   const config = getConfig();
   runMigrations(config.database.path);
@@ -97,6 +99,11 @@ export async function roleCreateAction(opts: { name: string; description?: strin
   }
 
   // Local mode
+  if (BUILT_IN_ROLES.has(opts.name)) {
+    fail(`Cannot create role with reserved name "${opts.name}"`);
+    closeDatabase();
+    process.exit(1);
+  }
   const { roleRepo } = initRepos();
   try {
     const role = await roleRepo.create(opts);
@@ -168,29 +175,56 @@ export async function roleUpdateAction(roleId: string, data: { name?: string; de
     if (data.name) body.name = data.name;
     if (data.description) body.description = data.description;
     if (data.tags) body.tags = data.tags;
-    const role = await apiCall<{ id: string; name: string; tags: string[] }>(
-      serverUrl, "PUT", `/api/admin/roles/${roleId}`, { body, credentials: creds },
-    );
-    ok(`Role updated: ${c.bold(role.name)}`);
+    try {
+      const role = await apiCall<{ id: string; name: string; tags: string[] }>(
+        serverUrl, "PUT", `/api/admin/roles/${roleId}`, { body, credentials: creds },
+      );
+      ok(`Role updated: ${c.bold(role.name)}`);
+    } catch (err) {
+      if (err instanceof Error && (err instanceof ConflictError || err.message.includes("already exists"))) {
+        fail(`Role "${data.name}" already exists`);
+      } else {
+        throw err;
+      }
+    }
     return;
   }
 
   // Local mode
   const { roleRepo } = initRepos();
-  const updated = await roleRepo.update(roleId, data);
-  if (!updated) {
-    fail(`Role not found: ${roleId}`, "Use `skill-mcp role list` to see available roles");
-    closeDatabase();
-    process.exit(1);
+  try {
+    const existing = await roleRepo.findById(roleId);
+    if (!existing) {
+      fail(`Role not found: ${roleId}`, "Use `skill-mcp role list` to see available roles");
+      closeDatabase();
+      process.exit(1);
+    }
+    if (BUILT_IN_ROLES.has(existing.name)) {
+      fail(`Cannot modify built-in role "${existing.name}"`);
+      closeDatabase();
+      process.exit(1);
+    }
+    const updated = await roleRepo.update(roleId, data);
+    if (!updated) {
+      fail(`Role not found: ${roleId}`, "Use `skill-mcp role list` to see available roles");
+      closeDatabase();
+      process.exit(1);
+    }
+
+    console.log(section("role updated", undefined, kvWidth(12, c.dim(updated.id), updated.name, updated.tags.join(", "))));
+    console.log();
+    console.log(kv("id", c.dim(updated.id)));
+    console.log(kv("name", updated.name));
+    console.log(kv("tags", updated.tags.join(", ") || c.dim("(none)")));
+
+    console.log();
+  } catch (err) {
+    if (err instanceof Error && (err instanceof ConflictError || err.message.includes("already exists"))) {
+      fail(`Role "${data.name}" already exists`);
+    } else {
+      throw err;
+    }
   }
-
-  console.log(section("role updated", undefined, kvWidth(12, c.dim(updated.id), updated.name, updated.tags.join(", "))));
-  console.log();
-  console.log(kv("id", c.dim(updated.id)));
-  console.log(kv("name", updated.name));
-  console.log(kv("tags", updated.tags.join(", ") || c.dim("(none)")));
-
-  console.log();
   closeDatabase();
 }
 
@@ -207,13 +241,19 @@ export async function roleDeleteAction(roleId: string, opts: { serverUrl?: strin
 
   // Local mode
   const { roleRepo, userRoleRepo } = initRepos();
-  await userRoleRepo.deleteByRoleId(roleId);
-  const deleted = await roleRepo.delete(roleId);
-  if (!deleted) {
+  const role = await roleRepo.findById(roleId);
+  if (!role) {
     fail(`Role not found: ${roleId}`, "Use `skill-mcp role list` to see available roles");
     closeDatabase();
     process.exit(1);
   }
+  if (["superadmin", "admin", "user"].includes(role.name)) {
+    fail(`Cannot delete built-in role "${role.name}"`);
+    closeDatabase();
+    process.exit(1);
+  }
+  await userRoleRepo.deleteByRoleId(roleId);
+  await roleRepo.delete(roleId);
   ok(`${c.bold("Deleted")}  role  ${c.dim(roleId)}`);
   hint("Run `skill-mcp role list` to see remaining roles");
   closeDatabase();

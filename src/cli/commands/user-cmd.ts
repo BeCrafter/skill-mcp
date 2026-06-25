@@ -14,6 +14,22 @@ import { c, kv, table, section, ok, warn, kvWidth, hint, fail } from "../ui.js";
 import { sha256 } from "../../utils/crypto.js";
 import { requireAuth, readCredentials } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
+import { ConflictError } from "../../utils/errors.js";
+
+const PRIVILEGED_ROLE_NAMES = new Set(["superadmin", "admin"]);
+
+function assertCanOperateOnCli(targetUserType: string, callerUserType: string): void {
+  if (targetUserType === "superadmin") {
+    fail("Cannot operate on superadmin user");
+    closeDatabase();
+    process.exit(1);
+  }
+  if (targetUserType === "admin" && callerUserType !== "superadmin") {
+    fail("Only superadmin can operate on admin users");
+    closeDatabase();
+    process.exit(1);
+  }
+}
 
 function initRepos() {
   const config = getConfig();
@@ -122,18 +138,27 @@ export async function userCreateAction(opts: { name?: string; roleIds?: string[]
     if (opts.userType) body.user_type = opts.userType;
     if (opts.roleIds) body.role_ids = opts.roleIds;
     if (opts.ttl) body.expires_in = parseTtlToMs(opts.ttl) / 1000;
-    const user = await apiCall<{ id: string; name: string | null; username: string | null; user_type: string; token: string }>(
-      serverUrl, "POST", "/api/admin/users", { body, credentials: creds },
-    );
-    ok(`User created: ${c.bold(user.username ?? user.name ?? user.id)}`);
-    console.log(kv("id", c.dim(user.id)));
-    if (user.username) console.log(kv("username", user.username));
-    console.log(kv("user_type", user.user_type));
-    console.log(kv("token", c.boldYellow(user.token)));
+    try {
+      const user = await apiCall<{ id: string; name: string | null; username: string | null; user_type: string; token: string }>(
+        serverUrl, "POST", "/api/admin/users", { body, credentials: creds },
+      );
+      ok(`User created: ${c.bold(user.username ?? user.name ?? user.id)}`);
+      console.log(kv("id", c.dim(user.id)));
+      if (user.username) console.log(kv("username", user.username));
+      console.log(kv("user_type", user.user_type));
+      console.log(kv("token", c.boldYellow(user.token)));
+    } catch (err) {
+      if (err instanceof Error && (err instanceof ConflictError || err.message.includes("already exists"))) {
+        fail(`Username "${opts.username}" already exists`);
+      } else {
+        throw err;
+      }
+    }
     return;
   }
 
   // Local mode
+  const creds = requireAuth();
   const { userRepo, userRoleRepo, roleRepo } = initRepos();
 
   // Password length validation
@@ -144,10 +169,28 @@ export async function userCreateAction(opts: { name?: string; roleIds?: string[]
   }
 
   // user_type enum validation
-  if (opts.userType && !["user", "admin"].includes(opts.userType)) {
-    fail("Invalid user_type. Must be 'user' or 'admin'");
+  if (opts.userType && !["user", "admin", "superadmin"].includes(opts.userType)) {
+    fail("Invalid user_type. Must be 'user', 'admin', or 'superadmin'");
     closeDatabase();
     process.exit(1);
+  }
+
+  // Only superadmin can create admin/superadmin users
+  if ((opts.userType === "admin" || opts.userType === "superadmin") && creds.userType !== "superadmin") {
+    fail("Only superadmin can create admin/superadmin users");
+    closeDatabase();
+    process.exit(1);
+  }
+
+  // role_ids containing privileged roles requires superadmin
+  if (opts.roleIds?.length && creds.userType !== "superadmin") {
+    const roles = await roleRepo.findByIds(opts.roleIds);
+    const hasPrivileged = roles.some(r => PRIVILEGED_ROLE_NAMES.has(r.name));
+    if (hasPrivileged) {
+      fail("Only superadmin can assign superadmin/admin roles");
+      closeDatabase();
+      process.exit(1);
+    }
   }
 
   const token = generateToken();
@@ -160,27 +203,28 @@ export async function userCreateAction(opts: { name?: string; roleIds?: string[]
     passwordHash = hashSync(opts.password, 12);
   }
 
-  const user = await userRepo.create({
-    name: opts.name,
-    username: opts.username,
-    passwordHash,
-    userType: opts.userType ?? "user",
-    token: hash,
-    tokenExpiresAt,
-  });
+  try {
+    const user = await userRepo.create({
+      name: opts.name,
+      username: opts.username,
+      passwordHash,
+      userType: opts.userType ?? "user",
+      token: hash,
+      tokenExpiresAt,
+    });
 
-  // Auto-assign admin role for admin users if no explicit roles
-  if (opts.userType === "admin" && !opts.roleIds?.length) {
-    const allRoles = await roleRepo.findAll();
-    const adminRole = allRoles.find(r => r.name === "admin");
-    if (adminRole) {
-      await userRoleRepo.replaceUserRoles(user.id, [adminRole.id]);
+    // Auto-assign admin role for admin users if no explicit roles
+    if (opts.userType === "admin" && !opts.roleIds?.length) {
+      const allRoles = await roleRepo.findAll();
+      const adminRole = allRoles.find(r => r.name === "admin");
+      if (adminRole) {
+        await userRoleRepo.replaceUserRoles(user.id, [adminRole.id]);
+      }
+    } else if (opts.roleIds?.length) {
+      await userRoleRepo.replaceUserRoles(user.id, opts.roleIds);
     }
-  } else if (opts.roleIds?.length) {
-    await userRoleRepo.replaceUserRoles(user.id, opts.roleIds);
-  }
 
-  const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
+    const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
 
     console.log(section("user created", undefined, kvWidth(12, c.dim(user.id), user.name ?? "(unnamed)", user.userType, token, tags.join(", "))));
     console.log();
@@ -192,7 +236,14 @@ export async function userCreateAction(opts: { name?: string; roleIds?: string[]
     if (tokenExpiresAt) console.log(kv("expires", new Date(tokenExpiresAt).toISOString()));
     console.log(kv("tags", tags.join(", ") || c.dim("(none)")));
 
-  console.log(`\n  ${c.boldYellow("⚠")}  Save the token above — it cannot be retrieved again.\n`);
+    console.log(`\n  ${c.boldYellow("⚠")}  Save the token above — it cannot be retrieved again.\n`);
+  } catch (err) {
+    if (err instanceof Error && (err instanceof ConflictError || err.message.includes("already exists"))) {
+      fail(`Username "${opts.username}" already exists`);
+    } else {
+      throw err;
+    }
+  }
   closeDatabase();
 }
 
@@ -220,6 +271,7 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
   }
 
   // Local mode
+  const creds = requireAuth();
   const { userRepo, webhookRepo, webhookDeliveryRepo } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {
@@ -227,6 +279,7 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
     closeDatabase();
     process.exit(1);
   }
+  assertCanOperateOnCli(user.userType, creds.userType);
   const tokenExpiresAt = opts.ttl ? Date.now() + parseTtlToMs(opts.ttl) : null;
   const graceMs = opts.grace ? parseTtlToMs(opts.grace) : undefined;
   const token = generateToken();
@@ -309,25 +362,30 @@ export async function userGetAction(userId: string, opts: { serverUrl?: string }
 }
 
 export async function userDeleteAction(userId: string, opts: { serverUrl?: string } = {}): Promise<void> {
-  requireAuth();
+  const creds = requireAuth();
   const serverUrl = getServerUrl(opts);
 
   if (serverUrl) {
-    const creds = readCredentials()!;
-    await apiCall(serverUrl, "DELETE", `/api/admin/users/${userId}`, { credentials: creds });
+    await apiCall(serverUrl, "DELETE", `/api/admin/users/${userId}`, { credentials: readCredentials()! });
     ok(`${c.bold("Deleted")}  user  ${c.dim(userId)}`);
     return;
   }
 
   // Local mode
+  if (userId === creds.userId) {
+    fail("Cannot delete your own account");
+    return;
+  }
   const { userRepo, userRoleRepo } = initRepos();
-  await userRoleRepo.deleteByUserId(userId);
-  const deleted = await userRepo.delete(userId);
-  if (!deleted) {
+  const target = await userRepo.findById(userId);
+  if (!target) {
     fail(`User not found: ${userId}`, "Use `skill-mcp user list` to see available users");
     closeDatabase();
     process.exit(1);
   }
+  assertCanOperateOnCli(target.userType, creds.userType);
+  await userRoleRepo.deleteByUserId(userId);
+  await userRepo.delete(userId);
   ok(`${c.bold("Deleted")}  user  ${c.dim(userId)}`);
   hint("Run `skill-mcp user list` to see remaining users");
 }
@@ -344,12 +402,24 @@ export async function userAssignRolesAction(userId: string, roleIds: string[], o
   }
 
   // Local mode
-  const { userRepo, userRoleRepo, eventBus } = initRepos();
+  const creds = requireAuth();
+  const { userRepo, userRoleRepo, roleRepo, eventBus } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {
     fail(`User not found: ${userId}`, "Use `skill-mcp user list` to see available users");
     closeDatabase();
     process.exit(1);
+  }
+  assertCanOperateOnCli(user.userType, creds.userType);
+  // Check privileged role assignment
+  if (roleIds.length > 0 && creds.userType !== "superadmin") {
+    const roles = await roleRepo.findByIds(roleIds);
+    const hasPrivileged = roles.some(r => PRIVILEGED_ROLE_NAMES.has(r.name));
+    if (hasPrivileged) {
+      fail("Only superadmin can assign superadmin/admin roles");
+      closeDatabase();
+      process.exit(1);
+    }
   }
   await userRoleRepo.replaceUserRoles(userId, roleIds);
   eventBus.publish({ type: "user:roles_changed", userId });

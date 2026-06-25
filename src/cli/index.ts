@@ -32,6 +32,14 @@ function styleUsage(raw: string): string {
     .replace(/<[^>]+>/g, m => c.yellow(m));
 }
 
+/** Build usage string for a command, stripping [options] if none exist. */
+function usageOf(cmd: Command): string {
+  const raw = cmd.usage();
+  const hasOpts = cmd.options.filter(o => o.flags !== "-h, --help").length > 0;
+  const cleaned = hasOpts ? raw : raw.replace(/\[options\]\s*/g, "").trim();
+  return cmd.name() + (cleaned ? " " + cleaned : "");
+}
+
 /** Format a single command row with aligned description. */
 function cmdRow(name: string, desc: string, indent: number, colWidth: number): string {
   const styled = styleUsage(name);
@@ -91,12 +99,12 @@ export async function createCli(): Promise<Command> {
                 const styled = styleUsage(sub.name());
                 lines.push(`    ${c.boldGreen(styled)}${" ".repeat(Math.max(1, 18 - sub.name().length))}${c.dim(sub.description())}`);
                 for (const child of subCmds) {
-                  const usage = child.name() + (child.usage() ? " " + child.usage() : "");
+                  const usage = usageOf(child);
                   lines.push(cmdRow("  " + usage, child.description() ?? "", 6, 36));
                 }
               } else {
-                const usage = sub.name() + (sub.usage() ? " " + sub.usage() : "");
-                lines.push(cmdRow("  " + usage, sub.description() ?? "", 4, 34));
+                const usage = usageOf(sub);
+                lines.push(cmdRow("  " + usage, sub.description() ?? "", 4, 36));
               }
             }
             lines.push("");
@@ -107,8 +115,8 @@ export async function createCli(): Promise<Command> {
           if (rest.length > 0) {
             lines.push(`  ${c.bold("OTHER")}`);
             for (const sub of rest) {
-              const usage = sub.name() + (sub.usage() ? " " + sub.usage() : "");
-              lines.push(cmdRow("  " + usage, sub.description() ?? "", 4, 34));
+              const usage = usageOf(sub);
+              lines.push(cmdRow("  " + usage, sub.description() ?? "", 4, 36));
             }
             lines.push("");
           }
@@ -142,7 +150,7 @@ export async function createCli(): Promise<Command> {
           // Subcommands
           lines.push(`  ${c.bold("COMMANDS")}`);
           for (const s of subs) {
-            const usage = s.name() + (s.usage() ? " " + s.usage() : "");
+            const usage = usageOf(s);
             lines.push(cmdRow("  " + usage, s.description() ?? "", 4, 36));
           }
           lines.push("");
@@ -162,7 +170,9 @@ export async function createCli(): Promise<Command> {
           lines.push("");
 
           // Usage
-          const args = cmd.usage() || "";
+          const rawArgs = cmd.usage() || "";
+          const hasOpts = opts.length > 0;
+          const args = hasOpts ? rawArgs : rawArgs.replace(/\[options\]\s*/g, "").trim();
           lines.push(`  ${c.dim("Usage:")}  ${c.cyan(parentName + " " + cmd.name())} ${styleUsage(args)}`.trimEnd());
           lines.push("");
 

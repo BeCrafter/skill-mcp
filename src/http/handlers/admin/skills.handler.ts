@@ -290,7 +290,13 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
     if (!filePart) throw new BadRequestError("Missing 'file' field");
     if (!metadataPart) throw new BadRequestError("Missing 'metadata' field");
 
-    const metadata = JSON.parse(metadataPart.data.toString("utf-8"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let metadata: any;
+    try {
+      metadata = JSON.parse(metadataPart.data.toString("utf-8"));
+    } catch {
+      throw new BadRequestError("metadata is not valid JSON");
+    }
 
     // Extract to temp directory and import
     const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = await import("node:fs");

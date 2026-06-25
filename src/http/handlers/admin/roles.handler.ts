@@ -2,11 +2,12 @@ import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
 import { json, readJsonBody } from "../../helpers.js";
 import { AppError, BadRequestError } from "../../../utils/errors.js";
-import { requireSuperadmin } from "../../middleware/admin-auth.js";
 
 class RoleNotFoundError extends AppError {
   constructor() { super("Role not found", "ROLE_NOT_FOUND", 404); this.name = "RoleNotFoundError"; }
 }
+
+const BUILT_IN_ROLES = new Set(["superadmin", "admin", "user"]);
 
 export function registerAdminRoleRoutes(router: Router, deps: AppDependencies): void {
   if (!deps.userRepo || !deps.roleRepo || !deps.userRoleRepo) return;
@@ -18,9 +19,11 @@ export function registerAdminRoleRoutes(router: Router, deps: AppDependencies): 
   });
 
   router.post("/api/admin/roles", async (ctx) => {
-    requireSuperadmin(ctx.requestContext!);
     const data = await readJsonBody<{ name?: string; description?: string; tags?: string[] }>(ctx.req);
     if (!data.name || !Array.isArray(data.tags)) throw new BadRequestError("name and tags (array) required");
+    if (BUILT_IN_ROLES.has(data.name)) {
+      throw new AppError(`Cannot create role with reserved name "${data.name}"`, "BUILT_IN_ROLE_PROTECTED", 403);
+    }
     const role = await roleRepo.create({ name: data.name, description: data.description, tags: data.tags });
     json(ctx.res, 201, { success: true, data: role });
   });
@@ -33,11 +36,15 @@ export function registerAdminRoleRoutes(router: Router, deps: AppDependencies): 
   });
 
   router.put("/api/admin/roles/:roleId", async (ctx) => {
-    requireSuperadmin(ctx.requestContext!);
     const roleId = ctx.params.roleId;
     const data = await readJsonBody<{ name?: string; description?: string; tags?: string[] }>(ctx.req);
     if (data.tags !== undefined && !Array.isArray(data.tags)) {
       throw new BadRequestError("tags must be an array");
+    }
+    const existing = await roleRepo.findById(roleId);
+    if (!existing) throw new RoleNotFoundError();
+    if (BUILT_IN_ROLES.has(existing.name)) {
+      throw new AppError(`Cannot modify built-in role "${existing.name}"`, "BUILT_IN_ROLE_PROTECTED", 403);
     }
     const updated = await roleRepo.update(roleId, data);
     if (!updated) throw new RoleNotFoundError();
@@ -47,8 +54,12 @@ export function registerAdminRoleRoutes(router: Router, deps: AppDependencies): 
   });
 
   router.delete("/api/admin/roles/:roleId", async (ctx) => {
-    requireSuperadmin(ctx.requestContext!);
     const roleId = ctx.params.roleId;
+    const role = await roleRepo.findById(roleId);
+    if (!role) throw new RoleNotFoundError();
+    if (BUILT_IN_ROLES.has(role.name)) {
+      throw new AppError(`Cannot delete built-in role "${role.name}"`, "BUILT_IN_ROLE_PROTECTED", 403);
+    }
     // T-731 — capture affected users *before* the cascade so we can publish
     // a `role:updated` event for them. Without this, every user assigned to
     // the deleted role keeps serving stale `skill:list:${userId}` cache

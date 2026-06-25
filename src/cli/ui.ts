@@ -243,7 +243,8 @@ export function truncate(text: string, max = 70): string {
   return clean.length <= max ? clean : clean.slice(0, max - 1) + "…";
 }
 
-export function fmtDate(ts: number): string {
+export function fmtDate(ts: number | null | undefined): string {
+  if (ts == null) return "-";
   return new Date(ts).toISOString().slice(0, 16).replace("T", " ");
 }
 

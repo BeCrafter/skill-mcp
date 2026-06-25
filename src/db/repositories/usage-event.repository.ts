@@ -74,6 +74,7 @@ export interface ListOptions {
  * callers (service / aggregator / tests) cannot drift on padding rules.
  */
 export function hourBucketOf(ts: number): string {
+  if (!Number.isFinite(ts)) return "unknown";
   const d = new Date(ts);
   const yyyy = d.getUTCFullYear().toString().padStart(4, "0");
   const mm = (d.getUTCMonth() + 1).toString().padStart(2, "0");

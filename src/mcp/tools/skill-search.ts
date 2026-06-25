@@ -69,8 +69,8 @@ export function createSkillSearchTool(skillService: SkillService, contextBuilder
       }
       const lines = hits.map(({ skill, score }) => {
         const desc = (skill.description ?? "").length > 80
-          ? skill.description.slice(0, 77) + "..."
-          : skill.description;
+          ? (skill.description ?? "").slice(0, 77) + "..."
+          : (skill.description ?? "");
         return `    - ${skill.slug} [id:${skill.id}] (score=${score.toFixed(3)}): ${desc}`;
       });
       return {

@@ -31,6 +31,7 @@ describe("DELETE /api/admin/roles/:roleId publishes role:updated (T-731)", () =>
       deleteByRoleId: vi.fn().mockResolvedValue(undefined),
     };
     const roleRepo = {
+      findById: vi.fn().mockResolvedValue({ id: "r-1", name: "custom-role" }),
       delete: vi.fn().mockResolvedValue(true),
     };
     const userRepo = {} as never;
@@ -59,6 +60,7 @@ describe("DELETE /api/admin/roles/:roleId publishes role:updated (T-731)", () =>
       deleteByRoleId: vi.fn().mockResolvedValue(undefined),
     };
     const roleRepo = {
+      findById: vi.fn().mockResolvedValue(null),
       delete: vi.fn().mockResolvedValue(false),
     };
     const eventBus = { publish: vi.fn() };
