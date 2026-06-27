@@ -14,6 +14,7 @@ import type { UsageMeterService } from "./usage-meter.service.js";
 import type { SkillSearchService } from "./skill-search.service.js";
 import type { SkillEvalRepository } from "../db/repositories/skill-eval.repository.js";
 import type { AuditLogRepository } from "../db/repositories/audit-log.repository.js";
+import { buildUnifiedDiff } from "../utils/diff.js";
 import { getMimeType, isTextFile } from "../utils/security.js";
 import { CacheEpochManager } from "../cache/cache-epochs.js";
 import { TagPermissionFilter } from "../permission/tag-filter.js";
@@ -102,43 +103,6 @@ export interface VersionDiff {
   from: string;
   to: string;
   files: VersionDiffFile[];
-}
-
-/** Build a minimal unified diff between two text strings. */
-function buildUnifiedDiff(label1: string, label2: string, oldText: string, newText: string): string {
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
-  const out: string[] = [`--- ${label1}`, `+++ ${label2}`];
-
-  const maxLen = Math.max(oldLines.length, newLines.length);
-  let diffStart = -1;
-  let oldLine = 0;
-  let newLine = 0;
-
-  for (let i = 0; i < maxLen; i++) {
-    const o = i < oldLines.length ? oldLines[i] : undefined;
-    const n = i < newLines.length ? newLines[i] : undefined;
-    if (o !== n) {
-      if (diffStart === -1) {
-        diffStart = Math.max(0, i - 2);
-        oldLine = diffStart + 1;
-        newLine = diffStart + 1;
-        const ctxCount = i - diffStart;
-        const oldRange = `${oldLine},${oldLine + Math.min(ctxCount, oldLines.length - diffStart) - 1}`;
-        const newRange = `${newLine},${newLine + Math.min(ctxCount, newLines.length - diffStart) - 1}`;
-        out.push(`@@ -${oldRange} +${newRange} @@`);
-        for (let j = diffStart; j < i; j++) {
-          out.push(` ${oldLines[j]}`);
-        }
-      }
-      if (o !== undefined) out.push(`-${o}`);
-      if (n !== undefined) out.push(`+${n}`);
-    } else if (diffStart !== -1) {
-      out.push(` ${o}`);
-    }
-  }
-
-  return out.join("\n");
 }
 
 export interface ListSkillsOptions {

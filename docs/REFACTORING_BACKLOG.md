@@ -9,7 +9,7 @@
 >
 > **优先级图例**：🔴 高危（生产风险） · 🟠 中危（功能缺陷 / 一致性） · 🟡 低危（体验 / 性能） · 🧱 架构级（跨模块）
 >
-> 最后更新：2026-05-26 ｜ 第 16 批第 11 轮审计加固 T-729 / T-730 / T-731（缓存键稳定序列化 + storage 纵深防御 + role 删除事件补齐）。
+> 最后更新：2026-06-26 ｜ 第 17 批 P0-P7 系统整改 + Ponytail 审计（T-800 ~ T-803）。
 
 ---
 
@@ -1680,6 +1680,38 @@
 | T-738r | `tests/integration/mcp-transport-auth.test.ts` + `tests/integration/_helpers.ts` | 补 T-738 的端到端回归守卫：spawn 真实 `node dist/index.js serve`（`http` + `sse` 两进程，共享 DB / storage），seed 一个 `private` skill 并打上用户的 role tag，断言 ① Streamable HTTP `/mcp` 走 JSON-RPC `initialize` + `tools/call skill_list`：带 bearer 看得见 slug，匿名看不见；② SSE `/mcp/sse` + `/mcp/messages` 同样断言（GET 拿 sessionId，POST 提交 JSON-RPC，从同一 SSE 流读 server-pushed reply 按 id 配对）。修 helper：`spawnHttpServer` 增加 `transport: "http" \| "sse"` 形参（原本硬编码 http）。这是 T-738 真正的"未来再回归"守卫——单测覆盖 helper 行为，本批覆盖 SDK 集成路径，缺一不可。|
 
 回归：`npm run lint` ✓；`npm test` 449 passed / 1 flaky（`executor-batch-parallel.test.ts` 在并发跑测时单独跑通过，是 T-703 既有的时序敏感断言、与本批无关）。新增 4 集成用例（446 → 450）。
+
+---
+
+## 第 17 批：P0-P7 系统整改 + Ponytail 审计（2026-06-26）
+
+本批涵盖权限管控、审计日志、版本管理重构、向量搜索配置化、反馈版本关联、Eval+Pipeline 一体化、多租户死代码清理。以下为 Ponytail ultra 审计结论：
+
+### T-800 内联 `LLMEvalProviderOptions` 接口 🟡
+
+`src/eval/llm-eval-provider.ts` L3-7：3 字段接口，仅构造函数一处使用。内联到构造函数参数。
+
+验收标准：接口删除，构造函数参数直接声明。
+
+### T-801 内联 `VersionDiff` / `VersionDiffFile` 接口 🟡
+
+`src/services/skill.service.ts` L91-102：导出接口，零外部消费者。改为文件内类型或内联。
+
+验收标准：接口不再导出。
+
+### T-802 内联 `AuditLogEntry` 接口 🟡
+
+`src/db/repositories/audit-log.repository.ts` L6-15：仅 `findByEntity` 返回类型使用。内联。
+
+验收标准：接口删除，返回类型直接声明。
+
+### T-803 内联 `EvalRunnerOptions` 接口 🟡
+
+`src/eval/runner.ts` L32-36：2 字段接口，仅构造函数使用。内联。
+
+验收标准：接口删除，构造函数参数直接声明。
+
+预计节省：~25 行。均为 yagni 级别，无功能影响。
 
 ---
 

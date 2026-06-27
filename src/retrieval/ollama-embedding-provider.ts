@@ -1,5 +1,6 @@
 import type { IEmbeddingProvider } from "./embedding-provider.js";
 import { getLogger } from "../utils/logger.js";
+import { l2Normalize } from "./normalize.js";
 
 const logger = getLogger();
 
@@ -28,22 +29,10 @@ export class OllamaEmbeddingProvider implements IEmbeddingProvider {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: this.model, input: text }),
       });
-      if (!res.ok) {
-        logger.warn({ status: res.status }, "Ollama embedding failed");
-        return null;
-      }
+      if (!res.ok) { logger.warn({ status: res.status }, "Ollama embedding failed"); return null; }
       const data = await res.json() as { embeddings: number[][] };
-      if (!data.embeddings?.[0]) return null;
-      const vec = new Float32Array(data.embeddings[0]);
-      let norm = 0;
-      for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
-      norm = Math.sqrt(norm);
-      if (norm > 0) for (let i = 0; i < vec.length; i++) vec[i] /= norm;
-      return vec;
-    } catch (err) {
-      logger.warn({ err }, "Ollama embedding error");
-      return null;
-    }
+      return data.embeddings?.[0] ? l2Normalize(data.embeddings[0]) : null;
+    } catch (err) { logger.warn({ err }, "Ollama embedding error"); return null; }
   }
 
   async embedBatch(texts: string[]): Promise<(Float32Array | null)[]> {
@@ -54,22 +43,9 @@ export class OllamaEmbeddingProvider implements IEmbeddingProvider {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: this.model, input: texts }),
       });
-      if (!res.ok) {
-        logger.warn({ status: res.status }, "Ollama batch embedding failed");
-        return texts.map(() => null);
-      }
+      if (!res.ok) { logger.warn({ status: res.status }, "Ollama batch embedding failed"); return texts.map(() => null); }
       const data = await res.json() as { embeddings: number[][] };
-      return (data.embeddings ?? []).map(emb => {
-        const vec = new Float32Array(emb);
-        let norm = 0;
-        for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
-        norm = Math.sqrt(norm);
-        if (norm > 0) for (let i = 0; i < vec.length; i++) vec[i] /= norm;
-        return vec;
-      });
-    } catch (err) {
-      logger.warn({ err }, "Ollama batch embedding error");
-      return texts.map(() => null);
-    }
+      return (data.embeddings ?? []).map(emb => l2Normalize(emb));
+    } catch (err) { logger.warn({ err }, "Ollama batch embedding error"); return texts.map(() => null); }
   }
 }
