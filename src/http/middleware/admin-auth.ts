@@ -52,14 +52,20 @@ export async function enforceAdminAuth(
   }
 
   const sessionId = (ctx.req.headers["x-session-id"] as string) || randomUUID();
-  const requestContext = await buildRequestContextFromHttp(
-    token,
-    sessionId,
-    deps.userRepo,
-    deps.userRoleRepo,
-    deps.jwtSecret,
-    deps.jwtIssuer,
-  );
+  let requestContext;
+  try {
+    requestContext = await buildRequestContextFromHttp(
+      token,
+      sessionId,
+      deps.userRepo,
+      deps.userRoleRepo,
+      deps.jwtSecret,
+      deps.jwtIssuer,
+    );
+  } catch {
+    json(ctx.res, 401, { success: false, error: "Invalid or expired token" });
+    return null;
+  }
 
   if (!requestContext.isAuthenticated) {
     json(ctx.res, 401, { success: false, error: "Invalid or expired token" });

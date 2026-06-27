@@ -28,6 +28,7 @@ function setup(): { db: DrizzleDB; sqlite: Database.Database; repo: SkillFeedbac
     user_id TEXT, session_id TEXT,
     outcome TEXT NOT NULL,
     context TEXT, agent_comment TEXT,
+    version TEXT,
     created_at INTEGER NOT NULL
   )`);
   const skillId = "skill-1";

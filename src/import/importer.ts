@@ -489,6 +489,18 @@ export class SkillImporter {
 
     this.logger.info({ slug, name: meta.name, version, action, fileCount: skillFiles.length }, "Skill imported");
 
+    // Record the new version as current
+    if (this.versionRepo) {
+      this.versionRepo.create({
+        skillId,
+        version,
+        contentHash,
+        storagePath,
+        fileCount: skillFiles.length,
+        isCurrent: true,
+      });
+    }
+
     return {
       id: skillId,
       slug,
@@ -600,7 +612,7 @@ export class SkillImporter {
       });
       const fileCount = copied.filter(Boolean).length;
 
-      // Record version in database
+      // Record version in database (old snapshot, not current)
       this.versionRepo.create({
         skillId: skill.id,
         version: skill.version,
@@ -608,6 +620,7 @@ export class SkillImporter {
         storagePath: versionPath,
         entryFile: skill.entryFile,
         fileCount,
+        isCurrent: false,
       });
 
       this.logger.debug({ skillId: skill.id, version: skill.version, fileCount }, "Version snapshot created");

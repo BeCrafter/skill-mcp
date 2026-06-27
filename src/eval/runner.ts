@@ -1,26 +1,8 @@
 import type { Logger } from "pino";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { SkillEvalRepository, SkillEvalCaseRow, EvalRunStatus } from "../db/repositories/skill-eval.repository.js";
-import type { EvalProvider } from "./provider.interface.js";
+import type { EvalProvider, EvalInput } from "./provider.interface.js";
 import { SkillNotFoundError } from "../utils/errors.js";
-
-/**
- * P1-12 stage 2 — Eval runner. Loads every persisted case for a skill, runs
- * each one through the configured provider, evaluates expectations, and
- * appends one `skill_eval_runs` row per case. Returns a summary the CLI / a
- * future REST endpoint can present.
- *
- * Failure semantics:
- *   - Provider throws → row gets `status="error"` with `failureReason`. The
- *     run continues to the next case so a single bad case doesn't mask the
- *     others.
- *   - At least one expectation fails → row gets `status="fail"` with the
- *     first failure surfaced as `failureReason`.
- *   - All expectations pass → row gets `status="pass"`.
- *
- * Stage 3 will reuse this runner inside the version-bump regression gate by
- * comparing the latest-run map between two versions.
- */
 
 export interface CaseEvaluation {
   caseName: string;
@@ -43,12 +25,18 @@ export interface RunSummary {
   cases: CaseEvaluation[];
 }
 
+export interface EvalRunnerOptions {
+  timeoutMs?: number;
+  retries?: number;
+}
+
 export class EvalRunner {
   constructor(
     private skillRepo: SkillRepository,
     private evalRepo: SkillEvalRepository,
     private provider: EvalProvider,
     private logger?: Logger,
+    private options: EvalRunnerOptions = {},
   ) {}
 
   async runForSlug(slug: string): Promise<RunSummary> {
@@ -90,22 +78,36 @@ export class EvalRunner {
     let toolsUsed: string[] = [];
     let status: EvalRunStatus;
     let failureReason: string | null = null;
+    const timeoutMs = this.options.timeoutMs ?? 30_000;
+    const maxAttempts = 1 + (this.options.retries ?? 1);
 
-    try {
-      const result = await this.provider.run(c.input, { skillSlug, caseName: c.caseName });
-      output = result.output;
-      toolsUsed = result.toolsUsed;
-      const failure = evaluateExpectations(c, result.output, result.toolsUsed);
-      if (failure) {
-        status = "fail";
-        failureReason = failure;
-      } else {
-        status = "pass";
+    const evalInput: EvalInput = { input: c.input };
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const result = await this.withTimeout(
+          this.provider.run(evalInput, { skillSlug, caseName: c.caseName }),
+          timeoutMs,
+        );
+        output = result.output;
+        toolsUsed = result.toolsUsed;
+        const failure = evaluateExpectations(c, result.output, result.toolsUsed);
+        if (failure) {
+          status = "fail";
+          failureReason = failure;
+        } else {
+          status = "pass";
+        }
+        break;
+      } catch (err) {
+        if (attempt < maxAttempts - 1) {
+          this.logger?.warn({ err, slug: skillSlug, caseName: c.caseName, attempt }, "Eval attempt failed, retrying");
+          continue;
+        }
+        status = "error";
+        failureReason = err instanceof Error ? err.message : String(err);
+        this.logger?.warn({ err, slug: skillSlug, caseName: c.caseName }, "Eval provider failed after retries");
       }
-    } catch (err) {
-      status = "error";
-      failureReason = err instanceof Error ? err.message : String(err);
-      this.logger?.warn({ err, slug: skillSlug, caseName: c.caseName }, "Eval provider threw");
     }
 
     const latencyMs = Date.now() - start;
@@ -113,7 +115,7 @@ export class EvalRunner {
       skillId,
       skillVersion,
       caseName: c.caseName,
-      status,
+      status: status!,
       runner: this.provider.name,
       toolsUsed,
       output,
@@ -121,15 +123,17 @@ export class EvalRunner {
       latencyMs,
     });
 
-    return { caseName: c.caseName, status, output, toolsUsed, failureReason, latencyMs };
+    return { caseName: c.caseName, status: status!, output, toolsUsed, failureReason, latencyMs };
+  }
+
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`Eval timed out after ${ms}ms`)), ms)),
+    ]);
   }
 }
 
-/**
- * Returns null on pass; the first failure message otherwise. Order matters
- * only for the message the user sees — the case is `fail` if any one of the
- * three checks fails.
- */
 export function evaluateExpectations(
   c: Pick<SkillEvalCaseRow, "expectedTools" | "expectedOutputContains" | "expectedOutputNotContains">,
   output: string,
@@ -138,21 +142,15 @@ export function evaluateExpectations(
   if (c.expectedTools.length > 0) {
     const seen = new Set(toolsUsed);
     const missing = c.expectedTools.filter((t) => !seen.has(t));
-    if (missing.length > 0) {
-      return `expected_tools missing: ${missing.join(", ")}`;
-    }
+    if (missing.length > 0) return `expected_tools missing: ${missing.join(", ")}`;
   }
   if (c.expectedOutputContains.length > 0) {
     const missing = c.expectedOutputContains.filter((s) => !output.includes(s));
-    if (missing.length > 0) {
-      return `expected_output_contains missing: ${JSON.stringify(missing)}`;
-    }
+    if (missing.length > 0) return `expected_output_contains missing: ${JSON.stringify(missing)}`;
   }
   if (c.expectedOutputNotContains.length > 0) {
     const present = c.expectedOutputNotContains.filter((s) => output.includes(s));
-    if (present.length > 0) {
-      return `expected_output_not_contains present: ${JSON.stringify(present)}`;
-    }
+    if (present.length > 0) return `expected_output_not_contains present: ${JSON.stringify(present)}`;
   }
   return null;
 }

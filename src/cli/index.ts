@@ -305,8 +305,9 @@ export async function createCli(): Promise<Command> {
     .command("versions <slug>")
     .description("Show version history for a skill")
     .option("--show <version>", "Show details for a specific version")
+    .option("--diff <range>", "Compare two versions (e.g. 1.0.0..1.1.0)")
     .action(async (slug, opts) => {
-      await versionsAction(slug, { show: opts.show as string | undefined, serverUrl: opts.serverUrl });
+      await versionsAction(slug, { show: opts.show as string | undefined, diff: opts.diff as string | undefined, serverUrl: opts.serverUrl });
     });
 
   program

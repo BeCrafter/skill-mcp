@@ -82,6 +82,19 @@ export const configSchema = z.object({
     hstsEnabled: false,
   }),
 
+  embedding: z.object({
+    provider: z.enum(["none", "openai", "ollama"]).default("none"),
+    model: z.string().optional(),
+    apiKey: z.string().optional(),
+    baseUrl: z.string().optional(),
+  }).default({ provider: "none" }),
+
+  eval: z.object({
+    provider: z.enum(["echo", "llm"]).default("echo"),
+    timeout: z.number().default(30_000),
+    retries: z.number().default(1),
+  }).default({}),
+
   rateLimit: z.object({
     /**
      * P0-3 — Master switch. When false the middleware is not mounted and

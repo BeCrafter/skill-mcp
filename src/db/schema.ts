@@ -163,6 +163,7 @@ export const skillFeedbacks = sqliteTable("skill_feedbacks", {
   outcome: text("outcome").notNull(),
   context: text("context"),
   agentComment: text("agent_comment"),
+  version: text("version"),
   createdAt: integer("created_at").notNull(),
 }, (table) => [
   index("idx_feedbacks_skill_slug").on(table.skillSlug),
@@ -181,6 +182,7 @@ export const skillVersions = sqliteTable("skill_versions", {
   fileCount: integer("file_count").notNull().default(0),
   createdBy: text("created_by"),
   changeSummary: text("change_summary"),
+  isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull(),
 }, (table) => [
   index("idx_skill_versions_skill_id").on(table.skillId),
@@ -464,4 +466,18 @@ export const skillEmbeddings = sqliteTable("skill_embeddings", {
   updatedAt: integer("updated_at").notNull(),
 }, (table) => [
   index("idx_skill_embeddings_model").on(table.modelName),
+]);
+
+export const auditLogs = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  operatorId: text("operator_id"),
+  beforeJson: text("before_json"),
+  afterJson: text("after_json"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("idx_audit_logs_entity").on(table.entityType, table.entityId),
+  index("idx_audit_logs_created").on(table.createdAt),
 ]);

@@ -32,6 +32,10 @@ import { DomainEventBus } from "../../events/event-bus.js";
 import { CacheEpochManager } from "../../cache/cache-epochs.js";
 import { CacheEpochRepository } from "../../db/repositories/cache-epoch.repository.js";
 import { ImportJobRepository } from "../../db/repositories/import-job.repository.js";
+import { AuditLogRepository } from "../../db/repositories/audit-log.repository.js";
+import { NullEmbeddingProvider } from "../../retrieval/embedding-provider.js";
+import { OpenAIEmbeddingProvider } from "../../retrieval/openai-embedding-provider.js";
+import { OllamaEmbeddingProvider } from "../../retrieval/ollama-embedding-provider.js";
 import { BackgroundImportWorker } from "../../services/import-worker.js";
 import { UsageEventRepository } from "../../db/repositories/usage-event.repository.js";
 import { UsageMeterService } from "../../services/usage-meter.service.js";
@@ -175,8 +179,24 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // to substring match if init() races with the first request.
   // The default open-source distribution ships NullEmbeddingProvider, so
   // hybrid search is a no-op until an operator wires in a real provider.
+  // Embedding provider — configured via config.embedding
+  let embeddingProvider: import("../../retrieval/embedding-provider.js").IEmbeddingProvider = new NullEmbeddingProvider();
+  if (config.embedding.provider === "openai" && config.embedding.apiKey) {
+    embeddingProvider = new OpenAIEmbeddingProvider({
+      apiKey: config.embedding.apiKey,
+      model: config.embedding.model,
+      baseUrl: config.embedding.baseUrl,
+    });
+  } else if (config.embedding.provider === "ollama") {
+    embeddingProvider = new OllamaEmbeddingProvider({
+      model: config.embedding.model,
+      baseUrl: config.embedding.baseUrl,
+    });
+  }
+
   const skillEmbeddingRepo = new SkillEmbeddingRepository(db);
   const skillSearchService = new SkillSearchService(skillRepo, logger, {
+    embeddingProvider,
     embeddingRepo: skillEmbeddingRepo,
   });
   skillSearchService.subscribe(eventBus);
@@ -184,6 +204,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // invalidation, event publication, and body allowlisting flow through one
   // place (see review §4.1). Importer / eventBus / accessLogRepo are passed
   // via the trailing options bag to keep existing positional callers working.
+  const auditRepo = new AuditLogRepository(db);
   const skillService = new SkillService(
     skillProvider,
     cache,
@@ -195,7 +216,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
     storage,
     cacheEpochs,
     skillFileRepo,
-    { eventBus, importer, accessLogRepo, usageMeter, searchService: skillSearchService, evalRepo },
+    { eventBus, importer, accessLogRepo, auditRepo, usageMeter, searchService: skillSearchService, evalRepo },
   );
   // Hydrate the BM25 corpus eagerly so the first MCP/HTTP request hits a
   // ready index. Errors are non-fatal — search() soft-fails to empty result.

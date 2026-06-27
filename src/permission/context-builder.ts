@@ -6,6 +6,7 @@ import { looksLikeJwt, verifyJwt } from "../auth/jwt.service.js";
 import { sha256 } from "../utils/crypto.js";
 import { withSpan } from "../telemetry/spans.js";
 import { getLogger } from "../utils/logger.js";
+import { AuthenticationError } from "../utils/errors.js";
 
 const logger = getLogger();
 
@@ -42,7 +43,7 @@ async function resolveContextForToken(
         let userType: "superadmin" | "admin" | "user" | undefined;
         if (userRepo) {
           const user = await userRepo.findById(payload.sub);
-          if (!user || user.status !== "active") return anonymousContext(sessionId);
+          if (!user || user.status !== "active") throw new AuthenticationError("User not found or disabled");
           userType = user.userType as "superadmin" | "admin" | "user" | undefined;
         }
         const tags = new Set<string>(Array.isArray(payload.tags) ? payload.tags : []);
@@ -55,9 +56,10 @@ async function resolveContextForToken(
           userType,
         };
       } catch (err) {
+        if (err instanceof AuthenticationError) throw err;
         const reason = err instanceof Error ? err.message : "unknown";
         logger.warn({ reason }, "JWT verification failed");
-        return anonymousContext(sessionId);
+        throw new AuthenticationError("Invalid or expired token");
       }
     }
 
@@ -65,7 +67,7 @@ async function resolveContextForToken(
     const hash = sha256(token);
     const user = await userRepo.findByToken(hash);
     if (!user || user.status !== "active") {
-      return anonymousContext(sessionId);
+      throw new AuthenticationError("Invalid or expired token");
     }
 
     const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);

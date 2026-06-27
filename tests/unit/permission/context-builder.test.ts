@@ -195,28 +195,22 @@ describe("buildRequestContext / buildRequestContextFromHttp", () => {
     expect(ctx.sessionId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("returns anonymous when token does not match any user", async () => {
+  it("throws AuthenticationError when token does not match any user", async () => {
     const { userRepo, userRoleRepo } = makeRepos({ user: null });
-    const ctx = await buildRequestContext(
+    await expect(buildRequestContext(
       { sessionId: "s", authInfo: { token: "unknown" } },
       userRepo,
       userRoleRepo,
-    );
-    expect(ctx.isAuthenticated).toBe(false);
-    expect(ctx.userId).toBe("anonymous");
-    expect((userRepo.findByToken as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(sha256hex("unknown"));
+    )).rejects.toThrow("Invalid or expired token");
   });
 
-  it("returns anonymous when matched user is disabled", async () => {
+  it("throws AuthenticationError when matched user is disabled", async () => {
     const { userRepo, userRoleRepo } = makeRepos({ user: { id: "u1", status: "disabled" }, tags: ["admin"] });
-    const ctx = await buildRequestContext(
+    await expect(buildRequestContext(
       { sessionId: "s", authInfo: { token: "tok" } },
       userRepo,
       userRoleRepo,
-    );
-    expect(ctx.isAuthenticated).toBe(false);
-    expect(ctx.userId).toBe("anonymous");
-    expect(ctx.tags.size).toBe(0);
+    )).rejects.toThrow("Invalid or expired token");
   });
 
   it("returns authenticated context with aggregated tags for active user", async () => {

@@ -28,6 +28,7 @@ function setup(): { db: DrizzleDB; repo: SkillVersionRepository } {
     file_count INTEGER NOT NULL DEFAULT 0,
     created_by TEXT,
     change_summary TEXT,
+    is_current INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   )`);
   sqlite.prepare(

@@ -18,8 +18,9 @@ export function createSkillFeedbackTool(skillService: SkillService, contextBuild
       // / audit listing that walks these rows.
       context: z.string().max(2000).describe("Brief description of the usage scenario"),
       agent_comment: z.string().max(8000).describe("Agent self-assessment, e.g. whether skill instructions were clear and steps were effective"),
+      version: z.string().optional().describe("Skill version this feedback applies to (auto-detected if omitted)"),
     }),
-    handler: async (input: { skill_slug: string; outcome: string; context: string; agent_comment: string }, extra?: McpExtra) => {
+    handler: async (input: { skill_slug: string; outcome: string; context: string; agent_comment: string; version?: string }, extra?: McpExtra) => {
       try {
         const context = contextBuilder && extra ? await contextBuilder(extra) : undefined;
         await skillService.submitFeedback(input, context);

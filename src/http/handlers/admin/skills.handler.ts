@@ -235,6 +235,15 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
     json(ctx.res, 200, { success: true, data: versions });
   });
 
+  router.get("/api/admin/skills/:slug/versions/diff", async (ctx) => {
+    const slug = requireSlug(ctx);
+    const v1 = ctx.query.get("v1");
+    const v2 = ctx.query.get("v2");
+    if (!v1 || !v2) throw new BadRequestError("v1 and v2 query params required");
+    const diff = await skillService.getVersionDiff(slug, v1, v2);
+    json(ctx.res, 200, { success: true, data: diff });
+  });
+
   router.get("/api/admin/skills/:slug/lifecycle/next", async (ctx) => {
     const slug = requireSlug(ctx);
     const result = await skillService.getNextLifecycleStates(slug);

@@ -6,7 +6,7 @@ import { SkillRepository } from "../../../src/db/repositories/skill.repository.j
 import { SkillEvalRepository } from "../../../src/db/repositories/skill-eval.repository.js";
 import { EvalRunner, evaluateExpectations } from "../../../src/eval/runner.js";
 import { EchoEvalProvider } from "../../../src/eval/echo-provider.js";
-import type { EvalProvider, EvalProviderResult } from "../../../src/eval/provider.interface.js";
+import type { EvalProvider, EvalProviderResult, EvalInput } from "../../../src/eval/provider.interface.js";
 import { SkillNotFoundError } from "../../../src/utils/errors.js";
 
 type DrizzleDB = BetterSQLite3Database<typeof schema>;
@@ -70,8 +70,8 @@ function createTestTables(db: DrizzleDB): void {
 
 class StubProvider implements EvalProvider {
   readonly name = "stub";
-  constructor(private fn: (input: string) => Promise<EvalProviderResult> | EvalProviderResult) {}
-  async run(input: string): Promise<EvalProviderResult> {
+  constructor(private fn: (input: EvalInput) => Promise<EvalProviderResult> | EvalProviderResult) {}
+  async run(input: EvalInput): Promise<EvalProviderResult> {
     return await this.fn(input);
   }
 }
@@ -206,8 +206,8 @@ describe("EvalRunner.runForSlug", () => {
       { name: "ok", input: "y", expectedOutputContains: ["y"] },
     ]);
     const provider = new StubProvider((input) => {
-      if (input === "x") throw new Error("boom");
-      return { output: input, toolsUsed: [] };
+      if (input.input === "x") throw new Error("boom");
+      return { output: input.input, toolsUsed: [] };
     });
     const runner = new EvalRunner(skillRepo, evalRepo, provider);
     const sum = await runner.runForSlug("s");

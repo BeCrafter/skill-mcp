@@ -13,6 +13,7 @@ import type { IStorageProvider } from "../storage/provider.interface.js";
 import type { UsageMeterService } from "./usage-meter.service.js";
 import type { SkillSearchService } from "./skill-search.service.js";
 import type { SkillEvalRepository } from "../db/repositories/skill-eval.repository.js";
+import type { AuditLogRepository } from "../db/repositories/audit-log.repository.js";
 import { getMimeType, isTextFile } from "../utils/security.js";
 import { CacheEpochManager } from "../cache/cache-epochs.js";
 import { TagPermissionFilter } from "../permission/tag-filter.js";
@@ -55,6 +56,7 @@ export interface SkillServiceAdminDeps {
   eventBus?: DomainEventBus;
   importer?: SkillImporter;
   accessLogRepo?: AccessLogRepository;
+  auditRepo?: AuditLogRepository;
   // P1-13 — usage metering hook for skill.view. Optional so MCP-read paths
   // continue to work without it; when wired, every accessible viewSkillEntry
   // emits a fire-and-forget `skill.view` event tagged with the resolved slug.
@@ -87,6 +89,56 @@ const SKILL_LIST_TTL_SECONDS = 600;
 
 function anonymousContext(): RequestContext {
   return { tenantId: DEFAULT_TENANT_ID, userId: "anonymous", sessionId: "anonymous", tags: new Set(), isAuthenticated: false, userType: undefined };
+}
+
+export interface VersionDiffFile {
+  path: string;
+  status: "added" | "removed" | "changed";
+  diff?: string;
+}
+
+export interface VersionDiff {
+  slug: string;
+  from: string;
+  to: string;
+  files: VersionDiffFile[];
+}
+
+/** Build a minimal unified diff between two text strings. */
+function buildUnifiedDiff(label1: string, label2: string, oldText: string, newText: string): string {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const out: string[] = [`--- ${label1}`, `+++ ${label2}`];
+
+  const maxLen = Math.max(oldLines.length, newLines.length);
+  let diffStart = -1;
+  let oldLine = 0;
+  let newLine = 0;
+
+  for (let i = 0; i < maxLen; i++) {
+    const o = i < oldLines.length ? oldLines[i] : undefined;
+    const n = i < newLines.length ? newLines[i] : undefined;
+    if (o !== n) {
+      if (diffStart === -1) {
+        diffStart = Math.max(0, i - 2);
+        oldLine = diffStart + 1;
+        newLine = diffStart + 1;
+        const ctxCount = i - diffStart;
+        const oldRange = `${oldLine},${oldLine + Math.min(ctxCount, oldLines.length - diffStart) - 1}`;
+        const newRange = `${newLine},${newLine + Math.min(ctxCount, newLines.length - diffStart) - 1}`;
+        out.push(`@@ -${oldRange} +${newRange} @@`);
+        for (let j = diffStart; j < i; j++) {
+          out.push(` ${oldLines[j]}`);
+        }
+      }
+      if (o !== undefined) out.push(`-${o}`);
+      if (n !== undefined) out.push(`+${n}`);
+    } else if (diffStart !== -1) {
+      out.push(` ${o}`);
+    }
+  }
+
+  return out.join("\n");
 }
 
 export interface ListSkillsOptions {
@@ -132,6 +184,7 @@ export class SkillService {
   private usageMeter: UsageMeterService | null;
   private searchService: SkillSearchService | null;
   private evalRepo: SkillEvalRepository | null;
+  private auditRepo: AuditLogRepository | null;
 
   constructor(
     private skillProvider: ISkillProvider,
@@ -158,6 +211,7 @@ export class SkillService {
     this.usageMeter = adminDeps?.usageMeter ?? null;
     this.searchService = adminDeps?.searchService ?? null;
     this.evalRepo = adminDeps?.evalRepo ?? null;
+    this.auditRepo = adminDeps?.auditRepo ?? null;
     // Falls back to a private (no-op-as-far-as-the-app-is-concerned) manager
     // when not wired in (CLI scripts, unit tests). The cache key still
     // includes the version suffix; old keys naturally expire by TTL.
@@ -554,6 +608,7 @@ export class SkillService {
       outcome: input.outcome as "success" | "partial" | "failure" | "irrelevant",
       context: input.context,
       agentComment: input.agent_comment,
+      version: skill.version,
     });
   }
 
@@ -583,6 +638,43 @@ export class SkillService {
     const skill = await this.skillProvider.getSkillMeta(slug);
     if (!skill) throw new SkillNotFoundError(slug);
     return this.versionRepo.findBySkillId(skill.id, limit);
+  }
+
+  /** Compare two versions and return file-level + line-level diff. */
+  async getVersionDiff(slug: string, v1: string, v2: string): Promise<VersionDiff> {
+    if (!this.versionRepo || !this.storage) throw new ConfigurationError("Version repository or storage not configured");
+    const skill = await this.skillProvider.getSkillMeta(slug);
+    if (!skill) throw new SkillNotFoundError(slug);
+
+    const ver1 = this.versionRepo.findByVersion(skill.id, v1);
+    const ver2 = this.versionRepo.findByVersion(skill.id, v2);
+    if (!ver1) throw new VersionNotFoundError(slug, v1);
+    if (!ver2) throw new VersionNotFoundError(slug, v2);
+
+    const files1 = await this.storage.listRecursive(ver1.storagePath);
+    const files2 = await this.storage.listRecursive(ver2.storagePath);
+    const set1 = new Set(files1);
+    const set2 = new Set(files2);
+    const allFiles = new Set([...files1, ...files2]);
+
+    const files: VersionDiffFile[] = [];
+    for (const f of allFiles) {
+      if (!set1.has(f)) {
+        files.push({ path: f, status: "added" });
+      } else if (!set2.has(f)) {
+        files.push({ path: f, status: "removed" });
+      } else {
+        const c1 = await this.storage.get(`${ver1.storagePath}${f}`);
+        const c2 = await this.storage.get(`${ver2.storagePath}${f}`);
+        const text1 = c1 ? new TextDecoder().decode(c1) : "";
+        const text2 = c2 ? new TextDecoder().decode(c2) : "";
+        if (text1 !== text2) {
+          files.push({ path: f, status: "changed", diff: buildUnifiedDiff(`${v1}/${f}`, `${v2}/${f}`, text1, text2) });
+        }
+      }
+    }
+
+    return { slug, from: v1, to: v2, files };
   }
 
   /** Rollback skill to a specific version */
@@ -862,6 +954,7 @@ export class SkillService {
       });
     }
     if (!updated) throw new SkillNotFoundError(slug);
+    if (this.auditRepo) this.auditRepo.log({ action: "skill.update", entityType: "skill", entityId: skill.id, before: { slug, ...projected }, after: updated });
     return toSkillMetaPublic(updated);
   }
 
@@ -872,6 +965,7 @@ export class SkillService {
     }
     const skill = await this.skillRepo.findBySlug(slug);
     if (!skill) throw new SkillNotFoundError(slug);
+    if (this.auditRepo) this.auditRepo.log({ action: "skill.delete", entityType: "skill", entityId: skill.id, before: skill });
     await this.storage.deleteDir(skill.storagePath);
     const deleted = await this.skillRepo.delete(slug);
     if (this.eventBus) {
@@ -915,7 +1009,9 @@ export class SkillService {
   /** Admin import — delegates to SkillImporter; importer publishes its own events post-commit. */
   async adminImportSkill(source: string, opts: ImportOptions): Promise<ImportResult> {
     if (!this.importer) throw new ConfigurationError("Importer not configured");
-    return this.importer.import(source, opts);
+    const result = await this.importer.import(source, opts);
+    if (this.auditRepo) this.auditRepo.log({ action: "skill.import", entityType: "skill", entityId: result.id, after: result });
+    return result;
   }
 
   /** Admin rollback — wraps `rollbackToVersion` and publishes skill:updated using post-rollback metadata. */
@@ -927,6 +1023,7 @@ export class SkillService {
     await this.rollbackToVersion(slug, targetVersion, bump);
     if (!this.skillRepo) return;
     const skillAfter = await this.skillRepo.findBySlug(slug);
+    if (this.auditRepo) this.auditRepo.log({ action: "skill.rollback", entityType: "skill", entityId: skillAfter?.id ?? slug, after: { targetVersion, bump, newVersion: skillAfter?.version } });
     if (this.eventBus) {
       this.eventBus.publish({
         type: "skill:updated",
@@ -1023,6 +1120,7 @@ export class SkillService {
     options?: TransitionLifecycleOptions,
   ): Promise<SkillMeta> {
     const updated = await this.transitionLifecycle(slug, target, options);
+    if (this.auditRepo) this.auditRepo.log({ action: "skill.lifecycle", entityType: "skill", entityId: updated.id, after: { from: updated.status, to: target } });
     if (this.eventBus) {
       this.eventBus.publish({
         type: "skill:updated",

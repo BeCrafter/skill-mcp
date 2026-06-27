@@ -13,6 +13,7 @@ export interface SkillVersion {
   fileCount: number;
   createdBy: string | null;
   changeSummary: string | null;
+  isCurrent: boolean;
   createdAt: number;
 }
 
@@ -25,6 +26,7 @@ export interface CreateSkillVersionInput {
   fileCount: number;
   createdBy?: string;
   changeSummary?: string;
+  isCurrent?: boolean;
 }
 
 export class SkillVersionRepository {
@@ -40,6 +42,15 @@ export class SkillVersionRepository {
       return !!row;
     });
     const now = Date.now();
+    const isCurrent = input.isCurrent ?? true;
+
+    // If marking as current, clear other current flags for this skill
+    if (isCurrent) {
+      this.db.update(skillVersions)
+        .set({ isCurrent: false })
+        .where(eq(skillVersions.skillId, input.skillId))
+        .run();
+    }
 
     this.db.insert(skillVersions).values({
       id,
@@ -51,6 +62,7 @@ export class SkillVersionRepository {
       fileCount: input.fileCount,
       createdBy: input.createdBy ?? null,
       changeSummary: input.changeSummary ?? null,
+      isCurrent,
       createdAt: now,
     }).run();
 
@@ -64,8 +76,30 @@ export class SkillVersionRepository {
       fileCount: input.fileCount,
       createdBy: input.createdBy ?? null,
       changeSummary: input.changeSummary ?? null,
+      isCurrent,
       createdAt: now,
     };
+  }
+
+  findCurrent(skillId: string): SkillVersion | null {
+    const result = this.db
+      .select()
+      .from(skillVersions)
+      .where(and(eq(skillVersions.skillId, skillId), eq(skillVersions.isCurrent, true)))
+      .limit(1)
+      .all();
+    return result.length > 0 ? (result[0] as SkillVersion) : null;
+  }
+
+  markCurrent(skillId: string, versionId: string): void {
+    this.db.update(skillVersions)
+      .set({ isCurrent: false })
+      .where(eq(skillVersions.skillId, skillId))
+      .run();
+    this.db.update(skillVersions)
+      .set({ isCurrent: true })
+      .where(eq(skillVersions.id, versionId))
+      .run();
   }
 
   findBySkillId(skillId: string, limit?: number): SkillVersion[] {
