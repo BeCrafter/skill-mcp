@@ -2,7 +2,7 @@
 
 ## 5 分钟快速上手
 
-### 1. 安装和构建
+### 1. 安装、构建和初始化
 
 ```bash
 # 克隆项目
@@ -14,6 +14,9 @@ npm install
 
 # 编译
 npm run build
+
+# 初始化系统（创建首个管理员用户）
+npm start -- init --username admin --password <your-password>
 ```
 
 ### 2. 启动本地 MCP（场景 A）
@@ -38,7 +41,7 @@ npm start
 npm start
 ```
 
-👉 详见 [Scenario A 完整指南](./SCENARIO_A.md)
+👉 详见 [Scenario A 完整指南](./SCENARIOS/SCENARIO_A.md)
 
 ---
 
@@ -55,10 +58,10 @@ npm start
 
 # 终端 2：启动本地 MCP 客户端
 cp src/config/examples/.env.scenario-b-client .env.local
-CLOUD_SERVICE_URL=http://localhost:3000 npm start
+CLOUD_SERVICE_URL=http://localhost:3000 AUTH_TOKEN=test-key-1 npm start
 ```
 
-👉 详见 [Scenario B 完整指南](./SCENARIO_B.md)
+👉 详见 [Scenario B 完整指南](./SCENARIOS/SCENARIO_B.md)
 
 ---
 
@@ -80,7 +83,7 @@ TRANSPORT_TYPE=http npm start
 docker-compose -f docker-compose.c2.yml up -d
 ```
 
-👉 详见 [Scenario C 完整指南](./SCENARIO_C.md)
+👉 详见 [Scenario C 完整指南](./SCENARIOS/SCENARIO_C.md)
 
 ---
 
@@ -100,6 +103,7 @@ docker-compose -f docker-compose.c2.yml up -d
 |------|---------|------|
 | **standalone** | 本地存储 | 独立部署 |
 | **gateway** | 远程服务 | 连接远程存储 |
+| **cloud** | 纯数据服务 | 后端部署（无 MCP） |
 
 ### 配置组合
 
@@ -125,10 +129,10 @@ npm run test:coverage           # 覆盖率报告
 
 # 数据库
 npm run db:migrate              # 迁移数据库
-npm run db:query                # 查询数据库
+sqlite3 data/skill-mcp.db "SELECT slug, name FROM skills"  # 查询
 
 # 导入技能
-npm run import -- --source <path>
+npm run import -- <path>
 ```
 
 ## 环境变量快速参考
@@ -136,11 +140,11 @@ npm run import -- --source <path>
 ```bash
 # 最重要的三个配置
 TRANSPORT_TYPE=stdio|http       # 通信方式
-DEPLOYMENT_MODE=standalone|gateway  # 数据源
+DEPLOYMENT_MODE=standalone|gateway|cloud  # 数据源
 CLOUD_SERVICE_URL=...          # 远程服务（gateway 模式）
 ```
 
-完整配置见 [配置参考](./ARCHITECTURE.md#配置详解)
+完整配置见 [配置参考](./ARCHITECTURE.md#71-配置srcconfig)
 
 ## 常见问题
 
@@ -148,13 +152,13 @@ CLOUD_SERVICE_URL=...          # 远程服务（gateway 模式）
 
 ```bash
 # 从本地目录
-npm run import -- --source /path/to/skill
+npm run import -- /path/to/skill
 
 # 从 Git 仓库
-npm run import -- --source https://github.com/user/skill.git
+npm run import -- https://github.com/user/skill.git
 
 # 看看导入了什么
-npm run db:query -- "SELECT slug, name FROM skills"
+sqlite3 data/skill-mcp.db "SELECT slug, name FROM skills"
 ```
 
 ### Q: 如何清除所有数据重新开始？
@@ -169,31 +173,39 @@ npm start  # 会自动创建新数据库
 建议使用场景 C2（分离部署）+ Docker Compose：
 
 ```bash
-# 参考 docs/SCENARIO_C.md 中的 Docker Compose 示例
+# 参考 docs/SCENARIOS/SCENARIO_C.md 中的 Docker Compose 示例
 ```
 
 ### Q: 能否在远程服务器上运行？
 
 可以。场景 B 和 C 都支持。关键是配置 `CLOUD_SERVICE_URL` 和 `AUTH_TOKEN`。
 
-### Q: 如何启用 API Key 认证？
+### Q: 如何管理用户权限？
+
+项目使用基于角色的访问控制（RBAC）。API Key 认证已移除。
 
 ```bash
-ENABLE_API_KEY_AUTH=true
-API_KEYS=key1,key2,key3
+# 初始化系统（首次）
+npm start -- init --username admin --password <your-password>
+
+# 创建角色
+npm start -- role create --name editor --tags skill:read,skill:write
+
+# 创建用户并分配角色
+npm start -- user create --name alice --role-ids <role-id>
 ```
 
-客户端连接时需要通过 `Authorization: Bearer {key}` 认证。
+HTTP/SSE 客户端通过 `Authorization: Bearer <token>` 认证；stdio 模式设置 `SKILL_MCP_AUTH_TOKEN` 环境变量。
 
 ## 文档导航
 
 | 内容 | 文件 |
 |------|------|
-| **本场景** | [Scenario A](./SCENARIO_A.md) |
-| **混合场景** | [Scenario B](./SCENARIO_B.md) |
-| **分布式场景** | [Scenario C](./SCENARIO_C.md) |
+| **本场景** | [Scenario A](./SCENARIOS/SCENARIO_A.md) |
+| **混合场景** | [Scenario B](./SCENARIOS/SCENARIO_B.md) |
+| **分布式场景** | [Scenario C](./SCENARIOS/SCENARIO_C.md) |
 | **完整架构** | [ARCHITECTURE.md](./ARCHITECTURE.md) |
-| **配置参考** | [ARCHITECTURE.md#配置详解](./ARCHITECTURE.md#配置详解) |
+| **配置参考** | [ARCHITECTURE.md#71-配置srcconfig](./ARCHITECTURE.md#71-配置srcconfig) |
 
 ## 下一步
 

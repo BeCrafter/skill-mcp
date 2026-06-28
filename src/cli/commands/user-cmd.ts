@@ -18,8 +18,10 @@ import { ConflictError } from "../../utils/errors.js";
 
 const PRIVILEGED_ROLE_NAMES = new Set(["superadmin", "admin"]);
 
-function assertCanOperateOnCli(targetUserType: string, callerUserType: string): void {
+function assertCanOperateOnCli(targetUserType: string, callerUserType: string, targetId?: string, callerId?: string): void {
   if (targetUserType === "superadmin") {
+    // 超管之间互相保护，但允许操作自己
+    if (targetId && callerId && targetId === callerId) return;
     fail("Cannot operate on superadmin user");
     closeDatabase();
     process.exit(1);
@@ -279,7 +281,7 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
     closeDatabase();
     process.exit(1);
   }
-  assertCanOperateOnCli(user.userType, creds.userType);
+  assertCanOperateOnCli(user.userType, creds.userType, user.id, creds.userId);
   const tokenExpiresAt = opts.ttl ? Date.now() + parseTtlToMs(opts.ttl) : null;
   const graceMs = opts.grace ? parseTtlToMs(opts.grace) : undefined;
   const token = generateToken();
@@ -383,7 +385,7 @@ export async function userDeleteAction(userId: string, opts: { serverUrl?: strin
     closeDatabase();
     process.exit(1);
   }
-  assertCanOperateOnCli(target.userType, creds.userType);
+  assertCanOperateOnCli(target.userType, creds.userType, target.id, creds.userId);
   await userRoleRepo.deleteByUserId(userId);
   await userRepo.delete(userId);
   ok(`${c.bold("Deleted")}  user  ${c.dim(userId)}`);
@@ -410,7 +412,7 @@ export async function userAssignRolesAction(userId: string, roleIds: string[], o
     closeDatabase();
     process.exit(1);
   }
-  assertCanOperateOnCli(user.userType, creds.userType);
+  assertCanOperateOnCli(user.userType, creds.userType, user.id, creds.userId);
   // Check privileged role assignment
   if (roleIds.length > 0 && creds.userType !== "superadmin") {
     const roles = await roleRepo.findByIds(roleIds);

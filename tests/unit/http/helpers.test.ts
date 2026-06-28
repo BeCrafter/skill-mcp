@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  RequestBodyTooLargeError, readBody, json, getSafeHost, isValidSlug,
-  parsePagination, parseQuery, parseJsonBody, readJsonBody, requireFilePaths,
+  RequestBodyTooLargeError, readBody, json, isValidSlug,
+  parsePagination, parseQuery, readJsonBody, requireFilePaths,
   requireSlug,
 } from "@/http/helpers.js";
 import type { HttpContext } from "@/http/context.js";
@@ -64,18 +64,6 @@ describe("http/helpers", () => {
     });
   });
 
-  describe("getSafeHost", () => {
-    it("falls back to localhost on undefined or unsafe host", () => {
-      expect(getSafeHost(undefined)).toBe("localhost");
-      expect(getSafeHost("a b c")).toBe("localhost");
-      expect(getSafeHost("evil$host")).toBe("localhost");
-    });
-    it("preserves clean hosts and ports", () => {
-      expect(getSafeHost("example.com")).toBe("example.com");
-      expect(getSafeHost("api.example.com:8080")).toBe("api.example.com:8080");
-    });
-  });
-
   describe("isValidSlug", () => {
     it("rejects empty / oversized / separator / traversal / tilde", () => {
       expect(isValidSlug("")).toBe(false);
@@ -113,15 +101,6 @@ describe("http/helpers", () => {
       const q = parseQuery("/x?a=1&b=2", "evil host");
       expect(q.get("a")).toBe("1");
       expect(q.get("b")).toBe("2");
-    });
-  });
-
-  describe("parseJsonBody", () => {
-    it("parses Buffer JSON", () => {
-      expect(parseJsonBody(Buffer.from('{"k":1}'))).toEqual({ k: 1 });
-    });
-    it("throws on bad JSON", () => {
-      expect(() => parseJsonBody(Buffer.from("nope"))).toThrow();
     });
   });
 

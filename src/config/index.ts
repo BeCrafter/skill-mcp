@@ -165,5 +165,4 @@ export function createConfig(): AppConfig {
   return loadConfig();
 }
 
-export type { AppConfig };
 export { configSchema, getDefaultDataDir };

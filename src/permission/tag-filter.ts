@@ -1,7 +1,10 @@
-import type { IPermissionFilter } from "./filter.interface.js";
 import type { SkillMeta, RequestContext } from "../types/index.js";
 import { metrics } from "../telemetry/metrics.js";
 import { withSpan } from "../telemetry/spans.js";
+
+interface IPermissionFilter {
+  filter(skills: SkillMeta[]): Promise<SkillMeta[]>;
+}
 
 // P0-9 — non-admin callers see published skills (active) and deprecated skills
 // (still visible during the deprecation window so existing integrations keep

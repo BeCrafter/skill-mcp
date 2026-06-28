@@ -4,6 +4,12 @@ This document provides a complete reference for the three MCP tools exposed by s
 
 ---
 
+## API Versioning
+
+The canonical path prefix is `/api/v1/*`. All unversioned paths (`/api/admin/*`, `/api/gateway/*`, `/api/auth/*`) remain functional aliases during a 6-month deprecation window (scheduled removal after **2026-11-28**). Clients SHOULD migrate to the `/api/v1/` prefix. Legacy responses include `Sunset` and `Deprecation` headers per RFC 8594.
+
+---
+
 ## 1. skill_list
 
 **Purpose**: Retrieve the complete list of available skills in the system.
@@ -170,22 +176,20 @@ This tool MUST be called with multiple file paths when the skill_view instructio
 
 ### Response Format
 
-Array of file content objects, one per requested file:
+Array of `SkillFileContent` objects, one per requested file:
 
 ```typescript
 [
   {
-    type: "text",          // For .md, .txt, .json, etc.
-    text: "# File content..."
+    path: "references/framework.md",
+    content: "# File content...",
+    encoding: "utf-8"        // text files (.md, .txt, .json, etc.)
   },
   {
-    type: "text",
-    text: "## Another file..."
-  },
-  {
-    type: "image",         // For .png, .jpg, .gif, etc.
-    mimeType: "image/png",
-    text: "iVBORw0KGgoAAAANS...base64-encoded..."
+    path: "assets/icon.png",
+    content: "iVBORw0KGgoAAAANS...",
+    encoding: "base64",       // binary files (.png, .jpg, .gif, etc.)
+    mimeType: "image/png"     // optional, present for binary files
   }
 ]
 ```
@@ -220,16 +224,19 @@ Array of file content objects, one per requested file:
   "result": {
     "content": [
       {
-        "type": "text",
-        "text": "# CRISPE Framework\n\n**C** = Clarity\n**R** = Role\n..."
+        "path": "references/crispe-framework.md",
+        "content": "# CRISPE Framework\n\n**C** = Clarity\n**R** = Role\n...",
+        "encoding": "utf-8"
       },
       {
-        "type": "text",
-        "text": "# CREATE Framework\n\n**C** = Context\n**R** = Role\n..."
+        "path": "references/create-framework.md",
+        "content": "# CREATE Framework\n\n**C** = Context\n**R** = Role\n...",
+        "encoding": "utf-8"
       },
       {
-        "type": "text",
-        "text": "# Self-Check Checklist\n\n- [ ] Clarity\n- [ ] Role\n..."
+        "path": "templates/checklist.md",
+        "content": "# Self-Check Checklist\n\n- [ ] Clarity\n- [ ] Role\n...",
+        "encoding": "utf-8"
       }
     ]
   }
@@ -260,17 +267,87 @@ Array of file content objects, one per requested file:
 
 ---
 
-## 4. Admin API Endpoints
+## 4. Auth API Endpoints
 
-These endpoints are for internal management and server administration. They are NOT authenticated by default.
+Authentication endpoints for obtaining and managing JWT access tokens.
 
-### GET /api/admin/skills
+### POST /api/auth/login
 
-List all available skills with pagination.
+Authenticate a user and receive access + refresh tokens.
 
 **Request**:
 ```bash
-curl http://localhost:3000/api/admin/skills?offset=0&limit=50
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "secret"}'
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "eyJhbGciOi...",
+    "refresh_token": "eyJhbGciOi...",
+    "token_type": "Bearer",
+    "expires_in": 7200
+  }
+}
+```
+
+### POST /api/auth/refresh
+
+Refresh an expired access token using a valid refresh token.
+
+**Request**:
+```bash
+curl -X POST http://localhost:3000/api/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "eyJhbGciOi..."}'
+```
+
+### POST /api/auth/change-password
+
+Change the authenticated user's password. Requires a valid Bearer token.
+
+**Request**:
+```bash
+curl -X POST http://localhost:3000/api/auth/change-password \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "old", "new_password": "new"}'
+```
+
+---
+
+## 5. Admin API Endpoints
+
+All admin endpoints require **JWT Bearer Token** authentication with `userType` of `admin` or `superadmin`. The `enforceAdminAuth()` middleware validates the JWT, checks token expiry, and verifies the user has admin-level privileges. Requests without a valid token or with insufficient privileges are rejected with 401/403.
+
+```bash
+Authorization: Bearer <jwt_access_token>
+```
+
+### 5.1 Skills Management
+
+#### GET /api/admin/skills
+
+List all available skills with pagination and filtering.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `offset` | number | Pagination offset (default: 0) |
+| `limit` | number | Page size (default: 50) |
+| `category` | string | Filter by category |
+| `tags` | string | Comma-separated tag list (AND match) |
+| `attributes.*` | string | Filter by dynamic attribute, e.g. `attributes.framework=react` |
+
+**Request**:
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:3000/api/admin/skills?offset=0&limit=50&category=writing&tags=prompt,ai"
 ```
 
 **Response**:
@@ -286,7 +363,7 @@ curl http://localhost:3000/api/admin/skills?offset=0&limit=50
 }
 ```
 
-### GET /api/admin/skills/{slug}
+#### GET /api/admin/skills/{slug}
 
 Get a specific skill by slug.
 
@@ -298,67 +375,496 @@ Get a specific skill by slug.
 }
 ```
 
-### PUT /api/admin/skills/{slug}
+#### PUT /api/admin/skills/{slug}
 
 Update skill metadata.
 
 **Request**:
 ```bash
 curl -X PUT http://localhost:3000/api/admin/skills/prompt-writer \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"category": "writing", "tags": ["prompt", "ai"]}'
 ```
 
-### DELETE /api/admin/skills/{slug}
+#### DELETE /api/admin/skills/{slug}
 
 Delete a skill and its files.
 
-### POST /api/admin/skills
+#### POST /api/admin/skills
 
 Import a new skill from a source path.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | **Required.** Path or URL to the skill source |
+| `category` | string | Skill category |
+| `tags` | string[] | List of tags |
+| `description` | string | Skill description |
+| `target_id` | string | Existing skill ID to overwrite (use with `overwrite: true`) |
+| `version_bump` | `"major" \| "minor" \| "patch"` | Version increment strategy (default: `"patch"`) |
+| `overwrite` | boolean | Whether to overwrite an existing skill (default: `false`) |
+| `allow_duplicate` | boolean | Allow importing a skill with a duplicate name (default: `false`) |
+| `slug` | string | Custom slug override |
+| `branch` | string | Git branch (when source is a git repo) |
+| `sub_dir` | string | Subdirectory within the source (for monorepos) |
 
 **Request**:
 ```bash
 curl -X POST http://localhost:3000/api/admin/skills \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"source": "/path/to/skill", "category": "writing"}'
+  -d '{"source": "/path/to/skill", "category": "writing", "tags": ["prompt"], "version_bump": "minor"}'
 ```
 
-### GET /api/admin/skills/{slug}/entry
+#### GET /api/admin/skills/{slug}/entry
 
 Get the entry file (SKILL.md) content.
 
-**Response**: Raw markdown content
+**Response**: Raw markdown content (`Content-Type: text/markdown; charset=utf-8`)
 
-### POST /api/admin/skills/{slug}/files
+#### POST /api/admin/skills/{slug}/files
 
 Batch-read multiple skill files.
 
 **Request**:
 ```bash
 curl -X POST http://localhost:3000/api/admin/skills/prompt-writer/files \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"paths": ["references/crispe-framework.md", "templates/checklist.md"]}'
 ```
 
-### GET /api/admin/skills/{slug}/file-tree
+**Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "path": "references/crispe-framework.md",
+      "content": "# CRISPE Framework\n\n...",
+      "encoding": "utf-8"
+    },
+    {
+      "path": "templates/checklist.md",
+      "content": "# Self-Check Checklist\n\n...",
+      "encoding": "utf-8"
+    }
+  ]
+}
+```
+
+**Response Object Fields** (`SkillFileContent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | File path relative to skill root |
+| `content` | string | File content (raw UTF-8 or base64-encoded) |
+| `encoding` | `"utf-8" \| "base64"` | Content encoding |
+| `mimeType` | string? | MIME type (present for binary files) |
+
+#### GET /api/admin/skills/{slug}/file-tree
 
 Get the file tree structure of a skill.
 
-### GET /api/admin/skills/name/{name}
+#### GET /api/admin/skills/name/{name}
 
 Search skills by name.
 
-### GET /api/admin/logs
+#### GET /api/admin/skills/{slug}/versions
+
+Get version history for a skill.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `limit` | number | Max versions to return (default: 10) |
+
+#### GET /api/admin/skills/{slug}/versions/diff
+
+Compare two skill versions.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `v1` | string | First version |
+| `v2` | string | Second version |
+
+#### GET /api/admin/skills/{slug}/lifecycle/next
+
+Get valid next lifecycle states for a skill.
+
+#### POST /api/admin/skills/{slug}/publish
+
+Transition a skill to `published` status.
+
+#### POST /api/admin/skills/{slug}/deprecate
+
+Transition a skill to `deprecated` status.
+
+#### POST /api/admin/skills/{slug}/archive
+
+Transition a skill to `archived` status.
+
+#### POST /api/admin/skills/{slug}/republish
+
+Transition a skill back to `published` status.
+
+#### POST /api/admin/skills/{slug}/rollback
+
+Rollback a skill to a previous version.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | string | **Required.** Target version to rollback to |
+| `bump` | `"major" \| "minor" \| "patch"` | Version bump strategy for the new version |
+
+#### PUT /api/admin/skills/{slug}/retrieval
+
+Update retrieval metadata (embedding hints, keyword weights, etc.). Send `null` to clear all retrieval fields.
+
+#### POST /api/admin/skills/upload
+
+Upload a skill package via multipart/form-data.
+
+#### GET /api/admin/skills/effectiveness-report
+
+Get skill effectiveness rates over a time window.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `days` | number | Lookback window in days (default: 30) |
+
+#### GET /api/admin/skills/{slug}/eval/cases
+
+Get eval cases for a skill (parsed from SKILL.md frontmatter).
+
+#### POST /api/admin/skills/{slug}/eval/run
+
+Run eval cases against a skill. Requires an eval runner to be configured.
+
+#### GET /api/admin/skills/{slug}/eval/results
+
+Get eval results for a skill.
+
+### 5.2 Users Management
+
+#### GET /api/admin/users
+
+List all users.
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": [
+    { "id": "...", "username": "admin", "userType": "admin", "status": "active" }
+  ]
+}
+```
+
+#### POST /api/admin/users
+
+Create a new user.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `username` | string | **Required.** Username |
+| `password` | string | User password |
+| `userType` | string | User type (`admin`, `superadmin`, `user`) |
+| `token_expires_at` | number? | Custom token expiry timestamp (ms) |
+| `expires_in` | number? | Token TTL in seconds |
+
+**Note**: Creating `superadmin` users requires a `superadmin` caller. `admin` targets can only be created by `superadmin`.
+
+#### GET /api/admin/users/{userId}
+
+Get a specific user by ID.
+
+#### PUT /api/admin/users/{userId}
+
+Update a user. `superadmin` targets are protected — only the superadmin can operate on themselves.
+
+#### DELETE /api/admin/users/{userId}
+
+Delete a user. `superadmin` targets cannot be deleted. `admin` targets require a `superadmin` caller.
+
+#### POST /api/admin/users/{userId}/rotate-token
+
+Rotate the API token for a user. Returns the new token (shown once).
+
+#### DELETE /api/admin/users/{userId}/previous-token
+
+Revoke the previous token during the grace period after rotation.
+
+#### PUT /api/admin/users/{userId}/roles
+
+Assign roles to a user.
+
+**Request Body**:
+```json
+{ "roleIds": ["role-id-1", "role-id-2"] }
+```
+
+#### POST /api/admin/users/{username}/reset-password
+
+Reset a user's password. Admin can only reset own password; superadmin can reset any admin.
+
+### 5.3 Roles Management
+
+Built-in roles (`superadmin`, `admin`, `user`) cannot be created, modified, or deleted.
+
+#### GET /api/admin/roles
+
+List all roles.
+
+#### POST /api/admin/roles
+
+Create a new custom role.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | **Required.** Role name (must not be a built-in name) |
+| `description` | string? | Role description |
+| `tags` | string[] | **Required.** Permission tags assigned to this role |
+
+#### GET /api/admin/roles/{roleId}
+
+Get a specific role by ID.
+
+#### PUT /api/admin/roles/{roleId}
+
+Update a custom role. Cannot modify built-in roles.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string? | New role name |
+| `description` | string? | New description |
+| `tags` | string[]? | Updated permission tags |
+
+#### DELETE /api/admin/roles/{roleId}
+
+Delete a custom role. Cannot delete built-in roles. Users assigned to this role will have their skill list cache invalidated.
+
+### 5.4 Quotas & Tier Limits
+
+#### GET /api/admin/tenants/{tenantId}/quota
+
+Get the current quota row for a tenant. Auto-seeds a `free` tier on first read.
+
+#### PUT /api/admin/tenants/{tenantId}/quota
+
+Change the tier or individual quota limits.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tier` | `"free" \| "team" \| "enterprise"` | Set tier (resets limits to tier defaults) |
+| `maxSkills` | number? | Max number of skills |
+| `maxStorageBytes` | number? | Max storage in bytes |
+| `maxApiCallsPerHour` | number? | Max API calls per hour |
+| `maxWebhooks` | number? | Max webhook subscriptions |
+| `maxFileSizeBytes` | number? | Max single file size |
+| `maxConcurrentImports` | number? | Max concurrent import jobs |
+
+#### GET /api/admin/tenants/{tenantId}/quota/history
+
+Get chronological quota change history (newest first).
+
+#### GET /api/admin/tenants/{tenantId}/overrides
+
+Get active quota overrides (or all with `?all=true`).
+
+#### POST /api/admin/tenants/{tenantId}/overrides
+
+Create a quota override. Requires an audit-grade reason.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `field` | string | **Required.** Quota field to override |
+| `value` | number | **Required.** Override value |
+| `reason` | string | **Required.** Audit reason |
+| `expiresAt` | number? | Expiry timestamp (ms) |
+
+#### DELETE /api/admin/quota-overrides/{overrideId}
+
+Remove a single quota override.
+
+### 5.5 Webhooks
+
+#### GET /api/admin/webhooks
+
+List all webhook subscriptions (secrets are hidden).
+
+#### POST /api/admin/webhooks
+
+Create a new webhook subscription. The secret is returned **once** in this response.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | string | **Required.** Webhook delivery URL |
+| `event_types` | string[] | **Required.** Event types to subscribe to |
+| `enabled` | boolean? | Enable/disable (default: `true`) |
+| `description` | string? | Human-readable description |
+
+#### GET /api/admin/webhooks/{id}
+
+Get a webhook subscription detail (secret is hidden).
+
+#### PUT /api/admin/webhooks/{id}
+
+Update a webhook subscription.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | string? | Delivery URL |
+| `event_types` | string[]? | Subscribed event types |
+| `enabled` | boolean? | Enable/disable |
+| `description` | string? | Description |
+
+#### POST /api/admin/webhooks/{id}/rotate
+
+Rotate the webhook secret. The new secret is returned **once**.
+
+#### DELETE /api/admin/webhooks/{id}
+
+Delete a webhook subscription (cascade-deletes orphan deliveries).
+
+#### GET /api/admin/webhooks/{id}/deliveries
+
+Get the last N deliveries for audit.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `limit` | number | Max deliveries to return (default: 50) |
+
+#### POST /api/admin/webhook-deliveries/{id}/replay
+
+Re-queue a dead-lettered delivery.
+
+### 5.6 Usage Metering
+
+#### GET /api/admin/usage/aggregate
+
+Get aggregated usage data.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tenantId` | string | Filter by tenant (default: `"default"`) |
+| `fromBucket` | string | Start bucket (`YYYY-MM-DDTHH` format) |
+| `toBucket` | string | End bucket (`YYYY-MM-DDTHH` format) |
+| `eventType` | string | Filter by event type (e.g. `skill.view`, `pipeline.run`, `api.call`, `storage.write`) |
+| `format` | `"json" \| "csv"` | Response format (default: `"json"`) |
+
+#### GET /api/admin/usage/events
+
+List raw usage events.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tenantId` | string | Filter by tenant |
+| `fromBucket` | string | Start bucket (`YYYY-MM-DDTHH` format) |
+| `toBucket` | string | End bucket (`YYYY-MM-DDTHH` format) |
+| `eventType` | string | Filter by event type |
+| `limit` | number | Max events (default: 100, max: 10000) |
+
+### 5.7 Import Jobs
+
+#### POST /api/admin/skills/import/async
+
+Enqueue an async skill import job.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | **Required.** Skill source path or URL |
+| `category` | string? | Skill category |
+| `tags` | string[]? | Tags |
+| `slug` | string? | Custom slug |
+| `branch` | string? | Git branch |
+| `sub_dir` | string? | Subdirectory |
+
+#### GET /api/admin/jobs
+
+List import jobs.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `status` | string | Filter by status |
+| `limit` | number | Max jobs to return |
+
+#### GET /api/admin/jobs/{jobId}
+
+Get a specific import job.
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "status": "completed",
+    "progress": 100,
+    "message": "Imported 3 files",
+    "source": "/path/to/skill",
+    "result": { "slug": "my-skill", "version": "0.0.1" },
+    "error": null,
+    "created_by_user_id": "...",
+    "created_at": "2026-01-01T00:00:00.000Z",
+    "started_at": "2026-01-01T00:00:01.000Z",
+    "finished_at": "2026-01-01T00:00:05.000Z"
+  }
+}
+```
+
+#### GET /api/admin/jobs/{jobId}/progress
+
+Get just the progress counter for an import job (thin alias for shell scripts).
+
+### 5.8 Admin Misc
+
+#### GET /api/admin/logs
 
 Get access logs for a skill.
 
-**Request**:
-```bash
-curl http://localhost:3000/api/admin/logs?skill_slug=prompt-writer&limit=50
-```
+**Query Parameters**:
 
-### GET /api/admin/stats
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `skill_slug` | string | **Required.** Skill slug to query |
+| `limit` | number | Max log entries (default: 50, max: 200) |
+
+#### GET /api/admin/stats
 
 Get server statistics.
 
@@ -370,9 +876,19 @@ Get server statistics.
 }
 ```
 
-### GET /api/health
+---
 
-Health check endpoint (legacy, for backward compatibility).
+## 6. Gateway API Endpoints
+
+All Gateway endpoints require **JWT Bearer Token** authentication. The gateway validates the JWT and resolves the user's identity and permissions. Legacy API key tokens are also supported for backward compatibility.
+
+```bash
+Authorization: Bearer <jwt_access_token>
+```
+
+### GET /api/gateway/health
+
+Simple health check for the gateway service.
 
 **Response**:
 ```json
@@ -382,28 +898,24 @@ Health check endpoint (legacy, for backward compatibility).
 }
 ```
 
----
-
-## 5. Gateway API Endpoints
-
-These endpoints are used by `RemoteProvider` when running in `DEPLOYMENT_MODE=gateway`. They mirror the MCP tools but use HTTP REST instead of JSON-RPC.
-
-### Authentication
-
-All Gateway endpoints require API Key authentication:
-
-```bash
-Authorization: Bearer YOUR_API_KEY
-```
-
 ### GET /api/gateway/skills
 
-List all available skills (equivalent to `skill_list` MCP tool).
+List all available skills accessible to the authenticated user (equivalent to `skill_list` MCP tool).
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `offset` | number | Pagination offset (default: 0) |
+| `limit` | number | Page size (default: 50) |
+| `category` | string | Filter by category |
+| `tags` | string | Comma-separated tag list (AND match) |
+| `attributes.*` | string | Filter by dynamic attribute, e.g. `attributes.framework=react` |
 
 **Request**:
 ```bash
-curl -H "Authorization: Bearer api-key" \
-  http://storage:3000/api/gateway/skills
+curl -H "Authorization: Bearer <token>" \
+  "http://storage:3000/api/gateway/skills?offset=0&limit=50&category=writing"
 ```
 
 **Response**:
@@ -416,17 +928,20 @@ curl -H "Authorization: Bearer api-key" \
       "slug": "prompt-writer",
       "description": "Professional prompt writing and optimization"
     }
-  ]
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 50
 }
 ```
 
-### GET /api/gateway/skills/{slug}
+### GET /api/gateway/skills/{identifier}
 
-Get skill metadata and entry file content.
+Get skill metadata. The `{identifier}` parameter accepts either a **slug** (kebab-case string) or a **UUID** (36-character hex string with dashes).
 
 **Request**:
 ```bash
-curl -H "Authorization: Bearer api-key" \
+curl -H "Authorization: Bearer <token>" \
   http://storage:3000/api/gateway/skills/prompt-writer
 ```
 
@@ -440,10 +955,19 @@ curl -H "Authorization: Bearer api-key" \
     "name": "prompt-writer",
     "description": "Professional prompt writing...",
     "version": "0.0.1",
-    "entry": "# Prompt Writer\n\n## Trigger Conditions..."
+    "status": "published",
+    "visibility": "public"
   }
 }
 ```
+
+> **Note**: This endpoint returns skill metadata only. To load the SKILL.md entry content, use the dedicated `/api/gateway/skills/{slug}/entry` endpoint below.
+
+### GET /api/gateway/skills/{slug}/entry
+
+Get the entry file (SKILL.md) content as raw markdown.
+
+**Response**: Raw markdown content (`Content-Type: text/markdown; charset=utf-8`)
 
 ### POST /api/gateway/skills/{slug}/files
 
@@ -452,7 +976,7 @@ Batch-read supporting files from a skill.
 **Request**:
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer api-key" \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
     "paths": [
@@ -470,15 +994,70 @@ curl -X POST \
   "data": [
     {
       "path": "references/crispe-framework.md",
-      "type": "text",
-      "content": "# CRISPE Framework\n\n**C** = Clarity..."
+      "content": "# CRISPE Framework\n\n**C** = Clarity...",
+      "encoding": "utf-8"
     },
     {
       "path": "templates/checklist.md",
-      "type": "text",
-      "content": "# Self-Check Checklist\n\n- [ ] Clarity..."
+      "content": "# Self-Check Checklist\n\n- [ ] Clarity...",
+      "encoding": "utf-8"
     }
   ]
+}
+```
+
+**Response Object Fields** (`SkillFileContent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | File path relative to skill root |
+| `content` | string | File content (raw UTF-8 or base64-encoded) |
+| `encoding` | `"utf-8" \| "base64"` | Content encoding |
+| `mimeType` | string? | MIME type (present for binary files) |
+
+### GET /api/gateway/skills/{slug}/file-tree
+
+Get the file tree structure of a skill.
+
+---
+
+## 7. Kubernetes Probe Endpoints
+
+These endpoints are used by kubelet for health checking in k8s deployments.
+
+### GET /api/livez
+
+**Liveness probe.** Returns 200 as long as the process event loop is responsive. No I/O or DB calls. Used by kubelet to decide whether to restart the pod.
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-04-29T10:00:00.000Z"
+}
+```
+
+### GET /api/readyz
+
+**Readiness probe.** Returns 200 only when dependencies (DB) are reachable. A `SELECT count(*) FROM skills` round-trip verifies the SQLite connection is healthy. Used by kubelet to gate Service endpoint inclusion.
+
+**Response** (ready):
+```json
+{
+  "status": "ok",
+  "checks": {
+    "db": { "ok": true, "latencyMs": 1 }
+  }
+}
+```
+
+**Response** (not ready — HTTP 503):
+```json
+{
+  "status": "not_ready",
+  "checks": {
+    "db": { "ok": false, "latencyMs": 5, "error": "SQLITE_CANTOPEN" }
+  }
 }
 ```
 
@@ -490,7 +1069,8 @@ curl -X POST \
 
 | Status | Scenario | Message |
 |--------|----------|---------|
-| 401 | Missing/invalid API key | `"error": "Invalid or missing API key"` |
+| 401 | Missing/invalid token | `"error": "Authentication required"` |
+| 403 | Non-admin accessing admin endpoint | `"error": "Admin privilege required"` |
 | 404 | Skill not found | `"error": "Skill 'invalid-slug' not found"` |
 | 400 | Invalid file path (traversal) | `"error": "Invalid file path"` |
 | 500 | Server error | `"error": "Internal server error"` |
@@ -523,6 +1103,7 @@ curl -X POST \
 - **MCP Protocol**: 2024-11-05 and later
 - **Node.js**: >= 22
 - **API Stability**: Stable (backward compatible)
+- **API Versioning**: `/api/v1/*` is the canonical prefix. Legacy unversioned paths are deprecated with a 6-month sunset window ending 2026-11-28.
 
 ---
 

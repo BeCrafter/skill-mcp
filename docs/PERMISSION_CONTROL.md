@@ -247,6 +247,55 @@ skillmcp user delete ${super02_id}  # → 应拒绝: "Cannot operate on superadm
 # HTTP PUT /api/admin/users/${super02_id} 同样返回 403 (assertCanOperateOn)
 ```
 
+### TC-19: 管理员不能修改管理员用户
+
+```bash
+# HTTP 层测试（CLI 无 user update 命令）
+curl -X PUT /api/admin/users/${admin_id} -H "Authorization: Bearer ${admin_token}" -d '{"name":"renamed"}'  # → 应返回 403
+```
+
+### TC-20: 超管可以修改自己，不能修改其他超管
+
+```bash
+# HTTP 层测试
+curl -X PUT /api/admin/users/${super_id} -H "Authorization: Bearer ${super_token}" -d '{"name":"renamed"}'   # → 应成功（操作自己）
+curl -X PUT /api/admin/users/${super02_id} -H "Authorization: Bearer ${super_token}" -d '{"name":"renamed"}'  # → 应返回 403（操作其他超管）
+```
+
+### TC-21: 管理员不能删除管理员
+
+```bash
+skillmcp user delete ${admin2_id}  # → 应拒绝: "Only superadmin can operate on admin users"
+```
+
+### TC-22: 管理员可以轮换普通用户 token
+
+```bash
+skillmcp user rotate-token ${user_id}  # → 应成功
+```
+
+### TC-23: 超管可以轮换自己 token，不能轮换其他超管 token
+
+```bash
+skillmcp user rotate-token ${super_id}     # → 应成功（轮换自己）
+skillmcp user rotate-token ${super02_id}   # → 应拒绝: "Cannot operate on superadmin user"
+```
+
+### TC-24: 超管可以重置管理员密码
+
+```bash
+skillmcp auth reset-password --username admin01 --password newpass123  # → 应成功
+```
+
+### TC-25: 任何人都可以重置自己密码
+
+```bash
+# 超管重置自己
+skillmcp auth reset-password --username admin --password newpass123  # → 应成功
+# 管理员重置自己
+skillmcp auth reset-password --username admin01 --password newpass123  # → 应成功
+```
+
 ---
 
 ## 变更日志
@@ -254,3 +303,4 @@ skillmcp user delete ${super02_id}  # → 应拒绝: "Cannot operate on superadm
 | 日期 | Commit | 变更摘要 |
 |------|--------|----------|
 | 2026-06-26 | — | 初版：用户/角色权限矩阵、多超管策略、18 条验证用例 |
+| 2026-06-27 | — | 统一 HTTP/CLI 错误消息；修复超管重置密码逻辑（仅自己）；修复超管操作自己逻辑（仅自己）；补充 TC-19 至 TC-25 |

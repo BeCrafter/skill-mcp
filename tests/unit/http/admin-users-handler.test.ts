@@ -50,6 +50,13 @@ function setup(overrides: Partial<AppDependencies> = {}): {
   const userRepo = {
     findAll: vi.fn().mockResolvedValue([{ id: "u1", name: "alice" }]),
     findById: vi.fn(async (id: string) => (id === "u1" ? { id: "u1", name: "alice", status: "active", userType: "user" } : null)),
+    findByUsername: vi.fn(async (username: string) => {
+      if (username === "alice") return { id: "u1", name: "alice", username: "alice", status: "active", userType: "user" };
+      if (username === "admin01") return { id: "adm-1", name: "admin01", username: "admin01", status: "active", userType: "admin" };
+      if (username === "superadmin") return { id: "sa-1", name: "superadmin", username: "superadmin", status: "active", userType: "superadmin" };
+      return null;
+    }),
+    updatePassword: vi.fn().mockResolvedValue(undefined),
     create: vi.fn(async ({ name, tokenExpiresAt }: { name?: string; tokenExpiresAt?: number | null }) => ({ id: "u-new", name: name ?? null, tokenExpiresAt: tokenExpiresAt ?? null })),
     update: vi.fn(async (id: string, fields: Record<string, unknown>) => (id === "u1" ? { id, ...fields } : null)),
     delete: vi.fn(async (id: string) => id === "u1"),
@@ -263,6 +270,102 @@ describe("registerAdminUserRoutes", () => {
       const ctx = makeCtx("DELETE", "/api/admin/users/missing/previous-token");
       await router.dispatch(ctx);
       expect(bodyOf(ctx).statusCode).toBe(404);
+    });
+  });
+
+  describe("reset-password permission (TC-14)", () => {
+    it("returns 403 when admin tries to reset superadmin password", async () => {
+      const { router } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/superadmin/reset-password", { new_password: "newpass123" });
+      ctx.requestContext = { userId: "adm-1", userType: "admin", isAuthenticated: true } as never;
+      await router.dispatch(ctx).catch(() => undefined);
+      expect(bodyOf(ctx).statusCode).toBe(403);
+    });
+
+    it("returns 403 when admin tries to reset another admin password", async () => {
+      const { router } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/admin01/reset-password", { new_password: "newpass123" });
+      ctx.requestContext = { userId: "adm-2", userType: "admin", isAuthenticated: true } as never;
+      await router.dispatch(ctx).catch(() => undefined);
+      expect(bodyOf(ctx).statusCode).toBe(403);
+    });
+
+    it("allows superadmin to reset their own password", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/superadmin/reset-password", { new_password: "newpass123" });
+      ctx.requestContext = { userId: "sa-1", userType: "superadmin", isAuthenticated: true } as never;
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(200);
+      expect(userRepo.updatePassword).toHaveBeenCalled();
+    });
+  });
+
+  describe("user update permission (TC-19, TC-20)", () => {
+    it("TC-19: returns 403 when admin tries to modify another admin", async () => {
+      const { router } = setup({
+        userRepo: {
+          findById: vi.fn(async (id: string) => {
+            if (id === "adm-2") return { id: "adm-2", name: "admin02", status: "active", userType: "admin" };
+            return null;
+          }),
+        } as never,
+      });
+      const ctx = makeCtx("PUT", "/api/admin/users/adm-2", { name: "renamed" });
+      ctx.requestContext = { userId: "adm-1", userType: "admin", isAuthenticated: true } as never;
+      await router.dispatch(ctx).catch(() => undefined);
+      expect(bodyOf(ctx).statusCode).toBe(403);
+    });
+
+    it("TC-20: returns 403 when superadmin tries to modify another superadmin", async () => {
+      const { router } = setup({
+        userRepo: {
+          findById: vi.fn(async (id: string) => {
+            if (id === "sa-2") return { id: "sa-2", name: "super02", status: "active", userType: "superadmin" };
+            return null;
+          }),
+          update: vi.fn(async (id: string, fields: Record<string, unknown>) => ({ id, ...fields })),
+        } as never,
+      });
+      const ctx = makeCtx("PUT", "/api/admin/users/sa-2", { name: "renamed" });
+      ctx.requestContext = { userId: "sa-1", userType: "superadmin", isAuthenticated: true } as never;
+      await router.dispatch(ctx).catch(() => undefined);
+      expect(bodyOf(ctx).statusCode).toBe(403);
+    });
+
+    it("TC-20: allows superadmin to modify themselves", async () => {
+      const { router } = setup({
+        userRepo: {
+          findById: vi.fn(async (id: string) => {
+            if (id === "sa-1") return { id: "sa-1", name: "superadmin", status: "active", userType: "superadmin" };
+            return null;
+          }),
+          update: vi.fn(async (id: string, fields: Record<string, unknown>) => ({ id, ...fields })),
+        } as never,
+      });
+      const ctx = makeCtx("PUT", "/api/admin/users/sa-1", { name: "superadmin-renamed" });
+      ctx.requestContext = { userId: "sa-1", userType: "superadmin", isAuthenticated: true } as never;
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(200);
+    });
+  });
+
+  describe("reset-password additional (TC-24, TC-25)", () => {
+    it("TC-24: allows superadmin to reset admin password", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/admin01/reset-password", { new_password: "newpass123" });
+      ctx.requestContext = { userId: "sa-1", userType: "superadmin", isAuthenticated: true } as never;
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(200);
+      expect(userRepo.updatePassword).toHaveBeenCalled();
+    });
+
+    it("TC-25: allows user to reset their own password", async () => {
+      const { router, userRepo } = setup();
+      const ctx = makeCtx("POST", "/api/admin/users/alice/reset-password", { new_password: "newpass123" });
+      ctx.requestContext = { userId: "u1", userType: "user", isAuthenticated: true } as never;
+      await router.dispatch(ctx);
+      expect(bodyOf(ctx).statusCode).toBe(200);
+      expect(userRepo.updatePassword).toHaveBeenCalled();
     });
   });
 });

@@ -384,7 +384,7 @@ SELECT id, name, version FROM skills;
 
 ```bash
 # Remove compiled code
-npm run clean
+rm -rf dist/
 
 # Remove database and skills
 rm -rf data/
@@ -427,7 +427,7 @@ npm test -- tests/unit/services/skill-service.test.ts --reporter=verbose
 
 ### Environment Variables
 
-See [.env.example](../.env.example) for all available variables.
+**[.env.example](../.env.example) is the authoritative reference** for all environment variables. The table below lists a few commonly adjusted ones; for the full set (including security, cache, storage, and rate-limit options) always consult `.env.example`.
 
 Common configurations:
 
@@ -447,7 +447,15 @@ TRANSPORT_PORT=3000
 # Gateway mode
 DEPLOYMENT_MODE=gateway
 CLOUD_SERVICE_URL=http://localhost:3001
+AUTH_TOKEN=<your-token>
 ```
+
+#### `DATABASE_URL` vs `DATABASE_PATH`
+
+Both variables configure the database connection. `DATABASE_URL` takes precedence when both are set:
+- `DATABASE_PATH=./data/skill-mcp.db` — bare path shortcut (SQLite default).
+- `DATABASE_URL=sqlite://./data/skill-mcp.db` — URL format enabling dialect detection. A future Postgres port will be triggered by `DATABASE_URL=postgres://...`.
+
 
 ### Build Configuration
 
@@ -497,11 +505,10 @@ git push origin dev
 
 ## 🔄 Pre-commit Hooks
 
-We use pre-commit hooks to maintain code quality. Before each commit, the following checks run automatically:
+The project uses a plain `.git/hooks/pre-commit` script (no husky or lint-staged). Before each commit it runs:
 
-1. **ESLint** - Code style and quality
-2. **Tests** - Unit and integration tests
-3. **Commit Message** - Format validation
+1. **ESLint** - Code style and quality (`npm run lint`)
+2. **Tests** - Unit and integration tests (`npm test`)
 
 If any check fails, the commit is rejected.
 
@@ -518,7 +525,7 @@ git commit --no-verify
 
 ```bash
 # Run hook manually
-.git/hooks/pre-commit .git/COMMIT_EDITMSG
+.git/hooks/pre-commit
 ```
 
 ## 📚 Additional Resources
@@ -534,7 +541,7 @@ git commit --no-verify
 
 ```bash
 # Clean and rebuild
-npm run clean
+rm -rf dist/
 npm install
 npm run build
 ```

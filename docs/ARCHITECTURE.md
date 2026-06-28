@@ -69,7 +69,8 @@ graph TB
 
     subgraph "MCP Tools src/mcp/tools"
         REG[registry.ts<br/>instrument 装饰]
-        T1[skill_list]
+        T0[skill_list]
+        T1[skill_search]
         T2[skill_view]
         T3[skill_file]
         T4[skill_feedback]
@@ -86,6 +87,7 @@ graph TB
     subgraph "业务层 src/services"
         SVC[SkillService<br/>统一业务入口]
         ALS[AccessLogService]
+        UMS[UsageMeterService]
     end
 
     subgraph "权限 src/permission"
@@ -136,9 +138,8 @@ graph TB
     HTTPT --> REG
     HTTP --> RT
     RT --> AUTH --> GWS
-    RT --> ADMS & ADMU & ADMR
-    REG --> T1 & T2 & T3 & T4 & T5
-    T1 & T2 & T3 & T4 & GWS --> SVC
+    REG --> T0 & T1 & T2 & T3 & T4 & T5
+    T0 & T1 & T2 & T3 & T4 & GWS --> SVC
     T5 --> EXEC
     SVC --> CB --> TF
     SVC --> IP
@@ -150,8 +151,7 @@ graph TB
     REPO --> DB
     IMP --> VAL --> STG & REPO
     IMP --> LSRC & GSRC
-    REPO --> EB --> CSUB --> COMP
-    EXEC --> SVC
+    EXEC --> SVC & EB & UMS
     EXEC --> RUN
 ```
 
@@ -175,25 +175,27 @@ graph TB
 
 | 一级目录 | 职责 | 关键文件 | 不能做什么 |
 |---|---|---|---|
-| `src/cli/` | 命令行入口、子命令分发 | `index.ts`, `commands/serve-cmd.ts`, `serve-stdio-auth.ts` | 写业务逻辑（必须委派给 Service） |
-| `src/app.ts` | HTTP 服务器装配 + MCP transport 绑定 | `app.ts`（单文件） | 散落业务分支（当前已超 300 行，待拆分） |
+| `src/cli/` | 命令行入口、子命令分发 | `index.ts`, `ui.ts`, `remote-client.ts`, `local-config.ts`, `commands/`（serve、user、auth、role、import、list、info、search、update、remove、rollback、versions、eval、pipeline、lint、init、migrate、manifest-migrate） | 写业务逻辑（必须委派给 Service） |
+| `src/app.ts` | HTTP 服务器装配 + MCP transport 绑定 | `app.ts`（~72 行 orchestrator）、`app-dependencies.ts`（类型） | 散落业务分支 |
 | `src/mcp/` | MCP server / transport / tool 注册 | `server.ts`, `transport/index.ts`, `tools/registry.ts`, `tools/skill-*.ts` | 直接读 DB / 存储 |
 | `src/auth/` | JWT 签发/验证 | `jwt.service.ts` | 包含业务逻辑（仅签发/验证） |
-| `src/http/` | 路由、中间件、HTTP handler | `router.ts`, `compose.ts`, `middleware/gateway-auth.ts`, `middleware/admin-auth.ts`, `middleware/error-map.ts`, `handlers/admin/*`, `handlers/gateway/*`, `handlers/auth.handler.ts` | 业务逻辑（应转 Service） |
-| `src/services/` | 业务编排：缓存、权限、日志、版本管理 | `skill.service.ts`, `access-log.service.ts` | 暴露 DB 实体类型给上层（当前 SkillMeta 泄漏） |
+| `src/http/` | 路由、中间件、HTTP handler | `router.ts`, `compose.ts`, `server.ts`, `helpers.ts`, `probes.ts`, `middleware/gateway-auth.ts`, `middleware/admin-auth.ts`, `middleware/error-map.ts`, `middleware/request-id.ts`, `middleware/rate-limit.ts`, `middleware/quota-check.ts`, `handlers/admin/`（skills、users、roles、import-jobs、webhooks、quotas、usage）、`handlers/gateway/skills.handler.ts`, `handlers/auth.handler.ts`, `openapi/` | 业务逻辑（应转 Service） |
+| `src/services/` | 业务编排：缓存、权限、日志、版本管理、生命周期、搜索、配额、webhook、用量计量、导入后台 | `skill.service.ts`, `access-log.service.ts`, `skill-lifecycle.ts`, `skill-search.service.ts`, `usage-meter.service.ts`, `quota.service.ts`, `webhook.service.ts`, `webhook-dispatcher.ts`, `webhook-worker.ts`, `import-worker.ts` | 暴露 DB 实体类型给上层（当前 SkillMeta 泄漏） |
 | `src/permission/` | 鉴权上下文构建 + 可见性过滤 | `context-builder.ts`, `tag-filter.ts` | 网络 IO 之外的业务逻辑 |
 | `src/provider/` | Skill 数据源抽象 + Local/Remote 实现 + Proxy 指标装饰 | `interface.ts`, `local.provider.ts`, `remote.provider.ts`, `instrument.ts` | 包含权限判断（由 Service 注入） |
 | `src/cache/` | 两层缓存（L1 LRU + L2 file）+ per-user epoch 失效 | `composite.provider.ts`, `memory-lru.provider.ts`, `file.provider.ts`, `cache-epochs.ts` | 直接订阅事件（由 cache-subscriber 桥接） |
-| `src/events/` | 领域事件总线 + 缓存订阅器 | `event-bus.ts`, `cache-subscriber.ts` | 同步阻塞主流程的副作用 |
+| `src/events/` | 领域事件总线 + 缓存/ webhook 订阅器 | `event-bus.ts`, `cache-subscriber.ts`, `webhook-subscriber.ts` | 同步阻塞主流程的副作用 |
 | `src/storage/` | 字节存储抽象（local-fs / aliyun-oss） | `provider.interface.ts`, `local-fs.provider.ts`, `aliyun-oss.provider.ts` | 业务字段语义 |
-| `src/db/` | Drizzle schema + Repository + 迁移 | `schema.ts`, `repositories/*.ts`, `migrate.ts` | 跨表业务编排（属于 Service） |
+| `src/db/` | Drizzle schema + Repository + 迁移 | `schema.ts`, `migrate.ts`, `connection.ts`, `dialect.ts`, `repositories/`（skill、skill-file、skill-version、skill-feedback、skill-embedding、skill-eval、user、user-role、role、access-log、import-job、pipeline-run、cache-epoch、usage-event、webhook、webhook-delivery、tenant-quota、audit-log） | 跨表业务编排（属于 Service） |
 | `src/import/` | 包导入流水线（local / git → validate → 入库） | `importer.ts`, `validator.ts`, `local-source.ts`, `git-source.ts` | 暴露 HTTP API（由 admin handler 调用） |
 | `src/pipeline/` | Skill 编排 DAG（解析 / 校验 / 两阶段执行 / 运行存储） | `parser.ts`, `dag.ts`, `executor.ts`, `run-store.ts`, `context.ts` | 直接调用 LLM；只决定下一批待执行的 stage |
 | `src/config/` | Zod 配置 schema + 单例加载 | `schema.ts`, `index.ts` | 在模块顶层做 IO（仅在 `getConfig()` 内） |
-| `src/telemetry/` | Prometheus 指标 | `metrics.ts` | 业务逻辑 |
-| `src/utils/` | 安全扫描、并发、错误、manifest、日志 | `security.ts`, `concurrency.ts`, `errors.ts`, `manifest.ts`, `logger.ts` | 引入跨模块依赖 |
+| `src/telemetry/` | Prometheus 指标 + OpenTelemetry tracing + span helpers | `metrics.ts`, `tracing.ts`, `spans.ts` | 业务逻辑 |
+| `src/utils/` | 安全扫描、并发、错误、manifest、日志、diff、ID 生成、crypto | `security.ts`, `concurrency.ts`, `errors.ts`, `manifest.ts`, `logger.ts`, `diff.ts`, `id.ts`, `crypto.ts` | 引入跨模块依赖 |
 | `src/prompt/` | 系统 prompt + 工具描述 | `system-prompt.ts`, `descriptions.ts` | — |
 | `src/types/` | 跨模块共享类型 | `index.ts` | 引入实现细节类型 |
+| `src/retrieval/` | 语义检索：embedding 生成、BM25/向量/混合打分 | `embedding-provider.ts`, `openai-embedding-provider.ts`, `ollama-embedding-provider.ts`, `bm25-index.ts`, `vector-index.ts`, `hybrid-scorer.ts`, `normalize.ts` | 直接读写 DB（通过 Repository） |
+| `src/eval/` | Skill 评估框架：provider 抽象 + runner 执行 | `provider.interface.ts`, `echo-provider.ts`, `llm-eval-provider.ts`, `runner.ts` | 管理 eval case/run 持久化（由 Repository 处理） |
 
 ---
 
@@ -213,7 +215,7 @@ flowchart LR
     G --> I[withFallbackToken<br/>包装 contextBuilder]
     I --> J[StdioServerTransport]
     H --> K[createApp 路由器]
-    J & K --> L[registerTools<br/>5 个 MCP 工具]
+    J & K --> L[registerTools<br/>6 个 MCP 工具]
     L --> M[server.connect transport]
 ```
 
@@ -344,15 +346,29 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 
 | 表 | 关键列 | 索引 | 外键 |
 |---|---|---|---|
-| `skills` | `id` PK / `slug` UNIQUE / `name` / `version` / `contentHash` / `storagePath` / `status` / `visibility` / `entryFile` | `idx_skills_{slug,name,status,visibility}` | — |
+| `skills` | `id` PK / `tenantId` / `slug` UNIQUE / `name` / `displayName` / `version` / `contentHash` / `storagePath` / `status` / `visibility` / `entryFile` / `category` / `attributes` JSON / `retrievalMeta` JSON | `idx_skills_{name,status,visibility,tenant_id}` / `unique_name_content_hash` | — |
 | `skill_tags` | `(skillId, tag)` 复合 PK | `idx_skill_tags_tag` | → `skills` CASCADE |
-| `skill_files` | `id` / `skillId` / `filePath` / `fileType` / `fileSize` / `mimeType` | `idx_skill_files_skill_id` | → `skills` CASCADE |
-| `skill_versions` | `id` / `skillId` / `version` / `contentHash` / `storagePath` / `fileCount` | `idx_skill_versions_*` | → `skills` CASCADE |
-| `skill_feedbacks` | `id` / `skillId` / `skillSlug` / `outcome` / `context` | `idx_feedbacks_*` | → `skills` CASCADE |
-| `access_logs` | `id` / `skillId` / `skillSlug` / `action` / `latencyMs` | `idx_access_logs_created_at` | → `skills` **❌ 无 CASCADE** |
-| `users` | `id` / `token` UNIQUE / `name` / `username` UNIQUE(partial) / `password_hash` / `user_type` / `status` | `idx_users_token` / `idx_users_username` | — |
-| `roles` | `id` / `name` UNIQUE / `tags` JSON | — | — |
-| `user_roles` | `id` / `(userId, roleId)` | `idx_user_roles_user_id` | → users, roles CASCADE |
+| `skill_files` | `id` / `tenantId` / `skillId` / `filePath` / `fileType` / `fileSize` / `mimeType` / `checksum` | `idx_skill_files_skill_id` | → `skills` CASCADE |
+| `skill_versions` | `id` / `tenantId` / `skillId` / `version` / `contentHash` / `storagePath` / `fileCount` / `createdBy` / `changeSummary` / `isCurrent` | `idx_skill_versions_{skill_id,version,created_at}` | → `skills` CASCADE |
+| `access_logs` | `id` / `tenantId` / `skillId` / `skillSlug` / `action` / `latencyMs` / `userId` / `sessionId` | `idx_access_logs_created_at` / `idx_access_logs_tenant_id` | → `skills` CASCADE |
+| `skill_feedbacks` | `id` / `tenantId` / `skillId` / `skillSlug` / `outcome` / `context` / `agentComment` / `version` | `idx_feedbacks_{skill_slug,created_at,outcome}` | → `skills` CASCADE |
+| `users` | `id` / `tenantId` / `token` UNIQUE / `name` / `username` UNIQUE / `passwordHash` / `userType` / `status` / `tokenExpiresAt` / `previousToken` / `previousTokenExpiresAt` | `idx_users_token` / `idx_users_previous_token` / `idx_users_tenant_id` / `idx_users_username` | — |
+| `roles` | `id` / `tenantId` / `name` UNIQUE / `tags` JSON | `idx_roles_tenant_id` | — |
+| `user_roles` | `id` / `tenantId` / `(userId, roleId)` | `uk_user_roles_user_role` / `idx_user_roles_role_id` | → users, roles CASCADE |
+| `tenants` | `id` PK / `name` / `description` / `status` | — | — |
+| `import_jobs` | `id` / `tenantId` / `status` / `source` / `optionsJson` / `progress` / `resultJson` / `errorMessage` / `createdByUserId` | `idx_import_jobs_{status,created_at}` | — |
+| `cache_global_epoch` | `id` PK / `tenantId` / `epoch` / `updatedAt` | — | — |
+| `cache_user_epochs` | `userId` PK / `tenantId` / `epoch` / `updatedAt` | — | — |
+| `usage_events` | `id` / `tenantId` / `userId` / `eventType` / `resourceId` / `quantity` / `metadata` JSON / `hourBucket` | `idx_usage_events_{tenant_bucket,tenant_event,created_at}` | — |
+| `pipeline_runs` | `id` / `tenantId` / `name` / `status` / `definitionJson` / `inputsJson` / `batchesJson` / `completedStagesJson` / `currentBatchIndex` / `startedAt` / `finishedAt` | `idx_pipeline_runs_{status,started_at}` | — |
+| `tenant_quotas` | `id` / `tenantId` / `tier` / `maxUsers` / `maxSkills` / `maxStorageBytes` / `maxApiCallsPerDay` / `maxPipelineRunsPerDay` / `effectiveFrom` / `effectiveUntil` / `notes` | `idx_tenant_quotas_tenant` | — |
+| `tenant_quota_overrides` | `id` / `tenantId` / `fieldName` / `overrideValue` / `reason` / `grantedBy` / `grantedAt` / `expiresAt` | `idx_tenant_quota_overrides_lookup` | — |
+| `webhooks` | `id` / `tenantId` / `url` / `secret` / `eventTypes` JSON / `enabled` / `description` / `secretRotatedAt` | `idx_webhooks_{tenant,enabled}` | — |
+| `webhook_deliveries` | `id` / `webhookId` / `tenantId` / `eventType` / `deliveryId` / `payload` / `attempt` / `status` / `responseStatus` / `nextRetryAt` | `idx_webhook_deliveries_{delivery_id,due,tenant,webhook}` | — |
+| `skill_eval_cases` | `id` / `tenantId` / `skillId` / `caseName` / `input` / `expectationsJson` | `uk_skill_eval_cases_skill_case` / `idx_skill_eval_cases_skill_id` | → `skills` CASCADE |
+| `skill_eval_runs` | `id` / `tenantId` / `skillId` / `skillVersion` / `caseName` / `status` / `runner` / `toolsUsedJson` / `output` / `failureReason` / `latencyMs` | `idx_skill_eval_runs_{skill_version,created_at}` | → `skills` CASCADE |
+| `skill_embeddings` | `skillId` PK / `modelName` / `dimension` / `vector` BLOB / `contentHash` | `idx_skill_embeddings_model` | → `skills` CASCADE |
+| `audit_logs` | `id` / `action` / `entityType` / `entityId` / `operatorId` / `beforeJson` / `afterJson` | `idx_audit_logs_{entity,created}` | — |
 
 ### 6.2 关键约束
 
@@ -375,6 +391,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 
 - 单例 `getConfig()`：env 变量 → 文件（`SKILL_MCP_CONFIG`）→ schema defaults，逐层 deepMerge。
 - Zod 严格 schema（`schema.ts`），enum / discriminatedUnion / URL 校验。
+- 配置段（`configSchema` 顶层）：`app` / `deployment` / `gateway` / `storage` / `database` / `cache` / `transport` / `security` / `embedding` / `eval` / `rateLimit` / `auth`。
 - 启动期 mkdir DB / storage / cache 目录，失败仅 debug log 不阻断（**风险**：磁盘满或权限错时延后失败）。
 
 ### 7.2 鉴权与权限
@@ -471,12 +488,13 @@ CLI 管理命令支持本地/远程两种操作模式：
 ### 7.4 事件
 
 - `EventBus`（基于 Node EventEmitter）支持 **同步 / 异步两种派发模式**：构造时传 `{ async: true }` 走 `setImmediate(() => dispatch(event))` 推迟到下个 tick，admin 写路径不再阻塞在 listener I/O；默认 sync 保持向后兼容。listener 异常通过 try/catch + `event_listener_errors_total` 计数器隔离（sync/async 两条路径都生效），单个 listener throw 不会断链 sibling listeners（T-303）。`serve-cmd.ts` 在生产装配里使用 `async: true`（P0-B, 2026-05-28）。
-- 事件类型：`skill:created/updated/deleted/imported`、`user:logged_in`、`user:password_changed`、`user:token_rotated`、`user:roles_changed`、`role:updated`。
+- 事件类型：`skill:created/updated/deleted/imported/deprecated`、`pipeline:completed`、`user:logged_in`、`user:password_changed`、`user:token_rotated`、`user:roles_changed`、`role:updated`。
 
 ### 7.5 日志与指标
 
 - pino 结构化日志，`LOG_LEVEL` 控制级别。
 - Prometheus 指标暴露在 `/metrics`：HTTP 路由/方法/状态/耗时、provider_latency（按 method + status）、缓存 hit/miss（**待补**）。
+- OpenTelemetry tracing（P0-6）：`OTEL_ENABLED=true` 启用，OTLP HTTP exporter 或 Console 回退；`withSpan()` helper 手动插桩（无 auto-instrumentation）；`src/telemetry/tracing.ts` 提供 `initTracing()` / `shutdownTracing()` / `getTracer()` / `tracingOptionsFromEnv()`。
 - 访问日志写 `access_logs` 表，由 `AccessLogService` 异步处理；当前所有调用点用 `.catch(() => {})` 静默吞错（见 9.10）。
 
 ### 7.6 安全
@@ -497,7 +515,7 @@ CLI 管理命令支持本地/远程两种操作模式：
 |---|---|---|
 | 入口 / CLI | commander 默认 serve；stdio 启动期 token 防隐式公开 | ✅ |
 | HTTP | 无框架，手写 regex 路由 | ✅ 中间件链已通过 errorMap 实现 |
-| MCP 工具 | 5 个工具硬编码 + instrument Proxy 包指标 | ✅ |
+| MCP 工具 | 6 个工具（skill_list/search/view/file/feedback/pipeline）+ instrument 装饰 | ✅ |
 | 认证 | JWT 登录 + opaque token 双路径；三层用户模型 | ✅ T-004/T-802 (2026-06-23) |
 | 权限过滤 | `user_type` 决定操作权限；角色 tags 决定数据可见性 | ✅ T-004 (2026-06-23) |
 | SkillService | 缓存 key + 先权限后缓存 + SkillMetaPublic DTO | ✅ |
@@ -515,6 +533,14 @@ CLI 管理命令支持本地/远程两种操作模式：
 | Migration | drizzle baseline + 迁移 journal | ✅ |
 | CLI 双模式 | `--server-url` 远程 + 本地 DB 直接操作 | ✅ T-803 (2026-06-23) |
 | JWT 认证 | HS256 + access/refresh + 密钥自动生成 | ✅ T-802 (2026-06-23) |
+| 语义检索 | BM25 + 向量 + 混合打分，embedding provider 抽象（openai/ollama） | ✅ P1-11 |
+| Skill 评估 | eval case/run 持久化，echo/LLM provider，runner 执行 | ✅ P1-12 |
+| OTel Tracing | `OTEL_ENABLED` 开关，OTLP/Console exporter，Batch/Simple processor，`withSpan` helper | ✅ P0-6 |
+| Rate Limit | 内存令牌桶（per-userId），admin/gateway 独立配置，429 + Retry-After | ✅ P0-3 |
+| Quota Check | tenant 配额中间件（tier + per-field override），429 拒绝超限 | ✅ P1-13.5 |
+| Webhook | 出站订阅 + delivery ledger + 重试队列（8 次 + dead_letter） | ✅ P1-16 |
+| Usage Meter | billing-grade 事件采集，fire-and-forget 写入，hourBucket 聚合 | ✅ P1-13 |
+| Lifecycle | 复用 `skills.status` 列，Draft→Published→Deprecated→Archived 状态机 | ✅ P0-9 |
 
 ---
 
@@ -621,8 +647,7 @@ CLI 管理命令支持本地/远程两种操作模式：
 12. ~~**HTTP rate limit**~~ ✅ 已完成 (2026-05-28, P0-3)：`src/http/middleware/rate-limit.ts` 内存令牌桶（per-userId，匿名走 `__anonymous__` 共享桶），admin/gateway 独立配置（默认 60/120 capacity, 10/20 refill per sec）；429 响应携带 `Retry-After` + `X-RateLimit-Limit/Remaining/Reset`；`metrics.rateLimitDenied{scope=admin|gateway}` Counter；周期 GC（5 min interval, 10 min idle 阈值）防止 Map 无界增长；`RATE_LIMIT_ENABLED=false` 关闭中间件挂载。8 个单元测试覆盖正常通过、drain → 429、refill 时序、per-user 隔离、匿名 fallback、GC eviction、scope label、参数校验。Redis 升级路径：替换 `Map<string, Bucket>` 为 redis cluster INCR + EXPIRE，中间件接口与配置不变。
 13. ~~**OSS 治理基础**~~ ✅ 已完成 (2026-05-28, P0-11 部分)：`docs/ADVANCED/LICENSING.md`（Phase 1 MIT → Phase 2 BUSL-1.1 切换 playbook + OSS/Commercial 边界表 + 4 反模式）；`CONTRIBUTING.md` 增 DCO sign-off 章节（`git commit -s` + 忘签补救步骤）；`SECURITY.md`（90 天协调披露时间表 + T-501~T-739 审计历史索引 + Hall of Fame + Out-of-Scope）；`MAINTAINERS.md`（Active maintainers + lazy consensus + RFC 流程 + breaking 变更边界 + Contributor Covenant 2.1 引用）。剩余：`LICENSE` 仍为 MIT（v0.2.0 BUSL 切换需法务 review + 商业化触发），文件头版权批量脚本。
 14. ~~**API v1 前缀**~~ ✅ 已完成 (2026-05-28, P0-1)：`src/http/server.ts` URL 解析阶段把 `/api/admin/*` / `/api/gateway/*` 重写为 `/api/v1/admin/*` / `/api/v1/gateway/*`，legacy 路径返回 `Deprecation: true` + `Sunset: 2026-12-31` + `Link: </api/v1/...>; rel="successor-version"`；`/api/v1/health` LB 探针公开。
-15. ~~**Token 过期 + 轮转 API**~~ ✅ 已完成 (2026-05-28, P0-4)：`users` 表加 `token_expires_at` / `previous_token_hash` / `previous_token_expires_at` 三列；`parseTtl()` 支持 `30d` / `12h` / `45m` / `3600s`（省略=永不过期）；`skill-mcp user create --ttl` / `skill-mcp user rotate-token <id> --ttl --grace`（默认 grace 7d）双入口；`POST /api/admin/users/:id/rotate-token` REST 端点；`buildRequestContext` 校验过期返回 401 `token_expired`；rotation 期间 `previous_token_hash` 在 grace 窗口内仍可解析为同一 user。
-16. ~~**Skill lifecycle 状态机**~~ ✅ 已完成 (2026-05-28, P0-9)：`src/services/skill-lifecycle.service.ts` 实现 Draft → Published → Deprecated → Archived（archived 终态、republish 允许、非法跃迁抛 `LifecycleError`）；schema 增 `lifecycle_state` 列 + 索引；`POST /api/admin/skills/:id/{publish|deprecate|archive|republish}` 四个 REST 端点 + CLI 镜像；事件总线发 `skill.lifecycle.*` 事件；与 `visibility` 解耦但允许策略联动（archived → 自动 hide from gateway list，与 `TagPermissionFilter` 配合屏蔽）。
+16. ~~**Skill lifecycle 状态机**~~ ✅ 已完成 (2026-05-28, P0-9)：`src/services/skill-lifecycle.service.ts` 实现 Draft → Published → Deprecated → Archived（archived 终态、republish 允许、非法跃迁抛 `LifecycleError`）；复用 `skills.status` 列存储生命周期状态；`POST /api/admin/skills/:id/{publish|deprecate|archive|republish}` 四个 REST 端点 + CLI 镜像；事件总线发 `skill.deprecated` 等事件；与 `visibility` 解耦但允许策略联动（archived → 自动 hide from gateway list，与 `TagPermissionFilter` 配合屏蔽）。
 17. ~~**Async import + 进度查询**~~ ✅ 已完成 (2026-05-28, P0-10)：`import_jobs` 表 + `ImportJobRepository` 持久化（pending/running/succeeded/failed + progress 0-100 + result_skill_id / error_message / options 列）；`BackgroundImportWorker` 启动时 recoverOrphans（重启幂等：残留 running → pending）+ in-process 100ms 轮询（P1 可替换为外置 queue）；`POST /api/admin/skills/import-async` 返回 `202 Accepted` + `{job_id, poll_url}`；`GET /api/admin/import-jobs/:id` 返回进度 + 结果；**响应 projection 显式剔除 `options` 字段防止 source URL / branch / token 泄露**；`SIGTERM` 触发 worker `stop()` 优雅停机。
 18. ~~**OpenAPI 规范 + Swagger UI**~~ ✅ 已完成 (2026-05-28, P0-2)：`src/http/openapi/spec.ts` 手写 OpenAPI 3.1（动态读 package.json 版本，`bearerAuth` security scheme、`servers: [{url:"/api/v1"}]`、所有 admin/gateway 路由 + Error envelope + ImportJobView 显式说明 options 不回显 + components.responses 复用）；`src/http/openapi/swagger-ui.ts` 渲染 pinned `swagger-ui-dist@5.17.14` via jsDelivr CDN（不增加运行时 dep）；`/api/v1/openapi.json`（含 `/api/openapi.json` 兼容别名）+ `/api/v1/docs`（spec 设 `Cache-Control: public, max-age=300`）。后续可平滑迁到 zod-to-openapi。
 19. ~~**Postgres dialect 骨架**~~ ⚠️ 部分完成 (2026-05-28, P0-8 骨架)：`src/db/dialect.ts` `parseDatabaseUrl` 支持 `sqlite://` / `postgres://` / `postgresql://` / 裸路径，拒 mysql/mongodb/空串；`resolveDialect` 实现 `DATABASE_URL > DATABASE_PATH` 优先级；`src/db/connection.ts` 改 dialect-aware 工厂（cache key 含 dialect，postgres 路径 fail-fast 抛"PG schema port not yet shipped (P1)"明确错误）；`src/db/migrate.ts` 同等 guard；`skill-mcp migrate:check [--target <url>]` 只读预检 CLI（扫源/目标 URL 解析 / dialect 跃迁 / 列出 9 项 SQLite→PG 待迁移惯用法清单）；`src/config/index.ts` 优先读 `DATABASE_URL`。**剩余=P1**：实际 PG schema port（drizzle-orm/pg-core 重写、列类型映射 timestamp→bigint / JSON→jsonb / boolean cast、journal_mode 移除、连接池接入、数据迁移工具）按 review §3.1.1 6 周阶段化推进。

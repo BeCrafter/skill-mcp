@@ -1,60 +1,8 @@
-import { randomUUID } from "node:crypto";
 import type { HttpContext } from "../context.js";
-import type { UserRepository } from "../../db/repositories/user.repository.js";
-import type { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
 import type { RequestContext } from "../../types/index.js";
-import {
-  extractBearerToken,
-  buildRequestContextFromHttp,
-} from "../../permission/context-builder.js";
-import { json } from "../helpers.js";
+import { enforceAuth, type AuthMiddlewareDeps } from "./admin-auth.js";
 
-export interface GatewayAuthDeps {
-  userRepo?: UserRepository;
-  userRoleRepo?: UserRoleRepository;
-  jwtSecret?: string;
-  jwtIssuer?: string;
-}
-
-export async function enforceGatewayAuth(
-  ctx: HttpContext,
-  deps: GatewayAuthDeps,
-): Promise<RequestContext | null> {
-  if (!deps.userRepo || !deps.userRoleRepo) {
-    ctx.logger.warn(
-      { url: ctx.url },
-      "Gateway auth misconfigured: userRepo/userRoleRepo missing — refusing request",
-    );
-    json(ctx.res, 500, { success: false, error: "Server auth not configured" });
-    return null;
-  }
-
-  const token = extractBearerToken(ctx.req.headers.authorization);
-  if (!token) {
-    json(ctx.res, 401, { success: false, error: "Authentication required" });
-    return null;
-  }
-
-  const sessionId = (ctx.req.headers["x-session-id"] as string) || randomUUID();
-  let requestContext;
-  try {
-    requestContext = await buildRequestContextFromHttp(
-      token,
-      sessionId,
-      deps.userRepo,
-      deps.userRoleRepo,
-      deps.jwtSecret,
-      deps.jwtIssuer,
-    );
-  } catch {
-    json(ctx.res, 401, { success: false, error: "Invalid or expired token" });
-    return null;
-  }
-
-  if (!requestContext.isAuthenticated) {
-    json(ctx.res, 401, { success: false, error: "Invalid or expired token" });
-    return null;
-  }
-
-  return requestContext;
+/** Gateway auth — authenticates the token but does NOT require admin userType. */
+export function enforceGatewayAuth(ctx: HttpContext, deps: AuthMiddlewareDeps): Promise<RequestContext | null> {
+  return enforceAuth(ctx, deps);
 }

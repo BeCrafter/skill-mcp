@@ -89,8 +89,7 @@ cp src/config/examples/.env.scenario-b-server .env.storage
 export TRANSPORT_TYPE=http
 export TRANSPORT_PORT=3000
 export DEPLOYMENT_MODE=standalone
-export ENABLE_API_KEY_AUTH=true
-export API_KEYS=my-secret-key
+export AUTH_TOKEN=my-secret-key
 export DATABASE_PATH=./data/storage.db
 
 npm start
@@ -161,7 +160,7 @@ time curl -H "Authorization: Bearer my-secret-key" \
 
 ```bash
 # 导入一个测试技能
-npm run import -- --source ./path/to/skill
+npm run import -- ./path/to/skill
 
 # 验证导入
 curl -H "Authorization: Bearer my-secret-key" \
@@ -201,8 +200,7 @@ export TRANSPORT_TYPE=http
 export TRANSPORT_PORT=3000
 export DEPLOYMENT_MODE=standalone
 export MCP_ONLY_MODE=true
-export ENABLE_API_KEY_AUTH=true
-export API_KEYS=c2-key
+export AUTH_TOKEN=c2-key
 
 npm start
 ```
@@ -281,12 +279,12 @@ curl http://localhost:3000/api/gateway/health
 ### 问题：认证失败
 
 ```bash
-# 1. 验证 API Key 配置
-echo $API_KEYS
+# 1. 验证 AUTH_TOKEN 配置
+echo $AUTH_TOKEN
 
 # 2. 验证认证请求格式
 curl -v http://localhost:3000/api/gateway/health \
-  -H "Authorization: Bearer your-key"
+  -H "Authorization: Bearer your-token"
 
 # 3. 查看服务器日志中的认证错误
 ```

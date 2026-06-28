@@ -10,8 +10,6 @@ import { AuthenticationError } from "../utils/errors.js";
 
 const logger = getLogger();
 
-export type { looksLikeJwt };
-
 export interface McpExtra {
   sessionId?: string;
   authInfo?: { token?: string };

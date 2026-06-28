@@ -291,9 +291,14 @@ export async function resetPasswordAction(opts: { username: string; password: st
     process.exit(1);
   }
 
-  // Permission check: cannot reset superadmin password unless you are superadmin
-  if (user.userType === "superadmin" && creds.userType !== "superadmin") {
-    fail("Only superadmin can reset superadmin password");
+  // Permission check: superadmin can only reset own password; admin target requires superadmin
+  if (user.userType === "superadmin" && user.id !== creds.userId) {
+    fail("Cannot reset another superadmin's password");
+    closeDatabase();
+    process.exit(1);
+  }
+  if (user.userType === "admin" && creds.userType !== "superadmin") {
+    fail("Only superadmin can reset admin password");
     closeDatabase();
     process.exit(1);
   }

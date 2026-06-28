@@ -11,22 +11,24 @@ import { looksLikeJwt } from "../../auth/jwt.service.js";
 import { AppError } from "../../utils/errors.js";
 import { json } from "../helpers.js";
 
-export interface AdminAuthDeps {
+export interface AuthMiddlewareDeps {
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
   jwtSecret?: string;
   jwtIssuer?: string;
 }
 
-export async function enforceAdminAuth(
+/**
+ * Shared auth middleware. When `requireAdmin` is true, rejects non-admin/non-superadmin users.
+ * Gateway routes pass `requireAdmin: false`; admin routes pass `requireAdmin: true`.
+ */
+export async function enforceAuth(
   ctx: HttpContext,
-  deps: AdminAuthDeps,
+  deps: AuthMiddlewareDeps,
+  opts: { requireAdmin?: boolean } = {},
 ): Promise<RequestContext | null> {
   if (!deps.userRepo || !deps.userRoleRepo) {
-    ctx.logger.warn(
-      { url: ctx.url },
-      "Admin auth misconfigured: userRepo/userRoleRepo missing — refusing request",
-    );
+    ctx.logger.warn({ url: ctx.url }, "Auth misconfigured: userRepo/userRoleRepo missing");
     json(ctx.res, 500, { success: false, error: "Server auth not configured" });
     return null;
   }
@@ -37,30 +39,20 @@ export async function enforceAdminAuth(
     return null;
   }
 
-  // Diagnostic: JWT-shaped token but JWT config incomplete
-  if (!deps.jwtSecret && looksLikeJwt(token)) {
-    ctx.logger.warn(
-      { url: ctx.url },
-      "JWT-shaped token but AUTH_JWT_SECRET not configured — token will fail",
-    );
-  }
-  if (deps.jwtSecret && !deps.jwtIssuer && looksLikeJwt(token)) {
-    ctx.logger.warn(
-      { url: ctx.url },
-      "JWT-shaped token but jwt issuer not configured — token will fail",
-    );
+  if (opts.requireAdmin) {
+    if (!deps.jwtSecret && looksLikeJwt(token)) {
+      ctx.logger.warn({ url: ctx.url }, "JWT-shaped token but AUTH_JWT_SECRET not configured");
+    }
+    if (deps.jwtSecret && !deps.jwtIssuer && looksLikeJwt(token)) {
+      ctx.logger.warn({ url: ctx.url }, "JWT-shaped token but jwt issuer not configured");
+    }
   }
 
   const sessionId = (ctx.req.headers["x-session-id"] as string) || randomUUID();
-  let requestContext;
+  let requestContext: RequestContext;
   try {
     requestContext = await buildRequestContextFromHttp(
-      token,
-      sessionId,
-      deps.userRepo,
-      deps.userRoleRepo,
-      deps.jwtSecret,
-      deps.jwtIssuer,
+      token, sessionId, deps.userRepo, deps.userRoleRepo, deps.jwtSecret, deps.jwtIssuer,
     );
   } catch {
     json(ctx.res, 401, { success: false, error: "Invalid or expired token" });
@@ -72,13 +64,17 @@ export async function enforceAdminAuth(
     return null;
   }
 
-  // Check userType instead of admin:write tag
-  if (requestContext.userType !== "admin" && requestContext.userType !== "superadmin") {
+  if (opts.requireAdmin && requestContext.userType !== "admin" && requestContext.userType !== "superadmin") {
     json(ctx.res, 403, { success: false, error: "Admin privilege required" });
     return null;
   }
 
   return requestContext;
+}
+
+/** Admin auth — requires admin or superadmin userType. */
+export function enforceAdminAuth(ctx: HttpContext, deps: AuthMiddlewareDeps): Promise<RequestContext | null> {
+  return enforceAuth(ctx, deps, { requireAdmin: true });
 }
 
 export function requireSuperadmin(rc: RequestContext): void {
@@ -92,10 +88,6 @@ export function assertSuperadminProtected(
   operatorId: string,
 ): void {
   if (target.userType === "superadmin" && target.id !== operatorId) {
-    throw new AppError(
-      "Cannot modify or delete superadmin",
-      "SUPERADMIN_PROTECTED",
-      403,
-    );
+    throw new AppError("Cannot modify or delete superadmin", "SUPERADMIN_PROTECTED", 403);
   }
 }

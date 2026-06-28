@@ -21,14 +21,14 @@ import type { SkillRepository } from "../db/repositories/skill.repository.js";
  * WAL is locked, it fails fast and we report `not ready` rather than 200ing
  * with a half-initialized stack.
  */
-export interface ProbeResult {
+interface ProbeResult {
   status: "ok" | "not_ready";
   checks: {
     db: { ok: boolean; latencyMs: number; error?: string };
   };
 }
 
-export interface ReadinessDeps {
+interface ReadinessDeps {
   skillRepo?: SkillRepository;
 }
 

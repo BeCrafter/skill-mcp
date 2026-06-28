@@ -46,7 +46,7 @@ export function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(body);
 }
 
-export function getSafeHost(headerHost: string | undefined): string {
+function getSafeHost(headerHost: string | undefined): string {
   const host = headerHost ?? "localhost";
   if (!/^[a-zA-Z0-9:.-]+$/.test(host)) {
     return "localhost";
@@ -70,10 +70,6 @@ export function parseQuery(url: string, host: string | undefined): URLSearchPara
   const safeHost = getSafeHost(host);
   const urlObj = new URLParser(url, `http://${safeHost}`);
   return urlObj.searchParams;
-}
-
-export function parseJsonBody(body: Buffer): unknown {
-  return JSON.parse(body.toString());
 }
 
 /**

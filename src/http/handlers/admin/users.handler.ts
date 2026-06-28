@@ -33,10 +33,12 @@ function parseExpiry(input: { token_expires_at?: number | null; expires_in?: num
 
 const PRIVILEGED_ROLE_NAMES = new Set(["superadmin", "admin"]);
 
-/** Check if caller can operate on target. Superadmin targets are always protected from other superadmins. */
+/** Check if caller can operate on target. Superadmin targets are protected from other superadmins, but can operate on themselves. */
 function assertCanOperateOn(target: { userType: string; id: string }, operatorId: string, operatorUserType?: string): void {
   if (target.userType === "superadmin") {
-    throw new AppError("Cannot modify or delete superadmin", "SUPERADMIN_PROTECTED", 403);
+    // 超管之间互相保护，但允许操作自己
+    if (target.id === operatorId) return;
+    throw new AppError("Cannot operate on superadmin user", "SUPERADMIN_PROTECTED", 403);
   }
   if (target.userType === "admin" && operatorUserType !== "superadmin") {
     throw new AppError("Only superadmin can operate on admin users", "SUPERADMIN_REQUIRED", 403);

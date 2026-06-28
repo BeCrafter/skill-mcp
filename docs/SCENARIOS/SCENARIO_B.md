@@ -13,7 +13,7 @@ stdio MCP + 远程文件服务
 ## 架构
 
 ```
-Claude IDE ↔ [stdio] ↔ MCP(Local) ↔ [HTTP + API Key] ↔ Storage Server ↔ LocalFS/OSS
+Claude IDE ↔ [stdio] ↔ MCP(Local) ↔ [HTTP + Bearer Token] ↔ Storage Server ↔ LocalFS/OSS
 ```
 
 ## 部署步骤
@@ -30,7 +30,7 @@ cd /path/to/skill-mcp
 cp src/config/examples/.env.scenario-b-server .env.storage
 
 # 编辑 .env.storage（可选）
-# 修改 API_KEYS、TRANSPORT_PORT 等
+# 修改 TRANSPORT_PORT、STORAGE_BASE_PATH 等
 
 # 启动服务器
 export $(cat .env.storage | xargs)
@@ -39,8 +39,15 @@ npm start
 
 启动成功后，应该看到：
 ```
-[INFO] HTTP transport configured at port 3000
-[INFO] API Key authentication enabled
+Starting MCP Server in standalone mode
+
+listening
+  mode: standalone
+  transport: http
+  port: 3000
+  host: 0.0.0.0
+
+  ✓  Ready
 ```
 
 验证健康检查：
@@ -71,10 +78,10 @@ npm start
 
 启动成功后，应该看到：
 ```
-[INFO] Stdio transport configured
-[INFO] RemoteSkillProvider initialized
-[INFO] Connected to remote service at http://...
+Starting MCP Server in gateway mode
 ```
+
+此时 Claude IDE 可以通过 stdio 连接并使用远程技能。
 
 ### 步骤 3：验证连接
 
@@ -95,14 +102,17 @@ curl -H "Authorization: Bearer test-key-1" \
 
 ```bash
 # 必需配置
-ENABLE_API_KEY_AUTH=true              # 启用认证
-API_KEYS=test-key-1,test-key-2        # 有效的 API Key 列表
+DEPLOYMENT_MODE=standalone              # 使用本地 Provider
+TRANSPORT_TYPE=http                     # HTTP 传输
+TRANSPORT_PORT=3000                     # 服务器端口
 
 # 可选配置
-TRANSPORT_PORT=3000                   # 服务器端口
-STORAGE_BASE_PATH=./data/skills       # 存储路径
-CACHE_MEMORY_MAX_SIZE=500            # 内存缓存大小
+STORAGE_BASE_PATH=./data/skills         # 存储路径
+CACHE_MEMORY_MAX_SIZE=500              # 内存缓存大小
 ```
+
+> **认证说明**：API Key 认证已移除。`/api/gateway/*` 端点需要 Bearer Token 认证（`/api/gateway/health` 除外）。
+> 创建用户和角色请参考：`skill-mcp init` 或 `skill-mcp user create`。
 
 ### 客户端配置 (.env.scenario-b-client)
 
@@ -110,7 +120,7 @@ CACHE_MEMORY_MAX_SIZE=500            # 内存缓存大小
 # 必需配置
 DEPLOYMENT_MODE=gateway               # 使用远程 Provider
 CLOUD_SERVICE_URL=http://...          # 远程服务 URL
-AUTH_TOKEN=test-key-1                 # 连接用的 API Key
+AUTH_TOKEN=test-key-1                 # 连接用的 Bearer Token
 
 # 可选配置
 CACHE_MEMORY_MAX_SIZE=100             # 客户端缓存（通常较小）
@@ -123,10 +133,10 @@ CACHE_FILE_ENABLED=true               # 启用文件缓存（跨进程共享）
 
 ```bash
 # 导入新技能到服务器
-npm run import -- --source /path/to/skill
+npm run import -- /path/to/skill
 
 # 查看已导入的技能
-npm run db:query -- "SELECT slug, name, version FROM skills"
+sqlite3 data/skill-mcp.db "SELECT slug, name, version FROM skills"
 
 # 更新技能
 # 通过管理 API：PUT /api/skills/{slug}
@@ -205,15 +215,15 @@ echo $CLOUD_SERVICE_URL
 ### 问题：认证失败 (401)
 
 ```bash
-# 1. 验证 API Key 配置
-# 检查服务器的 API_KEYS 是否包含客户端的 AUTH_TOKEN
+# 1. 验证 Bearer Token 配置
+# 确保客户端的 AUTH_TOKEN 与服务器端创建的用户 token 匹配
 
 # 2. 测试认证
-curl -H "Authorization: Bearer test-key-1" \
+curl -H "Authorization: Bearer <your-token>" \
   http://server:3000/api/gateway/skills
 
 # 3. 查看服务器日志
-# [WARN] Invalid API key
+# [WARN] Authentication failed
 ```
 
 ### 问题：连接超时
@@ -234,15 +244,16 @@ ping server
 ### 安全
 
 ```bash
-# 1. 使用强 API Key
-API_KEYS=sha256-hash-of-random-string
+# 1. 使用 RBAC 控制访问
+skill-mcp role create --name reader --tags "skill:read"
+skill-mcp user create --name client-app --role-ids <role-id>
 
 # 2. 使用 HTTPS（需要反向代理如 Nginx）
 CLOUD_SERVICE_URL=https://secure.example.com
 
 # 3. 限制客户端 IP（应用层或防火墙）
 
-# 4. 定期轮换 API Key
+# 4. 定期轮换用户 Token（skill-mcp user rotate-token）
 ```
 
 ### 性能
@@ -266,8 +277,8 @@ STORAGE_TYPE=aliyun-oss
 # - 缓存命中率
 # - 平均响应时间
 
-# 监控 API Key 使用
-# - 查询 /api/logs 端点
+# 监控访问日志
+# - 查询 /api/admin/access-logs 端点
 ```
 
 ## 多客户端场景
@@ -303,7 +314,6 @@ RUN npm run build
 
 ENV TRANSPORT_TYPE=http
 ENV DEPLOYMENT_MODE=standalone
-ENV ENABLE_API_KEY_AUTH=true
 
 EXPOSE 3000
 
@@ -342,8 +352,10 @@ services:
     environment:
       TRANSPORT_TYPE: http
       DEPLOYMENT_MODE: standalone
-      ENABLE_API_KEY_AUTH: "true"
-      API_KEYS: storage-key-prod
+      # RBAC: create a user+token via `skill-mcp init` or `skill-mcp user create`,
+      # then clients use that token as AUTH_TOKEN.
+      # For quick local testing, uncomment to allow anonymous access:
+      # SKILL_MCP_ADMIN_AUTH_OPTIONAL: "true"
 
   mcp-client-1:
     image: skill-mcp:latest
