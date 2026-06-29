@@ -140,8 +140,16 @@ export function table(rows: Array<Record<string, unknown>>, columns: Column[]): 
     return { ...col, width: Math.max(col.width, maxWidth) };
   });
 
+  // Helper: pad text considering ANSI codes
+  function padVisible(text: string, width: number, align: "left" | "right" = "left"): string {
+    const visibleLen = lineWidth(text);
+    const padding = Math.max(0, width - visibleLen);
+    const pad = " ".repeat(padding);
+    return align === "right" ? pad + text : text + pad;
+  }
+
   // Header
-  const headerLine = computedColumns.map(col => c.dim(col.header.padEnd(col.width))).join("  ");
+  const headerLine = computedColumns.map(col => c.dim(padVisible(col.header, col.width))).join("  ");
 
   const lines: string[] = [
     `    ${headerLine}`,
@@ -155,12 +163,10 @@ export function table(rows: Array<Record<string, unknown>>, columns: Column[]): 
       if (col.format) {
         // Pad raw text first, then apply format (e.g. color) so ANSI codes
         // don't interfere with padEnd's character count.
-        const padded = col.align === "right"
-          ? rawText.padStart(col.width)
-          : rawText.padEnd(col.width);
+        const padded = padVisible(rawText, col.width, col.align);
         return col.format(padded);
       }
-      return col.align === "right" ? rawText.padStart(col.width) : rawText.padEnd(col.width);
+      return padVisible(rawText, col.width, col.align);
     });
     lines.push(`    ${cells.join("  ")}`);
   }
@@ -171,18 +177,18 @@ export function table(rows: Array<Record<string, unknown>>, columns: Column[]): 
 // ── Status badges ───────────────────────────────────────────────────
 
 /**
- * Status badge with colored indicator.
+ * Status badge with color only (no icon).
  *
- *   ● published    (green)
- *   ○ draft        (yellow)
- *   ◌ archived     (dim)
+ *   published    (green)
+ *   draft        (yellow)
+ *   archived     (dim)
  */
 export function badge(status: string): string {
   switch (status) {
-    case "published": return `${c.green("●")}  published`;
-    case "draft":     return `${c.yellow("○")}  draft`;
-    case "archived":  return `${c.dim("◌")}  archived`;
-    default:          return `${c.dim("○")}  ${status}`;
+    case "published": return c.green(status);
+    case "draft":     return c.yellow(status);
+    case "archived":  return c.dim(status);
+    default:          return c.dim(status);
   }
 }
 

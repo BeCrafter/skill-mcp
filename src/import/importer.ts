@@ -602,26 +602,43 @@ export class SkillImporter {
 
     try {
       // List files in current skill directory (excluding .versions subdir)
+      // listRecursive returns paths WITH the prefix (e.g., "demo-skill/SKILL.md")
       const files = await this.storage.listRecursive(skill.storagePath);
-      const targets = files.filter(p => !p.startsWith(".versions/"));
+      const targets = files.filter(p => !p.includes("/.versions/") && !p.startsWith(".versions/"));
       const copied = await pMap(targets, STORAGE_CONCURRENCY, async (filePath) => {
-        const content = await this.storage.get(`${skill.storagePath}${filePath}`);
+        // filePath already includes the prefix, so use it directly
+        const content = await this.storage.get(filePath);
         if (!content) return false;
-        await this.storage.put(`${versionPath}${filePath}`, content);
+        // Strip the prefix for the version path
+        const relativePath = filePath.startsWith(skill.storagePath)
+          ? filePath.slice(skill.storagePath.length)
+          : filePath;
+        await this.storage.put(`${versionPath}${relativePath}`, content);
         return true;
       });
       const fileCount = copied.filter(Boolean).length;
 
-      // Record version in database (old snapshot, not current)
-      this.versionRepo.create({
-        skillId: skill.id,
-        version: skill.version,
-        contentHash: skill.contentHash!,
-        storagePath: versionPath,
-        entryFile: skill.entryFile,
-        fileCount,
-        isCurrent: false,
-      });
+      // Find existing version record and update it to point to the snapshot
+      const existing = this.versionRepo.findByVersion(skill.id, skill.version);
+      if (existing) {
+        // Update existing record to point to snapshot path
+        this.versionRepo.update(existing.id, {
+          storagePath: versionPath,
+          fileCount,
+          isCurrent: false,
+        });
+      } else {
+        // Create new record if none exists
+        this.versionRepo.create({
+          skillId: skill.id,
+          version: skill.version,
+          contentHash: skill.contentHash!,
+          storagePath: versionPath,
+          entryFile: skill.entryFile,
+          fileCount,
+          isCurrent: false,
+        });
+      }
 
       this.logger.debug({ skillId: skill.id, version: skill.version, fileCount }, "Version snapshot created");
     } catch (error) {

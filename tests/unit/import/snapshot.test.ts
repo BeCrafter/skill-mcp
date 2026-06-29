@@ -40,6 +40,14 @@ function makeLogger(): Logger {
   } as unknown as Logger;
 }
 
+function makeVersionRepo(existingVersion: unknown = null) {
+  return {
+    findByVersion: vi.fn().mockReturnValue(existingVersion),
+    create: vi.fn(),
+    update: vi.fn(),
+  } as unknown as SkillVersionRepository;
+}
+
 function makeImporter(opts: {
   storage: IStorageProvider;
   versionRepo?: SkillVersionRepository;
@@ -79,9 +87,7 @@ describe("SkillImporter.snapshotCurrentVersion", () => {
       listRecursive: vi.fn().mockResolvedValue(["SKILL.md", "ref.md", ".versions/old/x"]),
       get: vi.fn().mockResolvedValue(Buffer.from("payload")),
     });
-    const versionRepo = {
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
 
     const { importer } = makeImporter({ storage, versionRepo });
     await callSnapshot(importer, baseSkill);
@@ -103,7 +109,7 @@ describe("SkillImporter.snapshotCurrentVersion", () => {
     const storage = makeStorage({
       listRecursive: vi.fn().mockRejectedValue(new Error("storage offline")),
     });
-    const versionRepo = { create: vi.fn() } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const { importer, logger } = makeImporter({ storage, versionRepo });
 
     await expect(callSnapshot(importer, baseSkill)).resolves.toBeUndefined();
@@ -120,7 +126,7 @@ describe("SkillImporter.snapshotCurrentVersion", () => {
       get: vi.fn().mockResolvedValue(Buffer.from("x")),
       put: vi.fn().mockRejectedValue(new Error("disk full")),
     });
-    const versionRepo = { create: vi.fn() } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const { importer, logger } = makeImporter({ storage, versionRepo });
 
     await expect(callSnapshot(importer, baseSkill)).resolves.toBeUndefined();
@@ -136,7 +142,7 @@ describe("SkillImporter.snapshotCurrentVersion", () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(Buffer.from("C")),
     });
-    const versionRepo = { create: vi.fn() } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const { importer } = makeImporter({ storage, versionRepo });
 
     await callSnapshot(importer, baseSkill);

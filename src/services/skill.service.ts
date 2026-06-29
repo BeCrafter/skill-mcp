@@ -615,11 +615,21 @@ export class SkillService {
     if (!ver1) throw new VersionNotFoundError(slug, v1);
     if (!ver2) throw new VersionNotFoundError(slug, v2);
 
+    // listRecursive returns paths WITH the prefix
     const files1 = await this.storage.listRecursive(ver1.storagePath);
     const files2 = await this.storage.listRecursive(ver2.storagePath);
-    const set1 = new Set(files1);
-    const set2 = new Set(files2);
-    const allFiles = new Set([...files1, ...files2]);
+
+    // Normalize paths to relative form for comparison
+    const normalize = (p: string, prefix: string) => {
+      const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
+      return p.startsWith(normalizedPrefix) ? p.slice(normalizedPrefix.length) : p;
+    };
+
+    const rel1 = files1.map(f => normalize(f, ver1.storagePath));
+    const rel2 = files2.map(f => normalize(f, ver2.storagePath));
+    const set1 = new Set(rel1);
+    const set2 = new Set(rel2);
+    const allFiles = new Set([...rel1, ...rel2]);
 
     const files: VersionDiffFile[] = [];
     for (const f of allFiles) {
@@ -628,8 +638,11 @@ export class SkillService {
       } else if (!set2.has(f)) {
         files.push({ path: f, status: "removed" });
       } else {
-        const c1 = await this.storage.get(`${ver1.storagePath}${f}`);
-        const c2 = await this.storage.get(`${ver2.storagePath}${f}`);
+        // Use the original full paths to read from storage
+        const idx1 = rel1.indexOf(f);
+        const idx2 = rel2.indexOf(f);
+        const c1 = await this.storage.get(files1[idx1]);
+        const c2 = await this.storage.get(files2[idx2]);
         const text1 = c1 ? new TextDecoder().decode(c1) : "";
         const text2 = c2 ? new TextDecoder().decode(c2) : "";
         if (text1 !== text2) {
@@ -657,23 +670,39 @@ export class SkillService {
     // 1. Snapshot current version (non-destructive: writes only to .versions/<v>/).
     const currentVersionPath = `${skill.storagePath}.versions/${skill.version}/`;
     const currentFiles = await storage.listRecursive(skill.storagePath);
-    const snapshotTargets = currentFiles.filter(p => !p.startsWith(".versions/"));
+    const snapshotTargets = currentFiles.filter(p => !p.includes("/.versions/") && !p.startsWith(".versions/"));
     const copied = await pMap(snapshotTargets, STORAGE_CONCURRENCY, async (filePath) => {
-      const content = await storage.get(`${skill.storagePath}${filePath}`);
+      // filePath already includes the prefix, so use it directly
+      const content = await storage.get(filePath);
       if (!content) return false;
-      await storage.put(`${currentVersionPath}${filePath}`, content);
+      // Strip the prefix for the version path
+      const relativePath = filePath.startsWith(skill.storagePath)
+        ? filePath.slice(skill.storagePath.length)
+        : filePath;
+      await storage.put(`${currentVersionPath}${relativePath}`, content);
       return true;
     });
     const currentFileCount = copied.filter(Boolean).length;
-    this.versionRepo.create({
-      skillId: skill.id,
-      version: skill.version,
-      contentHash: skill.contentHash ?? "",
-      storagePath: currentVersionPath,
-      entryFile: skill.entryFile,
-      fileCount: currentFileCount,
-      changeSummary: `Pre-rollback snapshot before restoring to ${targetVersion}`,
-    });
+    // Find existing version record and update it to point to the snapshot
+    const existingVersion = this.versionRepo.findByVersion(skill.id, skill.version);
+    if (existingVersion) {
+      this.versionRepo.update(existingVersion.id, {
+        storagePath: currentVersionPath,
+        fileCount: currentFileCount,
+        isCurrent: false,
+        changeSummary: `Pre-rollback snapshot before restoring to ${targetVersion}`,
+      });
+    } else {
+      this.versionRepo.create({
+        skillId: skill.id,
+        version: skill.version,
+        contentHash: skill.contentHash ?? "",
+        storagePath: currentVersionPath,
+        entryFile: skill.entryFile,
+        fileCount: currentFileCount,
+        changeSummary: `Pre-rollback snapshot before restoring to ${targetVersion}`,
+      });
+    }
 
     const runId = shortId();
     const stagingPath = `${ROLLBACK_STAGING_ROOT}/${runId}/`;
@@ -688,10 +717,15 @@ export class SkillService {
       const versionFiles = await storage.listRecursive(version.storagePath);
       const stagedSizes = new Map<string, number>();
       await pMap(versionFiles, STORAGE_CONCURRENCY, async (filePath) => {
-        const content = await storage.get(`${version.storagePath}${filePath}`);
+        // filePath already includes the prefix, so use it directly
+        const content = await storage.get(filePath);
         if (!content) return;
         stagedSizes.set(filePath, content.byteLength);
-        await storage.put(`${stagingPath}${filePath}`, content);
+        // Strip the prefix for the staging path
+        const relativePath = filePath.startsWith(version.storagePath)
+          ? filePath.slice(version.storagePath.length)
+          : filePath;
+        await storage.put(`${stagingPath}${relativePath}`, content);
       });
 
       // 3. Commit storage from staging to live path (per-file overwrite —
@@ -738,6 +772,20 @@ export class SkillService {
         await this.skillFileRepo.replaceAll(skill.id, fileRows);
       }
 
+      // 4c. Record the new rolled-back version as current
+      if (this.versionRepo) {
+        this.versionRepo.create({
+          skillId: skill.id,
+          version: newVersion,
+          contentHash: version.contentHash,
+          storagePath: skill.storagePath,
+          entryFile: skill.entryFile,
+          fileCount: versionFiles.length,
+          changeSummary: `Rolled back to ${targetVersion}`,
+          isCurrent: true,
+        });
+      }
+
       // 5. Synchronous cache invalidation — close the read-after-rollback window.
       // T-711 — DB and storage are already committed at this point; a transient
       // cache provider failure is recoverable (TTL + cache-aside semantics) but
@@ -760,9 +808,14 @@ export class SkillService {
         try {
           const restoreFiles = await storage.listRecursive(currentVersionPath);
           await pMap(restoreFiles, STORAGE_CONCURRENCY, async (filePath) => {
-            const content = await storage.get(`${currentVersionPath}${filePath}`);
+            // filePath already includes the prefix, so use it directly
+            const content = await storage.get(filePath);
             if (!content) return;
-            await storage.put(`${skill.storagePath}${filePath}`, content);
+            // Strip the prefix for the live path
+            const relativePath = filePath.startsWith(currentVersionPath)
+              ? filePath.slice(currentVersionPath.length)
+              : filePath;
+            await storage.put(`${skill.storagePath}${relativePath}`, content);
           });
         } catch (cleanupErr) {
           this.logger.error({ err: cleanupErr, slug }, "Failed to restore storage from pre-rollback snapshot");

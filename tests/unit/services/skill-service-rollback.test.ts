@@ -72,6 +72,14 @@ function makeStorage(overrides?: Partial<IStorageProvider>): IStorageProvider {
   };
 }
 
+function makeVersionRepo(existingVersion: unknown = v100) {
+  return {
+    findByVersion: vi.fn().mockReturnValue(existingVersion),
+    create: vi.fn(),
+    update: vi.fn(),
+  } as unknown as SkillVersionRepository;
+}
+
 describe("SkillService.rollbackToVersion", () => {
   it("throws when version repo / skill repo / storage are not configured", async () => {
     const service = new SkillService(makeProvider(), makeCache(), makeLogger());
@@ -80,7 +88,7 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("throws SkillNotFoundError when slug does not resolve", async () => {
-    const versionRepo = { findByVersion: vi.fn(), create: vi.fn() } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn() } as unknown as SkillRepository;
     const service = new SkillService(
       makeProvider(null), makeCache(), makeLogger(),
@@ -91,10 +99,7 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("throws when target version row is missing", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(null),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo(null);
     const skillRepo = { update: vi.fn() } as unknown as SkillRepository;
     const service = new SkillService(
       makeProvider(), makeCache(), makeLogger(),
@@ -105,17 +110,12 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("happy path: snapshots current, restores target, bumps version, clears caches", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
     const cache = makeCache();
     const storage = makeStorage({
       listRecursive: vi.fn()
-        // First call: snapshot of current files (under demo/)
         .mockResolvedValueOnce(["SKILL.md", "ref.md", ".versions/old/x"])
-        // Second call: files under v1.0.0 snapshot
         .mockResolvedValueOnce(["SKILL.md", "ref.md"]),
       get: vi.fn().mockResolvedValue(Buffer.from("payload")),
     });
@@ -135,18 +135,19 @@ describe("SkillService.rollbackToVersion", () => {
     expect(storage.put).toHaveBeenCalledWith("demo/SKILL.md", expect.any(Buffer));
     expect(storage.put).toHaveBeenCalledWith("demo/ref.md", expect.any(Buffer));
 
-    // Pre-rollback snapshot row recorded for current version (1.2.0)
-    expect(versionRepo.create).toHaveBeenCalledWith(expect.objectContaining({
-      skillId: "s1", version: "1.2.0", contentHash: "current-hash",
-      storagePath: "demo/.versions/1.2.0/", fileCount: 2,
-      changeSummary: expect.stringContaining("Pre-rollback"),
-    }));
-
     // DB updated: bumped patch (1.2.0 → 1.2.1) and contentHash from target version
     expect(skillRepo.update).toHaveBeenCalledWith("s1", {
       version: "1.2.1",
       contentHash: "hash-100",
     });
+
+    // New version record created for the rolled-back version
+    expect(versionRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      skillId: "s1",
+      version: "1.2.1",
+      contentHash: "hash-100",
+      isCurrent: true,
+    }));
 
     // Caches cleared for entry + file
     expect(cache.clearByPrefix).toHaveBeenCalledWith("skill:entry:demo");
@@ -154,10 +155,7 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("respects the bump argument when computing the new version", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
     const storage = makeStorage({
       listRecursive: vi.fn().mockResolvedValue([]),
@@ -176,23 +174,18 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("storage commit failure mid-way restores from pre-rollback snapshot and does not advance DB", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
     const cache = makeCache();
 
-    // Bookkeep call sequence: snapshot reads/writes, then staging reads/writes,
-    // then the commit-overwrite phase. We make commit-overwrite to live path fail.
     const putMock = vi.fn().mockImplementation(async (path: string) => {
       if (path === "demo/SKILL.md") throw new Error("disk error during commit");
     });
     const storage = makeStorage({
       listRecursive: vi.fn()
-        .mockResolvedValueOnce(["SKILL.md", "ref.md"])  // current snapshot
-        .mockResolvedValueOnce(["SKILL.md", "ref.md"])  // version files (for staging)
-        .mockResolvedValueOnce(["SKILL.md", "ref.md"]), // restore-from-snapshot
+        .mockResolvedValueOnce(["SKILL.md", "ref.md"])
+        .mockResolvedValueOnce(["SKILL.md", "ref.md"])
+        .mockResolvedValueOnce(["SKILL.md", "ref.md"]),
       get: vi.fn().mockResolvedValue(Buffer.from("payload")),
       put: putMock,
     });
@@ -214,19 +207,16 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("DB update failure rolls back live storage from snapshot and does not poison cache", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = {
       update: vi.fn().mockRejectedValue(new Error("DB locked")),
     } as unknown as SkillRepository;
     const cache = makeCache();
     const storage = makeStorage({
       listRecursive: vi.fn()
-        .mockResolvedValueOnce(["SKILL.md"])  // current snapshot
-        .mockResolvedValueOnce(["SKILL.md"])  // version files
-        .mockResolvedValueOnce(["SKILL.md"]), // restore from snapshot
+        .mockResolvedValueOnce(["SKILL.md"])
+        .mockResolvedValueOnce(["SKILL.md"])
+        .mockResolvedValueOnce(["SKILL.md"]),
       get: vi.fn().mockResolvedValue(Buffer.from("payload")),
     });
 
@@ -243,10 +233,7 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("uses an isolated staging directory and cleans it up on the happy path", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
     const storage = makeStorage({
       listRecursive: vi.fn()
@@ -271,17 +258,12 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("T-723: deletes live files absent from the target version before restoring", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
-    // Live tree has SKILL.md + ref.md + extra.md (e.g. added in v1.1.0/1.2.0).
-    // Target v1.0.0 only has SKILL.md + ref.md → extra.md must be deleted.
     const storage = makeStorage({
       listRecursive: vi.fn()
-        .mockResolvedValueOnce(["SKILL.md", "ref.md", "extra.md"]) // current snapshot scan
-        .mockResolvedValueOnce(["SKILL.md", "ref.md"]),             // target version
+        .mockResolvedValueOnce(["SKILL.md", "ref.md", "extra.md"])
+        .mockResolvedValueOnce(["SKILL.md", "ref.md"]),
       get: vi.fn().mockResolvedValue(Buffer.from("payload")),
     });
 
@@ -293,25 +275,21 @@ describe("SkillService.rollbackToVersion", () => {
     await service.rollbackToVersion("demo", "1.0.0");
 
     expect(storage.delete).toHaveBeenCalledWith("demo/extra.md");
-    // Files present in both must NOT be deleted (only overwritten via put).
     const deletedPaths = (storage.delete as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
     expect(deletedPaths).not.toContain("demo/SKILL.md");
     expect(deletedPaths).not.toContain("demo/ref.md");
   });
 
   it("T-724: refreshes skill_files index via replaceAll with target version's files", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
     const skillFileRepo = {
       replaceAll: vi.fn().mockResolvedValue(undefined),
     } as unknown as SkillFileRepository;
     const storage = makeStorage({
       listRecursive: vi.fn()
-        .mockResolvedValueOnce(["SKILL.md", "ref.md"])  // current snapshot
-        .mockResolvedValueOnce(["SKILL.md", "ref.md"]), // target version files
+        .mockResolvedValueOnce(["SKILL.md", "ref.md"])
+        .mockResolvedValueOnce(["SKILL.md", "ref.md"]),
       get: vi.fn().mockResolvedValue(Buffer.from("body-bytes")),
     });
 
@@ -329,7 +307,6 @@ describe("SkillService.rollbackToVersion", () => {
     expect(rows).toHaveLength(2);
     const paths = rows.map((r: { filePath: string }) => r.filePath).sort();
     expect(paths).toEqual(["SKILL.md", "ref.md"].sort());
-    // fileSize is captured from staged buffer length (Buffer.from("body-bytes") = 10 bytes).
     for (const row of rows) {
       expect(row.fileSize).toBe(10);
       expect(row.fileType).toBe("text");
@@ -337,10 +314,7 @@ describe("SkillService.rollbackToVersion", () => {
   });
 
   it("skips snapshot files whose storage.get returns null", async () => {
-    const versionRepo = {
-      findByVersion: vi.fn().mockReturnValue(v100),
-      create: vi.fn(),
-    } as unknown as SkillVersionRepository;
+    const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
     const storage = makeStorage({
       listRecursive: vi.fn()
@@ -359,6 +333,6 @@ describe("SkillService.rollbackToVersion", () => {
 
     await service.rollbackToVersion("demo", "1.0.0");
 
-    expect(versionRepo.create).toHaveBeenCalledWith(expect.objectContaining({ fileCount: 2 }));
+    expect(versionRepo.update).toHaveBeenCalledWith("v1", expect.objectContaining({ fileCount: 2 }));
   });
 });

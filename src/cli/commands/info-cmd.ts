@@ -41,32 +41,45 @@ export async function infoAction(slug: string, opts: { serverUrl?: string } = {}
 }
 
 function renderSkillInfo(skill: SkillDetail): void {
-  const kvLines: string[] = [];
-  kvLines.push(kv("slug", skill.slug));
-  if (skill.name !== skill.slug) kvLines.push(kv("name", skill.name));
-  if (skill.displayName) kvLines.push(kv("display", skill.displayName));
-  kvLines.push(kv("status", badge(skill.status)));
-  kvLines.push(kv("visibility", skill.visibility));
-  if (skill.category) kvLines.push(kv("category", skill.category));
-  if (Array.isArray(skill.tags) && skill.tags.length) kvLines.push(kv("tags", skill.tags.join(", ")));
-  kvLines.push(kv("version", c.dim("v" + skill.version)));
-  kvLines.push(kv("entry", skill.entryFile));
-  kvLines.push(kv("storage", skill.storagePath));
-  kvLines.push(kv("hash", skill.contentHash ? skill.contentHash.slice(0, 16) + "…" : c.dim("N/A")));
-  kvLines.push(kv("created", fmtDate(skill.createdAt)));
-  kvLines.push(kv("updated", fmtDate(skill.updatedAt)));
+  // Basic info - compact
+  const basicLines: string[] = [];
+  basicLines.push(kv("Version", `v${skill.version}`));
+  basicLines.push(kv("Status", badge(skill.status)));
+  if (skill.visibility !== "private") basicLines.push(kv("Visibility", skill.visibility));
+  if (skill.category) basicLines.push(kv("Category", skill.category));
+  if (Array.isArray(skill.tags) && skill.tags.length) basicLines.push(kv("Tags", skill.tags.join(", ")));
+  basicLines.push(kv("Updated", fmtDate(skill.updatedAt)));
 
-  console.log(section(skill.slug, undefined, maxLineWidth(...kvLines)));
+  // Technical info
+  const techLines: string[] = [];
+  techLines.push(kv("Entry", skill.entryFile));
+  techLines.push(kv("Storage", skill.storagePath));
+  techLines.push(kv("Hash", skill.contentHash ? skill.contentHash.slice(0, 16) + "…" : c.dim("N/A")));
+  techLines.push(kv("Created", fmtDate(skill.createdAt)));
+
+  // Header
+  console.log(section(skill.slug, undefined, maxLineWidth(...basicLines, ...techLines)));
   console.log();
-  for (const line of kvLines) console.log(line);
 
+  // Basic info
+  for (const line of basicLines) console.log(line);
+
+  // Technical section
+  console.log();
+  console.log(`    ${c.dim("Technical")}`);
+  console.log(`    ${c.dim("─".repeat(20))}`);
+  for (const line of techLines) console.log(line);
+
+  // Description
   if (skill.description) {
     const desc = skill.description.replace(/^["']|["']$/g, "").trim();
     console.log();
+    const termWidth = process.stdout.columns || 80;
+    const maxWidth = Math.min(termWidth - 4, 120);
     const words = desc.split(" ");
     let line = "  ";
     for (const word of words) {
-      if (line.length + word.length > 44) {
+      if (line.length + word.length > maxWidth) {
         console.log(c.dim(line.trimEnd()));
         line = "  " + word + " ";
       } else {

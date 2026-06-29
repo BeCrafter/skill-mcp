@@ -115,7 +115,7 @@ function printVersionTable(versions: VersionInfo[]): void {
   console.log(section("Version history", versions.length));
   console.log();
   const rows = versions.map(v => ({
-    version: v.version + (v.isCurrent ? " ●" : ""),
+    version: v.isCurrent ? `→ ${v.version}` : `  ${v.version}`,
     hash: v.contentHash.slice(7, 15),
     files: String(v.fileCount),
     created: fmtDate(v.createdAt),
@@ -123,17 +123,17 @@ function printVersionTable(versions: VersionInfo[]): void {
   }));
   console.log(table(rows.map(r => ({
     ...r,
-    version: r.isCurrent ? c.bold(r.version) : r.version,
+    version: r.isCurrent ? c.bold(c.green(r.version)) : c.dim(r.version),
     hash: c.dim(r.hash),
     files: c.dim(r.files),
     created: c.dim(r.created),
   })), [
-    { key: "version", header: "VERSION", width: 12 },
+    { key: "version", header: "VERSION", width: 14 },
     { key: "hash", header: "HASH", width: 10 },
-    { key: "files", header: "FILES", width: 6, align: "right" },
+    { key: "files", header: "FILES", width: 6 },
     { key: "created", header: "CREATED", width: 18 },
   ]));
-  console.log(`\n  ${c.dim("● current version")}\n`);
+  console.log();
 }
 
 function printDiff(diff: VersionDiff): void {

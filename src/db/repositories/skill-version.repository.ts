@@ -81,6 +81,13 @@ export class SkillVersionRepository {
     };
   }
 
+  async update(id: string, updates: Partial<{ storagePath: string; fileCount: number; isCurrent: boolean; changeSummary: string }>): Promise<void> {
+    this.db.update(skillVersions)
+      .set(updates)
+      .where(eq(skillVersions.id, id))
+      .run();
+  }
+
   findCurrent(skillId: string): SkillVersion | null {
     const result = this.db
       .select()

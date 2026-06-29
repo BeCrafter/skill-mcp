@@ -6,7 +6,7 @@ import { c, badge, truncate, table, section, warn } from "../ui.js";
 import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
-type SkillRow = { slug: string; name: string; version: string; status: string; description: string; category: string | null; tags: string[] };
+type SkillRow = { id: string; slug: string; name: string; version: string; status: string; description: string; category: string | null; tags: string[] };
 
 export async function listAction(options: { name?: string; tags?: string; serverUrl?: string }): Promise<void> {
   const serverUrl = getServerUrl(options);
@@ -51,27 +51,30 @@ function renderSkillTable(skills: SkillRow[]): void {
   const slugWidth = Math.min(Math.max(...skills.map(s => s.slug.length), 16), 36);
 
   for (const s of skills) {
+    const meta: string[] = [];
+    if (s.description) meta.push(truncate(s.description, 48));
+    if (s.category) meta.push(`category: ${s.category}`);
+    const metaText = meta.length ? c.dim(truncate(meta.join("  ·  "), 48)) : "";
+
+    const tagsText = Array.isArray(s.tags) && s.tags.length
+      ? c.dim(s.tags.join(", "))
+      : "";
+
     tableRows.push({
       slug: c.boldCyan(s.slug),
       version: c.dim("v" + s.version),
       status: badge(s.status),
-      name: s.name !== s.slug ? c.dim("[" + s.name + "]") : "",
+      tags: tagsText,
+      details: metaText,
     });
-    const meta: string[] = [];
-    if (s.description) meta.push(truncate(s.description, 48));
-    if (s.category) meta.push(`category: ${s.category}`);
-    if (Array.isArray(s.tags) && s.tags.length) meta.push(`tags: ${s.tags.join(", ")}`);
-    if (meta.length) {
-      const metaText = truncate(meta.join("  ·  "), 52);
-      tableRows.push({ slug: "", version: "", status: "", name: c.dim(metaText) });
-    }
   }
 
   console.log(table(tableRows, [
     { key: "slug", header: "SLUG", width: slugWidth },
     { key: "version", header: "VERSION", width: 10 },
     { key: "status", header: "STATUS", width: 16 },
-    { key: "name", header: "DETAILS", width: 42 },
+    { key: "tags", header: "TAGS", width: 24 },
+    { key: "details", header: "DETAILS", width: 48 },
   ]));
 
   console.log();
