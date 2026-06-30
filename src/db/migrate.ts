@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDatabaseUrl } from "./dialect.js";
@@ -165,47 +166,74 @@ export function runMigrations(dbInput: string): void {
   const db = drizzle(sqlite);
 
   // ponytail: idempotency guard for migration 0018. If the 'username' column
-  // already exists (e.g. from a prior 0017 run) but the journal tag is
-  // '0018_user_type_and_login', drizzle will re-run the ALTER TABLE and crash
-  // with "duplicate column name". Pre-check and mark as applied to avoid this.
-  const MIGRATION_0018_TAG = "0018_user_type_and_login";
+  // already exists (e.g. from a prior 0017 run) but the migration wasn't
+  // recorded, mark it as applied to avoid "duplicate column name".
   try {
     const hasUsernameCol = sqlite.prepare(
       "SELECT name FROM pragma_table_info('users') WHERE name = 'username'"
     ).get();
     if (hasUsernameCol) {
+      const migration0018Sql = readFileSync(join(migrationsFolder, "0018_user_type_and_login.sql"), "utf-8");
+      const migration0018Hash = createHash("sha256").update(migration0018Sql).digest("hex");
       const hasTag = sqlite.prepare(
         "SELECT 1 FROM __drizzle_migrations WHERE hash = ?"
-      ).get(MIGRATION_0018_TAG);
+      ).get(migration0018Hash);
       if (!hasTag) {
         sqlite.prepare(
           "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
-        ).run(MIGRATION_0018_TAG, Date.now());
+        ).run(migration0018Hash, Date.now());
       }
     }
   } catch {
     // Table may not exist yet on fresh DB — let migrate() handle it
   }
 
-  // Idempotency guard for migration 0020: if token_plaintext column doesn't
-  // exist but the migration tag is recorded, reset it so drizzle re-runs it.
-  const MIGRATION_0020_TAG = "0020_skill_versions_is_current";
+  // Idempotency guard for migration 0020: ensure all columns/tables added by
+  // 0020 exist.  Two failure modes are possible:
+  //
+  //   A) 0020 partially applied — tag recorded, some columns missing.
+  //      → Add missing columns directly (re-running would hit "duplicate
+  //        column name" for columns that already exist).
+  //
+  //   B) Columns added manually or by a prior partial run, but tag NOT
+  //      recorded.  → Insert the tag so drizzle doesn't re-run 0020 and
+  //        crash on already-existing columns.
   try {
-    const hasTokenPlaintext = sqlite.prepare(
-      "SELECT name FROM pragma_table_info('users') WHERE name = 'token_plaintext'"
-    ).get();
-    if (!hasTokenPlaintext) {
-      const hasTag = sqlite.prepare(
-        "SELECT 1 FROM __drizzle_migrations WHERE hash = ?"
-      ).get(MIGRATION_0020_TAG);
-      if (hasTag) {
-        sqlite.prepare(
-          "DELETE FROM __drizzle_migrations WHERE hash = ?"
-        ).run(MIGRATION_0020_TAG);
-      }
+    const addColIfMissing = (table: string, column: string, type: string) => {
+      const has = sqlite.prepare(
+        `SELECT name FROM pragma_table_info('${table}') WHERE name = '${column}'`
+      ).get();
+      if (!has) sqlite.exec(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${type}`);
+    };
+    addColIfMissing("skill_versions", "is_current", "integer NOT NULL DEFAULT 0");
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS audit_logs (
+      id text PRIMARY KEY NOT NULL, action text NOT NULL, entity_type text NOT NULL,
+      entity_id text NOT NULL, operator_id text, before_json text,
+      after_json text, created_at integer NOT NULL
+    )`);
+    sqlite.exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs (entity_type, entity_id)");
+    sqlite.exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at)");
+    addColIfMissing("users", "token_plaintext", "text");
+    addColIfMissing("skills", "import_source", "text");
+    addColIfMissing("skills", "import_url", "text");
+    addColIfMissing("skills", "import_branch", "text");
+    addColIfMissing("skills", "import_sub_dir", "text");
+    addColIfMissing("skills", "imported_at", "integer");
+
+    // Case B: all additions now exist — ensure the tag is recorded so
+    // drizzle's migrate() doesn't try to re-run 0020.
+    const migration0020Sql = readFileSync(join(migrationsFolder, "0020_skill_versions_is_current.sql"), "utf-8");
+    const migration0020Hash = createHash("sha256").update(migration0020Sql).digest("hex");
+    const hasTag = sqlite.prepare(
+      "SELECT 1 FROM __drizzle_migrations WHERE hash = ?"
+    ).get(migration0020Hash);
+    if (!hasTag) {
+      sqlite.prepare(
+        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
+      ).run(migration0020Hash, Date.now());
     }
   } catch {
-    // Table may not exist yet — let migrate() handle it
+    // Tables may not exist yet — let migrate() handle it
   }
 
   migrate(db, { migrationsFolder });
