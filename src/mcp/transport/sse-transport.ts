@@ -19,8 +19,8 @@ export interface SseMcpHandlerDeps {
   usageMeter?: UsageMeterService;
 }
 
-const SSE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-const SSE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const SSE_IDLE_TIMEOUT_MS = 2 * 60 * 1000;   // 2 min (was 30 min) — faster cleanup on disconnect
+const SSE_SWEEP_INTERVAL_MS = 30 * 1000;     // 30s (was 5 min) — faster sweep for dev scenarios
 
 export async function createSseMcpHandler(
   deps: SseMcpHandlerDeps,
@@ -67,6 +67,22 @@ export async function createSseMcpHandler(
 
         await server.connect(transport);
 
+        // Wrap the transport's send method to catch "Not connected" errors
+        // that occur when the SSE response stream is closed.
+        const originalSend = transport.send.bind(transport);
+        transport.send = async (message) => {
+          try {
+            await originalSend(message);
+          } catch (err) {
+            if (err instanceof Error && err.message === "Not connected") {
+              logger.debug({ sessionId }, "SSE client disconnected during send");
+              cleanup();
+            } else {
+              throw err;
+            }
+          }
+        };
+
         // Guard against double-fire from close/finish so the gauge stays accurate.
         const cleanup = () => {
           const session = sseConnections.get(sessionId);
@@ -80,14 +96,9 @@ export async function createSseMcpHandler(
         res.on("close", cleanup);
         res.on("finish", cleanup);
 
-        // Handle transport-level errors (e.g., "Not connected" when client disconnects)
+        // Handle transport-level errors
         transport.onerror = (err) => {
-          if (err.message === "Not connected") {
-            logger.debug({ sessionId }, "SSE client disconnected");
-            cleanup();
-          } else {
-            logger.warn({ err, sessionId }, "SSE transport error");
-          }
+          logger.warn({ err, sessionId }, "SSE transport error");
         };
       } catch (err) {
         logger.error({ err }, "Failed to create SSE connection");

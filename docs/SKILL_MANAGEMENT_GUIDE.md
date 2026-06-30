@@ -6,17 +6,76 @@
 
 ## 前置准备
 
+### 1. 编译项目
+
 ```bash
-# 编译项目
 npm run build
+```
 
-# 初始化系统（创建超级管理员）
+### 2. 初始化系统
+
+```bash
+# 创建超级管理员
 node dist/index.js init --username admin --password admin888
+```
 
-# 登录
+### 3. 认证登录
+
+**本地模式（CLI 直接操作数据库）：**
+
+```bash
 node dist/index.js auth login
 # 输入用户名: admin
 # 输入密码: admin888
+```
+
+**远程模式（通过 HTTP/SSE 服务器）：**
+
+```bash
+# 1. 启动 HTTP 服务器
+node dist/index.js serve --transport http --port 3000
+
+# 2. 登录获取 JWT token
+node dist/index.js auth login --server-url http://localhost:3000
+
+# 3. 使用 --server-url 参数执行命令
+node dist/index.js list --server-url http://localhost:3000
+```
+
+### 4. 认证方式说明
+
+| 模式 | 认证方式 | 环境变量 |
+------|---------|---------|
+| 本地 CLI | `~/.skill-mcp/credentials.json` | - |
+| stdio MCP | `--auth-token` 或 `SKILL_MCP_AUTH_TOKEN` | `SKILL_MCP_AUTH_TOKEN` |
+| HTTP/SSE MCP | `Authorization: Bearer <JWT>` | - |
+| Gateway | `--server-url` + JWT | `AUTH_TOKEN` |
+
+
+### 5. MCP Inspector 连接
+
+```bash
+# 启动 Inspector
+npx @modelcontextprotocol/inspector
+
+# 在 Inspector UI 中配置：
+# 1. Transport: Streamable HTTP
+# 2. URL: http://localhost:3000/mcp
+# 3. 添加 Header: Authorization: Bearer <your-jwt-token>
+```
+
+**获取 JWT Token：**
+
+```bash
+# 方式 1: 通过 CLI 登录
+node dist/index.js auth login --server-url http://localhost:3000
+# 登录后 token 保存在 ~/.skill-mcp/credentials.json
+
+# 方式 2: 通过 API 获取
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin888"}'
+# 响应中的 access_token 即为 JWT token
 ```
 
 ---
