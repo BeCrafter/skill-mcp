@@ -79,6 +79,16 @@ export async function createSseMcpHandler(
         req.on("close", cleanup);
         res.on("close", cleanup);
         res.on("finish", cleanup);
+
+        // Handle transport-level errors (e.g., "Not connected" when client disconnects)
+        transport.onerror = (err) => {
+          if (err.message === "Not connected") {
+            logger.debug({ sessionId }, "SSE client disconnected");
+            cleanup();
+          } else {
+            logger.warn({ err, sessionId }, "SSE transport error");
+          }
+        };
       } catch (err) {
         logger.error({ err }, "Failed to create SSE connection");
         json(res, 500, { error: "Failed to create SSE connection" });
