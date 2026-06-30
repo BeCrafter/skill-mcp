@@ -48,7 +48,13 @@ function renderSkillTable(skills: SkillRow[]): void {
   console.log();
 
   const tableRows: Array<Record<string, unknown>> = [];
-  const slugWidth = Math.min(Math.max(...skills.map(s => s.slug.length), 16), 36);
+
+  // Calculate max slug width INCLUDING the source suffix (⎈ = 1 char + 1 space)
+  const SUFFIX_LEN = 2; // " ⎇" visible width
+  const slugWidth = Math.min(
+    Math.max(...skills.map(s => s.slug.length + (s.importSource === "git" ? SUFFIX_LEN : 0)), 16),
+    36,
+  );
 
   for (const s of skills) {
     const meta: string[] = [];
@@ -60,13 +66,13 @@ function renderSkillTable(skills: SkillRow[]): void {
       ? c.dim(s.tags.join(", "))
       : "";
 
-    const sourceIcon = s.importSource === "git" ? c.cyan("⬇") : c.dim("📁");
+    // Source indicator: ⎇ for git remote (green, small gap)
+    const sourceSuffix = s.importSource === "git" ? c.green(" ⎇") : "";
 
     tableRows.push({
-      slug: c.boldCyan(s.slug),
+      slug: `${c.boldCyan(s.slug)}${sourceSuffix}`,
       version: c.dim("v" + s.version),
       status: badge(s.status),
-      source: sourceIcon,
       tags: tagsText,
       details: metaText,
     });
@@ -76,7 +82,6 @@ function renderSkillTable(skills: SkillRow[]): void {
     { key: "slug", header: "SLUG", width: slugWidth },
     { key: "version", header: "VERSION", width: 10 },
     { key: "status", header: "STATUS", width: 16 },
-    { key: "source", header: " ", width: 3 },
     { key: "tags", header: "TAGS", width: 24 },
     { key: "details", header: "DETAILS", width: 48 },
   ]));

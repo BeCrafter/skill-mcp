@@ -77,16 +77,15 @@ node dist/index.js list
 
 输出示例：
 ```
-  ── Skills (3) ─────────────────────────────────
+  ── Skills (3) ────────────────────────────────────────────────────────────────────────
 
-  SLUG              VERSION   STATUS          DETAILS
-  prompt-writer     v1.2.0    ● published     A skill for writing prompts
-                                              category: writing  ·  tags: prompt, engineering
-  code-reviewer     v0.3.1    ● published     Code review assistant
-                                              category: development  ·  tags: review, code
-  data-analyst      v0.1.0    ○ draft         Data analysis tool
-                                              category: analytics
+    SLUG                 VERSION     STATUS            TAGS                      DETAILS
+    prompt-writer        v1.2.0      published         prompt, engineering       A skill for writing prompts
+    code-reviewer ⎇      v0.3.1      published         review, code              Code review assistant
+    data-analyst         v0.1.0      draft                                       Data analysis tool
 ```
+
+> `⎈` 标记表示 Git 远程导入的技能，无标记表示本地导入
 
 ### 2.2 按标签过滤
 
@@ -110,9 +109,9 @@ node dist/index.js search --name code
 ```
   ── Results for "code" (2) ─────────────────────
 
-  SLUG              VERSION   STATUS          DESCRIPTION
-  code-reviewer     v0.3.1    ● published     Code review assistant
-  code-generator    v1.0.0    ● published     Generate code snippets
+    SLUG              VERSION   STATUS          DESCRIPTION
+    code-reviewer ⎇   v0.3.1    published       Code review assistant
+    code-generator    v1.0.0    published       Generate code snippets
 ```
 
 ---
@@ -126,26 +125,25 @@ node dist/index.js info prompt-writer
 
 输出示例：
 ```
-  ── prompt-writer ───────────────────────────────
+  prompt-writer
+  ─────────────────────────────────────────
 
-      slug          prompt-writer
-      name          prompt-writer
-      display       Prompt Writer
-      status        ● published
-      visibility    private
-      category      writing
-      tags          prompt, engineering
-      version       v1.2.0
-      entry         SKILL.md
-      storage       skills/prompt-writer/
-      hash          a1b2c3d4e5f67890…
-      created       2026-06-20 10:30:00
-      updated       2026-06-25 14:20:00
+    Version       v1.2.0
+    Status        published
+    Category      writing
+    Tags          prompt, engineering
+    Updated       2026-06-25 14:20:00
 
-  A skill for writing high-quality prompts with
-  structured templates and best practices.
+    Technical
+    ────────────────────
+    Entry         SKILL.md
+    Storage       prompt-writer/
+    Hash          sha256:a1b2c3d4e5f67890…
+    Created       2026-06-20 10:30:00
+
+  A skill for writing high-quality prompts with structured templates
+  and best practices.
 ```
-
 ---
 
 ## 5. 技能更新 (update)
@@ -195,15 +193,15 @@ node dist/index.js versions prompt-writer
 
 输出示例：
 ```
-  ── prompt-writer versions (3) ──────────────────
+  ── prompt-writer versions (3) ────────────────────────────────────────────────────────────────
 
-  VERSION   HASH              FILES   DATE                 SUMMARY
-  v1.2.0    a1b2c3d4e5f6…     5       2026-06-25 14:20     Added template examples
-  v1.1.0    b2c3d4e5f6a7…     4       2026-06-22 09:15     Updated prompt structure
-  v1.0.0    c3d4e5f6a7b8…     3       2026-06-20 10:30     Initial version
+    VERSION         HASH        FILES   CREATED
+    → 1.2.0         a1b2c3d4    5       2026-06-25 14:20
+      1.1.0         b2c3d4e5    4       2026-06-22 09:15
+      1.0.0         c3d4e5f6    3       2026-06-20 10:30
 ```
 
-### 6.2 查看特定版本详情
+> `→` 标记表示当前版本
 
 ```bash
 node dist/index.js versions prompt-writer --show v1.1.0
@@ -229,22 +227,17 @@ node dist/index.js versions prompt-writer --diff v1.0.0..v1.2.0
 
 输出示例：
 ```
-  ── diff: prompt-writer v1.0.0 → v1.2.0 ────────
+  ── prompt-writer  v1.0.0 → v1.2.0  2 ────────────────────────────────────────────────────────────────
 
-  ADDED:
-    + templates/advanced.md
-    + examples/code-review.md
-
-  MODIFIED:
-    ~ SKILL.md (hash changed)
-    ~ templates/basic.md (hash changed)
-
-  DELETED:
-    - (none)
-
-  SUMMARY:
-    Files: 3 → 5 (+2)
-    Size: 2.1 KB → 4.8 KB (+2.7 KB)
+  +  templates/advanced.md
+  +  examples/code-review.md
+  ~  SKILL.md
+    --- v1.0.0/SKILL.md
+    +++ v1.2.0/SKILL.md
+    @@ -1,2 +1,2 @@
+     name: prompt-writer
+    -version: 1.0.0
+    +version: 1.2.0
 ```
 
 ---
@@ -295,6 +288,78 @@ node dist/index.js remove prompt-writer --force
 ```
 
 ---
+
+## 10. 技能同步 (sync)
+
+### 10.1 检查单个技能是否有更新
+
+```bash
+node dist/index.js sync check prompt-writer
+```
+
+输出示例（有更新）：
+```
+  ── sync check ────────────────────────────────────────────────────────────────
+
+    slug          prompt-writer
+    version       v1.2.0
+    source        https://github.com/user/repo
+    branch        main
+    sub-dir       skills/prompt-writer
+    imported      2026-06-25 14:20:00
+
+  ✓  Update available
+
+    local hash    a1b2c3d4e5f67890…
+    remote hash   b2c3d4e5f6a78901…
+
+  Run skill-mcp sync pull prompt-writer to update
+```
+
+输出示例（无更新）：
+```
+  ── sync check ────────────────────────────────────────────────────────────────
+
+    slug          prompt-writer
+    version       v1.2.0
+    source        https://github.com/user/repo
+    branch        main
+
+  ✓  Already up to date
+```
+
+### 10.2 检查所有远程技能
+
+```bash
+node dist/index.js sync check --all
+```
+
+输出示例：
+```
+  ── sync results (3) ────────────────────────────────────────────────────────────────
+
+  ✓ 2 update(s) available:
+
+    prompt-writer  v1.2.0 → update available
+    code-reviewer  v0.3.1 → update available
+
+  Run skill-mcp sync pull <slug> to update each skill
+
+  ✓ 1 skill(s) already up to date
+```
+
+### 10.3 拉取更新
+
+```bash
+node dist/index.js sync pull prompt-writer
+```
+
+输出示例：
+```
+  ✓  Updated prompt-writer to v1.3.0
+    source        https://github.com/user/repo
+    branch        main
+```
 
 ## 9. 技能质量检查 (lint)
 
