@@ -1,7 +1,5 @@
--- Adds is_current column to skill_versions for marking the current version.
 ALTER TABLE `skill_versions` ADD COLUMN `is_current` integer NOT NULL DEFAULT 0;
 --> statement-breakpoint
--- Adds audit_logs table for tracking changes
 CREATE TABLE IF NOT EXISTS `audit_logs` (
     `id` text PRIMARY KEY NOT NULL,
     `action` text NOT NULL,
@@ -17,10 +15,8 @@ CREATE INDEX IF NOT EXISTS `idx_audit_logs_entity` ON `audit_logs` (`entity_type
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_audit_logs_created` ON `audit_logs` (`created_at`);
 --> statement-breakpoint
--- Adds token_plaintext column to users for displaying token on user get
 ALTER TABLE `users` ADD COLUMN `token_plaintext` text;
 --> statement-breakpoint
--- Adds import source tracking columns to skills table
 ALTER TABLE `skills` ADD COLUMN `import_source` text;
 --> statement-breakpoint
 ALTER TABLE `skills` ADD COLUMN `import_url` text;

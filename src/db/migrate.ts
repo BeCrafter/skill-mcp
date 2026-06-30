@@ -187,6 +187,27 @@ export function runMigrations(dbInput: string): void {
     // Table may not exist yet on fresh DB — let migrate() handle it
   }
 
+  // Idempotency guard for migration 0020: if token_plaintext column doesn't
+  // exist but the migration tag is recorded, reset it so drizzle re-runs it.
+  const MIGRATION_0020_TAG = "0020_skill_versions_is_current";
+  try {
+    const hasTokenPlaintext = sqlite.prepare(
+      "SELECT name FROM pragma_table_info('users') WHERE name = 'token_plaintext'"
+    ).get();
+    if (!hasTokenPlaintext) {
+      const hasTag = sqlite.prepare(
+        "SELECT 1 FROM __drizzle_migrations WHERE hash = ?"
+      ).get(MIGRATION_0020_TAG);
+      if (hasTag) {
+        sqlite.prepare(
+          "DELETE FROM __drizzle_migrations WHERE hash = ?"
+        ).run(MIGRATION_0020_TAG);
+      }
+    }
+  } catch {
+    // Table may not exist yet — let migrate() handle it
+  }
+
   migrate(db, { migrationsFolder });
   sqlite.pragma("foreign_keys = ON");
 
