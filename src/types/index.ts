@@ -68,17 +68,18 @@ export interface SkillMeta {
   category: string | null;
   tags: string[];
   attributes: Record<string, unknown>;
-  /**
-   * P1-11 stage 2a — retrieval signals (triggers / whenToUse / embeddingText).
-   * `null` for legacy rows imported before stage 2a; `{}` after a JSON parse
-   * failure (mirrors the `attributes` corruption-tolerance contract).
-   */
   retrievalMeta: SkillRetrievalMeta | null;
   status: SkillStatus;
   visibility: SkillVisibility;
   entryFile: string;
   storagePath: string;
   contentHash: string | null;
+  // Import source tracking
+  importSource: string | null;  // "local" | "git"
+  importUrl: string | null;     // Git repository URL
+  importBranch: string | null;  // Git branch
+  importSubDir: string | null;  // Sub-directory within repo
+  importedAt: number | null;    // Timestamp of last import
   createdAt: number;
   updatedAt: number;
 }

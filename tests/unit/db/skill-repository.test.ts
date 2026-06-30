@@ -17,6 +17,7 @@ function createTestTables(db: DrizzleDB): void {
       status TEXT NOT NULL DEFAULT 'draft',
       visibility TEXT NOT NULL DEFAULT 'private', entry_file TEXT DEFAULT 'SKILL.md',
       storage_path TEXT NOT NULL, content_hash TEXT,
+      import_source TEXT, import_url TEXT, import_branch TEXT, import_sub_dir TEXT, imported_at INTEGER,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS skill_tags (

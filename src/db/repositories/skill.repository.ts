@@ -218,6 +218,11 @@ export class SkillRepository {
         entryFile: input.entryFile ?? "SKILL.md",
         storagePath: input.storagePath ?? `${input.slug}/`,
         contentHash: input.contentHash ?? null,
+        importSource: input.importSource ?? null,
+        importUrl: input.importUrl ?? null,
+        importBranch: input.importBranch ?? null,
+        importSubDir: input.importSubDir ?? null,
+        importedAt: input.importedAt ?? null,
         createdAt: now,
         updatedAt: now,
       }).run();
@@ -245,13 +250,14 @@ export class SkillRepository {
     if (input.status !== undefined) updateData.status = input.status;
     if (input.visibility !== undefined) updateData.visibility = input.visibility;
     if (input.entryFile !== undefined) updateData.entryFile = input.entryFile;
-    // T-728 — `storagePath` / `contentHash` are accepted here because the
-    // importer and rollback paths legitimately rewrite them after staging
-    // new package content. Untrusted callers (admin PUT body) MUST be
-    // filtered upstream at the HTTP handler boundary; see
-    // `src/http/handlers/admin/skills.handler.ts` for that projection.
     if (input.storagePath !== undefined) updateData.storagePath = input.storagePath;
     if (input.contentHash !== undefined) updateData.contentHash = input.contentHash;
+    // Import source tracking
+    if (input.importSource !== undefined) updateData.importSource = input.importSource;
+    if (input.importUrl !== undefined) updateData.importUrl = input.importUrl;
+    if (input.importBranch !== undefined) updateData.importBranch = input.importBranch;
+    if (input.importSubDir !== undefined) updateData.importSubDir = input.importSubDir;
+    if (input.importedAt !== undefined) updateData.importedAt = input.importedAt;
 
     this.db.transaction((tx) => {
       if (Object.keys(updateData).length > 1) {
@@ -326,6 +332,11 @@ export class SkillRepository {
       entryFile: row.entryFile ?? "SKILL.md",
       storagePath: row.storagePath,
       contentHash: row.contentHash,
+      importSource: row.importSource ?? null,
+      importUrl: row.importUrl ?? null,
+      importBranch: row.importBranch ?? null,
+      importSubDir: row.importSubDir ?? null,
+      importedAt: row.importedAt ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

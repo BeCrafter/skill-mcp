@@ -16,3 +16,17 @@ CREATE TABLE IF NOT EXISTS `audit_logs` (
 CREATE INDEX IF NOT EXISTS `idx_audit_logs_entity` ON `audit_logs` (`entity_type`,`entity_id`);
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_audit_logs_created` ON `audit_logs` (`created_at`);
+--> statement-breakpoint
+-- Adds token_plaintext column to users for displaying token on user get
+ALTER TABLE `users` ADD COLUMN `token_plaintext` text;
+--> statement-breakpoint
+-- Adds import source tracking columns to skills table
+ALTER TABLE `skills` ADD COLUMN `import_source` text;
+--> statement-breakpoint
+ALTER TABLE `skills` ADD COLUMN `import_url` text;
+--> statement-breakpoint
+ALTER TABLE `skills` ADD COLUMN `import_branch` text;
+--> statement-breakpoint
+ALTER TABLE `skills` ADD COLUMN `import_sub_dir` text;
+--> statement-breakpoint
+ALTER TABLE `skills` ADD COLUMN `imported_at` integer;

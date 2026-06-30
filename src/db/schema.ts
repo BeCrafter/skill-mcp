@@ -17,11 +17,6 @@ export const tenants = sqliteTable("tenants", {
 
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey(),
-  // P0-3 — every skill belongs to exactly one tenant. Default 'default' so
-  // legacy rows backfill without coordination. The slug uniqueness rule
-  // (see UNIQUE on `slug`) is *cross-tenant* in this skeleton; tightening
-  // to `(tenant_id, slug)` is deferred to the multi-tenant rollout when
-  // physical storage is also tenant-prefixed.
   tenantId: text("tenant_id").notNull().default("default"),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
@@ -30,32 +25,25 @@ export const skills = sqliteTable("skills", {
   version: text("version").notNull().default("0.0.1"),
   category: text("category"),
   attributes: text("attributes"), // JSON object
-  // P1-11 stage 2a — retrieval signals JSON envelope:
-  // `{ triggers?: string[]; whenToUse?: string; embeddingText?: string }`.
-  // Written by the importer (sourced from SKILL.md frontmatter), read by
-  // the BM25 indexer (stage 2b) and embedding provider (stage 3). Hydrated
-  // through the same parse-error guard pattern as `attributes` (T-721).
   retrievalMeta: text("retrieval_meta"),
   status: text("status").notNull().default("draft"),
   visibility: text("visibility").notNull().default("private"),
   entryFile: text("entry_file").default("SKILL.md"),
   storagePath: text("storage_path").notNull(),
   contentHash: text("content_hash"),
+  // Import source tracking for sync-upgrade support
+  importSource: text("import_source"), // "local" | "git"
+  importUrl: text("import_url"),       // Git repository URL
+  importBranch: text("import_branch"), // Git branch (default: main)
+  importSubDir: text("import_sub_dir"), // Sub-directory within repo
+  importedAt: integer("imported_at"),  // Timestamp of last import
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 }, (table) => [
-  // skills.slug already has a UNIQUE constraint, which SQLite implements as
-  // a unique index — a separate non-unique idx_skills_slug would be a no-op
-  // duplicate. Removed in migration 0001.
   index("idx_skills_name").on(table.name),
   index("idx_skills_status").on(table.status),
   index("idx_skills_visibility").on(table.visibility),
   index("idx_skills_tenant_id").on(table.tenantId),
-  // T-202: idempotency — a skill is identified by (name, content_hash). Two
-  // concurrent imports of the same payload collapse onto the same row via
-  // the UNIQUE conflict path (caught by the importer and translated to an
-  // idempotent return). Implemented as a partial unique index in the
-  // migration so existing rows with NULL content_hash don't collide.
   uniqueIndex("unique_name_content_hash").on(table.name, table.contentHash),
 ]);
 
@@ -105,6 +93,9 @@ export const users = sqliteTable("users", {
   passwordHash: text("password_hash"),
   userType: text("user_type").notNull().default("user"),
   token: text("token").notNull().unique(),
+  // Stores the plaintext token for display on `user get`. Only populated
+  // when the token is created or rotated; callers must have admin+ privileges.
+  tokenPlaintext: text("token_plaintext"),
   status: text("status").default("active"),
   // P0-4 — token expiration. NULL means "never expires" so existing rows
   // continue to work without migration coordination. Tokens minted via

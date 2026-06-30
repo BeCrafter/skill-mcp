@@ -13,6 +13,7 @@ export interface UserEntity {
   passwordHash: string | null;
   userType: string;
   token: string;
+  tokenPlaintext: string | null;
   status: string;
   tokenExpiresAt: number | null;
   previousToken: string | null;
@@ -87,7 +88,7 @@ export class UserRepository {
     return rows.length > 0 ? this.toEntity(rows[0]) : null;
   }
 
-  async create(input: { name?: string; username?: string; passwordHash?: string; userType?: string; token: string; tokenExpiresAt?: number | null }): Promise<UserEntity> {
+  async create(input: { name?: string; username?: string; passwordHash?: string; userType?: string; token: string; tokenPlaintext?: string; tokenExpiresAt?: number | null }): Promise<UserEntity> {
     if (input.username) {
       const existing = await this.findByUsername(input.username);
       if (existing) throw new ConflictError(`Username "${input.username}" already exists`);
@@ -101,6 +102,7 @@ export class UserRepository {
       passwordHash: input.passwordHash ?? null,
       userType: input.userType ?? "user",
       token: input.token,
+      tokenPlaintext: input.tokenPlaintext ?? null,
       status: "active",
       tokenExpiresAt: input.tokenExpiresAt ?? null,
       createdAt: now,
@@ -142,7 +144,7 @@ export class UserRepository {
   async rotateToken(
     id: string,
     newTokenHash: string,
-    opts: { graceMs?: number; tokenExpiresAt?: number | null } = {},
+    opts: { graceMs?: number; tokenExpiresAt?: number | null; tokenPlaintext?: string } = {},
   ): Promise<UserEntity | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
@@ -150,6 +152,7 @@ export class UserRepository {
     const graceMs = opts.graceMs ?? TOKEN_ROTATION_GRACE_MS;
     this.db.update(users).set({
       token: newTokenHash,
+      tokenPlaintext: opts.tokenPlaintext ?? null,
       tokenExpiresAt: opts.tokenExpiresAt ?? null,
       previousToken: existing.token,
       previousTokenExpiresAt: now + graceMs,
@@ -185,6 +188,7 @@ export class UserRepository {
       passwordHash: row.passwordHash ?? null,
       userType: row.userType ?? "user",
       token: row.token,
+      tokenPlaintext: row.tokenPlaintext ?? null,
       status: row.status ?? "active",
       tokenExpiresAt: row.tokenExpiresAt ?? null,
       previousToken: row.previousToken ?? null,

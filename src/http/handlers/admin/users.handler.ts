@@ -41,6 +41,8 @@ function assertCanOperateOn(target: { userType: string; id: string }, operatorId
     throw new AppError("Cannot operate on superadmin user", "SUPERADMIN_PROTECTED", 403);
   }
   if (target.userType === "admin" && operatorUserType !== "superadmin") {
+    // admin 操作 admin 需要 superadmin 权限，但允许操作自己
+    if (target.id === operatorId) return;
     throw new AppError("Only superadmin can operate on admin users", "SUPERADMIN_REQUIRED", 403);
   }
 }
@@ -96,6 +98,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
       passwordHash,
       userType: data.user_type ?? "user",
       token: hash,
+      tokenPlaintext: token,
       tokenExpiresAt,
     });
 
@@ -137,7 +140,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     }
     const token = generateToken();
     const hash = createHash("sha256").update(token).digest("hex");
-    const updated = await userRepo.rotateToken(userId, hash, { graceMs, tokenExpiresAt });
+    const updated = await userRepo.rotateToken(userId, hash, { graceMs, tokenExpiresAt, tokenPlaintext: token });
     if (!updated) throw new UserNotFoundError();
     json(ctx.res, 200, {
       success: true,
@@ -163,6 +166,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
   });
 
   router.get("/api/admin/users/:userId", async (ctx) => {
+    const rc = ctx.requestContext!;
     const userId = ctx.params.userId;
     const user = await userRepo.findById(userId);
     if (!user) throw new UserNotFoundError();
@@ -170,7 +174,17 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     const roleIds = await userRoleRepo.findRoleIdsByUserId(userId);
     const roleRows = await roleRepo.findByIds(roleIds);
     const roles = roleRows.map(r => ({ id: r.id, name: r.name, tags: r.tags }));
-    json(ctx.res, 200, { success: true, data: { ...user, roles, tags } });
+
+    // Only include token_plaintext if caller has permission to operate on this user
+    let tokenPlaintext: string | undefined;
+    try {
+      assertCanOperateOn(user, rc.userId, rc.userType);
+      tokenPlaintext = user.tokenPlaintext ?? undefined;
+    } catch {
+      // No permission - don't include token
+    }
+
+    json(ctx.res, 200, { success: true, data: { ...user, roles, tags, token_plaintext: tokenPlaintext } });
   });
 
   router.put("/api/admin/users/:userId", async (ctx) => {

@@ -18,6 +18,7 @@ function setup(): { db: DrizzleDB; sqlite: Database.Database; repo: SkillFeedbac
     attributes TEXT, retrieval_meta TEXT, status TEXT NOT NULL DEFAULT 'draft',
     visibility TEXT NOT NULL DEFAULT 'private', entry_file TEXT DEFAULT 'SKILL.md',
     storage_path TEXT NOT NULL, content_hash TEXT,
+      import_source TEXT, import_url TEXT, import_branch TEXT, import_sub_dir TEXT, imported_at INTEGER,
     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
   )`);
   db.run(`CREATE TABLE skill_feedbacks (

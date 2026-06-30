@@ -14,6 +14,7 @@ function setup(): { db: DrizzleDB; repo: UserRepository } {
     id TEXT PRIMARY KEY, name TEXT, username TEXT, password_hash TEXT,
     user_type TEXT DEFAULT 'user',
     token TEXT NOT NULL UNIQUE,
+    token_plaintext TEXT,
     status TEXT DEFAULT 'active',
     token_expires_at INTEGER,
     previous_token TEXT,

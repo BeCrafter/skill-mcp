@@ -45,6 +45,22 @@ import { metrics } from "../telemetry/metrics.js";
 const STORAGE_CONCURRENCY = 8;
 const STAGING_ROOT = "__staging__";
 
+/** Extract import source metadata from source string and options */
+function extractImportSource(source: string, options: ImportOptions): {
+  importSource: string;
+  importUrl: string | null;
+  importBranch: string | null;
+  importSubDir: string | null;
+} {
+  const isGit = source.startsWith("http") || source.startsWith("git@");
+  return {
+    importSource: isGit ? "git" : "local",
+    importUrl: isGit ? source : null,
+    importBranch: isGit ? (options.branch ?? "main") : null,
+    importSubDir: options.subDir ?? null,
+  };
+}
+
 /**
  * P1-11 stage 2a — Project the validated frontmatter retrieval signals into
  * the persisted JSON envelope. Returns `null` when none of the three optional
@@ -110,6 +126,9 @@ export class SkillImporter {
 
   private async importInner(source: string, options: ImportOptions): Promise<ImportResult> {
     this.logger.info({ source, options }, "Importing skill package");
+
+    // Extract import source metadata
+    const importMeta = extractImportSource(source, options);
 
     // 1. Resolve source
     const skillFiles = await this.resolveSource(source, options);
@@ -300,6 +319,8 @@ export class SkillImporter {
           storagePath,
           status: "published",
           retrievalMeta,
+          ...importMeta,
+          importedAt: Date.now(),
         });
         skillId = targetSkill.id;
       } else {
@@ -324,6 +345,8 @@ export class SkillImporter {
               status: "published",
               entryFile: meta.entry ?? "SKILL.md",
               retrievalMeta,
+              ...importMeta,
+              importedAt: Date.now(),
             });
             skillId = created.id;
             createdSkillId = created.id;

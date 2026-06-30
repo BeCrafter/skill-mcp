@@ -6,7 +6,7 @@ import { c, badge, truncate, table, section, warn } from "../ui.js";
 import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
-type SkillRow = { id: string; slug: string; name: string; version: string; status: string; description: string; category: string | null; tags: string[] };
+type SkillRow = { id: string; slug: string; name: string; version: string; status: string; description: string; category: string | null; tags: string[]; importSource?: string | null };
 
 export async function listAction(options: { name?: string; tags?: string; serverUrl?: string }): Promise<void> {
   const serverUrl = getServerUrl(options);
@@ -60,10 +60,13 @@ function renderSkillTable(skills: SkillRow[]): void {
       ? c.dim(s.tags.join(", "))
       : "";
 
+    const sourceIcon = s.importSource === "git" ? c.cyan("⬇") : c.dim("📁");
+
     tableRows.push({
       slug: c.boldCyan(s.slug),
       version: c.dim("v" + s.version),
       status: badge(s.status),
+      source: sourceIcon,
       tags: tagsText,
       details: metaText,
     });
@@ -73,6 +76,7 @@ function renderSkillTable(skills: SkillRow[]): void {
     { key: "slug", header: "SLUG", width: slugWidth },
     { key: "version", header: "VERSION", width: 10 },
     { key: "status", header: "STATUS", width: 16 },
+    { key: "source", header: " ", width: 3 },
     { key: "tags", header: "TAGS", width: 24 },
     { key: "details", header: "DETAILS", width: 48 },
   ]));

@@ -19,6 +19,7 @@ import { manifestMigrateAction } from "./commands/manifest-migrate-cmd.js";
 import { evalListAction, evalRunAction, evalResultsAction } from "./commands/eval-cmd.js";
 import { loginAction, logoutAction, whoamiAction, resetPasswordAction } from "./commands/auth-cmd.js";
 import { initAction } from "./commands/init-cmd.js";
+import { syncCheckAction, syncCheckAllAction, syncPullAction } from "./commands/sync-cmd.js";
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
@@ -70,6 +71,7 @@ export async function createCli(): Promise<Command> {
           // ── Root: grouped category layout ──
           const CATEGORIES: Array<{ label: string; icon: string; names: string[] }> = [
             { label: "Skills",    icon: "◆", names: ["serve", "import", "list", "info", "search", "remove", "update", "versions", "rollback"] },
+            { label: "Sync",      icon: "◆", names: ["sync"] },
             { label: "Quality",   icon: "◆", names: ["lint", "eval"] },
             { label: "Pipeline",  icon: "◆", names: ["pipeline"] },
             { label: "System",    icon: "◆", names: ["init", "migrate:check", "manifest:migrate"] },
@@ -103,8 +105,11 @@ export async function createCli(): Promise<Command> {
                   lines.push(cmdRow("  " + usage, child.description() ?? "", 6, 36));
                 }
               } else {
-                const usage = usageOf(sub);
-                lines.push(cmdRow("  " + usage, sub.description() ?? "", 4, 36));
+                // leaf command — same indent as parent group
+                const styled = styleUsage(sub.name());
+                const args = sub.usage().replace(/\[options\]\s*/g, "").trim();
+                const fullUsage = args ? `${styled} ${args}` : styled;
+                lines.push(`    ${c.boldGreen(fullUsage)}${" ".repeat(Math.max(1, 24 - fullUsage.length))}${c.dim(sub.description())}`);
               }
             }
             lines.push("");
@@ -208,7 +213,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("serve")
-    .description("Start MCP server (stdio, SSE, or HTTP transport)")
+    .description("Start MCP server")
     .option("--transport <type>", "Transport type: stdio|sse|http", config.transport.type)
     .option("--port <number>", "HTTP port (for sse/http)", String(config.transport.port))
     .option("--host <host>", "HTTP host", config.transport.host)
@@ -226,7 +231,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("import <source>")
-    .description("Import skill from local path, npm package, or Git repo")
+    .description("Import skill from local path or Git repo")
     .option("--category <category>", "Server-side category")
     .option("--tags <tags>", "Server-side tags (comma-separated)")
     .option("--description <desc>", "Server-side description for index")
@@ -255,7 +260,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("list")
-    .description("List all skills with status and metadata")
+    .description("List all skills")
     .option("--tags <tags>", "Filter by tags")
     .action(async (opts) => {
       await listAction({ name: opts.name, tags: opts.tags, serverUrl: opts.serverUrl });
@@ -263,14 +268,14 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("info <slug>")
-    .description("Show detailed skill information (metadata, files, status)")
+    .description("Show skill details")
     .action(async (slug, opts) => {
       await infoAction(slug, { serverUrl: opts.serverUrl });
     });
 
   program
     .command("search")
-    .description("Search skills by name or keyword")
+    .description("Search skills by name")
     .requiredOption("--name <name>", "Skill name to search")
     .action(async (opts) => {
       await searchAction(opts.name, { serverUrl: opts.serverUrl });
@@ -278,7 +283,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("remove <slug>")
-    .description("Remove a skill and its stored files")
+    .description("Remove a skill")
     .option("--force", "Skip confirmation")
     .action(async (slug, opts) => {
       await removeAction(slug, { force: opts.force, serverUrl: opts.serverUrl });
@@ -286,7 +291,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("update <slug>")
-    .description("Update skill metadata (category, tags, description)")
+    .description("Update skill metadata")
     .option("--category <category>", "Update category")
     .option("--tags <tags>", "Update tags (comma-separated)")
     .option("--description <desc>", "Update description")
@@ -303,7 +308,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("versions <slug>")
-    .description("Show version history for a skill")
+    .description("Show version history")
     .option("--show <version>", "Show details for a specific version")
     .option("--diff <range>", "Compare two versions (e.g. 1.0.0..1.1.0)")
     .action(async (slug, opts) => {
@@ -312,7 +317,7 @@ export async function createCli(): Promise<Command> {
 
   program
     .command("rollback <slug>")
-    .description("Roll back skill to a previous version")
+    .description("Roll back to a previous version")
     .requiredOption("--to <version>", "Target version to rollback to")
     .option("--bump <type>", "Version bump type: major|minor|patch", "patch")
     .action(async (slug, opts) => {
@@ -323,9 +328,31 @@ export async function createCli(): Promise<Command> {
       });
     });
 
+  // ── Sync commands ──────────────────────────────────────────────────
+  const syncCmd = program.command("sync").description("Sync skills with remote sources");
+
+  syncCmd
+    .command("check [slug]")
+    .description("Check for remote updates")
+    .option("--all", "Check all remote skills")
+    .action(async (slug, opts) => {
+      if (opts.all || !slug) {
+        await syncCheckAllAction({ serverUrl: opts.serverUrl as string | undefined });
+      } else {
+        await syncCheckAction(slug, { serverUrl: opts.serverUrl as string | undefined });
+      }
+    });
+
+  syncCmd
+    .command("pull <slug>")
+    .description("Pull updates from remote")
+    .action(async (slug, opts) => {
+      await syncPullAction(slug, { serverUrl: opts.serverUrl as string | undefined });
+    });
+
   program
     .command("lint <path>")
-    .description("Validate skill package structure and content")
+    .description("Validate skill package")
     .action(async (path) => {
       await lintAction(path);
     });
@@ -393,21 +420,21 @@ export async function createCli(): Promise<Command> {
   // =========================================================
   const evalCmd = program
     .command("eval")
-    .description("Run and manage skill evaluation cases")
+    .description("Manage skill evaluation")
 
   evalCmd
     .command("list <slug>")
-    .description("List persisted eval cases for a skill")
+    .description("List eval cases")
     .action(async (slug, opts) => { await evalListAction(slug, { serverUrl: opts.serverUrl }); });
 
   evalCmd
     .command("run <slug>")
-    .description("Run every eval case for a skill against the stub provider, persist results")
+    .description("Run eval cases")
     .action(async (slug, opts) => { await evalRunAction(slug, { serverUrl: opts.serverUrl }); });
 
   evalCmd
     .command("results <slug>")
-    .description("Show recent eval runs for a skill")
+    .description("Show eval results")
     .option("--limit <n>", "Max rows to display (default 20)", "20")
     .action(async (slug, opts) => {
       await evalResultsAction(slug, { limit: parseInt(opts.limit as string, 10), serverUrl: opts.serverUrl });
@@ -416,7 +443,7 @@ export async function createCli(): Promise<Command> {
   // ── System initialization ──────────────────────────────────────────
   program
     .command("init")
-    .description("Initialize system with first superadmin user")
+    .description("Initialize system")
     .requiredOption("--username <username>", "Superadmin username")
     .requiredOption("--password <password>", "Superadmin password (min 8 chars)")
     .action(async (opts) => {
@@ -426,26 +453,26 @@ export async function createCli(): Promise<Command> {
   // ── Auth commands ─────────────────────────────────────────────────
   const authCmd = program
     .command("auth")
-    .description("Authentication commands");
+    .description("Manage authentication")
 
   authCmd
     .command("login")
-    .description("Log in with username and password (local or remote)")
+    .description("Log in")
     .action(async (opts) => { await loginAction({ serverUrl: opts.serverUrl }); });
 
   authCmd
     .command("logout")
-    .description("Clear stored credentials")
+    .description("Log out")
     .action(async () => { await logoutAction(); });
 
   authCmd
     .command("whoami")
-    .description("Show current authenticated user")
+    .description("Show current user")
     .action(async () => { await whoamiAction(); });
 
   authCmd
     .command("reset-password")
-    .description("Reset a user's password (requires local DB access)")
+    .description("Reset user password")
     .requiredOption("--username <username>", "Username")
     .requiredOption("--password <password>", "New password (min 8 chars)")
     .action(async (opts) => {
@@ -455,7 +482,7 @@ export async function createCli(): Promise<Command> {
   // ── User management ────────────────────────────────────────────────
   const userCmd = program
     .command("user")
-    .description("Manage users, tokens, and role assignments");
+    .description("Manage users")
 
   userCmd
     .command("list")
@@ -485,7 +512,7 @@ export async function createCli(): Promise<Command> {
 
   userCmd
     .command("rotate-token <userId>")
-    .description("Rotate a user's token. Old token remains valid for the grace window (default 7d).")
+    .description("Rotate user token")
     .option("--ttl <duration>", "New token time-to-live (e.g. 30d). Omit for non-expiring.")
     .option("--grace <duration>", "Old token grace window (default 7d).")
     .action(async (userId, opts) => {
@@ -508,7 +535,7 @@ export async function createCli(): Promise<Command> {
 
   userCmd
     .command("assign-roles <userId>")
-    .description("Assign roles to a user (replaces existing)")
+    .description("Assign roles to user")
     .requiredOption("--role-ids <ids>", "Comma-separated role IDs")
     .action(async (userId, opts) => {
       const roleIds = (opts.roleIds as string).split(",").map((s: string) => s.trim());
@@ -518,7 +545,7 @@ export async function createCli(): Promise<Command> {
   // ── Role management ────────────────────────────────────────────────
   const roleCmd = program
     .command("role")
-    .description("Manage roles and permission tags");
+    .description("Manage roles")
 
   roleCmd
     .command("list")

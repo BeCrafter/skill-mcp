@@ -19,19 +19,22 @@ import { ConflictError } from "../../utils/errors.js";
 const PRIVILEGED_ROLE_NAMES = new Set(["superadmin", "admin"]);
 
 function assertCanOperateOnCli(targetUserType: string, callerUserType: string, targetId?: string, callerId?: string): void {
+  // 超管之间互相保护，但允许操作自己
   if (targetUserType === "superadmin") {
-    // 超管之间互相保护，但允许操作自己
     if (targetId && callerId && targetId === callerId) return;
     fail("Cannot operate on superadmin user");
     closeDatabase();
     process.exit(1);
   }
+  // admin 操作 admin 需要 superadmin 权限，但允许操作自己
   if (targetUserType === "admin" && callerUserType !== "superadmin") {
+    if (targetId && callerId && targetId === callerId) return;
     fail("Only superadmin can operate on admin users");
     closeDatabase();
     process.exit(1);
   }
 }
+
 
 function initRepos() {
   const config = getConfig();
@@ -212,6 +215,7 @@ export async function userCreateAction(opts: { name?: string; roleIds?: string[]
       passwordHash,
       userType: opts.userType ?? "user",
       token: hash,
+      tokenPlaintext: token,
       tokenExpiresAt,
     });
 
@@ -286,7 +290,7 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
   const graceMs = opts.grace ? parseTtlToMs(opts.grace) : undefined;
   const token = generateToken();
   const hash = sha256(token);
-  const rotated = await userRepo.rotateToken(userId, hash, { graceMs, tokenExpiresAt });
+  const rotated = await userRepo.rotateToken(userId, hash, { graceMs, tokenExpiresAt, tokenPlaintext: token });
   if (!rotated) {
     fail("Rotate failed: user disappeared mid-operation", "This is a transient error, try again");
     closeDatabase();
@@ -318,23 +322,39 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
 }
 
 export async function userGetAction(userId: string, opts: { serverUrl?: string } = {}): Promise<void> {
-  requireAuth();
+  const creds = requireAuth();
   const serverUrl = getServerUrl(opts);
 
   if (serverUrl) {
-    const creds = readCredentials()!;
-    const user = await apiCall<{ id: string; name: string | null; username: string | null; userType: string; status: string; roles: Array<{ name: string; tags: string[] }>; tags: string[] }>(
-      serverUrl, "GET", `/api/admin/users/${userId}`, { credentials: creds },
-    );
+    const user = await apiCall<{
+      id: string; name: string | null; username: string | null;
+      userType: string; status: string;
+      roles: Array<{ name: string; tags: string[] }>; tags: string[];
+      token_plaintext?: string; token_expires_at?: number | null;
+    }>(serverUrl, "GET", `/api/admin/users/${userId}`, { credentials: readCredentials()! });
+
     console.log(section("user"));
     console.log();
-    console.log(kv("id", c.dim(user.id)));
-    console.log(kv("name", user.name ?? c.dim("(unnamed)")));
-    if (user.username) console.log(kv("username", user.username));
-    console.log(kv("userType", user.userType));
-    console.log(kv("status", user.status));
-    console.log(kv("roles", user.roles?.map(r => `${r.name} [${r.tags?.join(",")}]`).join("; ") || c.dim("(none)")));
+    console.log(kv("id", c.dim(user.id), 14));
+    console.log(kv("name", user.name ?? c.dim("(unnamed)"), 14));
+    if (user.username) console.log(kv("username", user.username, 14));
+    console.log(kv("userType", user.userType, 14));
+    console.log(kv("status", user.status, 14));
+    console.log(kv("roles", user.roles?.map(r => `${r.name} [${r.tags?.join(",")}]`).join("; ") || c.dim("(none)"), 14));
+
+    if (user.token_plaintext) {
+      console.log(kv("token", c.boldYellow(user.token_plaintext), 14));
+      if (user.token_expires_at) {
+        const expiresDate = new Date(user.token_expires_at).toLocaleString("zh-CN");
+        const isExpired = user.token_expires_at < Date.now();
+        console.log(kv("token expires", isExpired ? c.red(`${expiresDate} (已过期)`) : expiresDate, 14));
+      } else {
+        console.log(kv("token expires", c.green("永久有效"), 14));
+      }
+    }
+
     console.log();
+    closeDatabase();
     return;
   }
 
@@ -350,14 +370,33 @@ export async function userGetAction(userId: string, opts: { serverUrl?: string }
   const roleRows = await roleRepo.findByIds(roleIds);
   const roles = roleRows.map(r => ({ id: r.id, name: r.name, tags: r.tags }));
 
-    console.log(section("user", undefined, kvWidth(12, c.dim(user.id), user.name ?? "(unnamed)", user.status, roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; "))));
-    console.log();
-    console.log(kv("id", c.dim(user.id)));
-    console.log(kv("name", user.name ?? c.dim("(unnamed)")));
-    if (user.username) console.log(kv("username", user.username));
-    console.log(kv("userType", user.userType));
-    console.log(kv("status", user.status));
-    console.log(kv("roles", roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; ") || c.dim("(none)")));
+  console.log(section("user", undefined, kvWidth(14, c.dim(user.id), user.name ?? "(unnamed)", user.status, roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; "))));
+  console.log();
+  console.log(kv("id", c.dim(user.id), 14));
+  console.log(kv("name", user.name ?? c.dim("(unnamed)"), 14));
+  if (user.username) console.log(kv("username", user.username, 14));
+  console.log(kv("userType", user.userType, 14));
+  console.log(kv("status", user.status, 14));
+  console.log(kv("roles", roles.map(r => `${r.name} [${r.tags.join(",")}]`).join("; ") || c.dim("(none)"), 14));
+
+  // Show token if caller has permission (same as rotate-token: can operate on this user)
+  try {
+    assertCanOperateOnCli(user.userType, creds.userType, user.id, creds.userId);
+    if (user.tokenPlaintext) {
+      console.log(kv("token", c.boldYellow(user.tokenPlaintext), 14));
+      if (user.tokenExpiresAt) {
+        const expiresDate = new Date(user.tokenExpiresAt).toLocaleString("zh-CN");
+        const isExpired = user.tokenExpiresAt < Date.now();
+        console.log(kv("token expires", isExpired ? c.red(`${expiresDate} (已过期)`) : expiresDate, 14));
+      } else {
+        console.log(kv("token expires", c.green("永久有效"), 14));
+      }
+    } else {
+      console.log(kv("token", c.dim("(not available - token was created before this feature)"), 14));
+    }
+  } catch {
+    // No permission to see token - don't show it
+  }
 
   console.log();
   closeDatabase();
