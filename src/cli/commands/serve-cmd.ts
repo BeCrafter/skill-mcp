@@ -231,8 +231,10 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   importWorker.start();
   webhookWorker.start();
   // ── Startup banner ────────────────────────────────────────────────
-  console.log(banner(config.app.name, config.app.version));
-  console.log();
+  // In stdio mode, stdout is reserved for MCP JSON-RPC messages.
+  // Output the banner to stderr so it doesn't corrupt the protocol stream.
+  const out = options.transport === "stdio" ? process.stderr : process.stdout;
+  out.write(banner(config.app.name, config.app.version) + "\n\n");
 
   // Start based on transport
   let stdioMcpServer: Awaited<ReturnType<typeof createMcpServer>> | null = null;

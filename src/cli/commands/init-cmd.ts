@@ -5,7 +5,7 @@ import { getDatabase, closeDatabase } from "../../db/connection.js";
 import { UserRepository } from "../../db/repositories/user.repository.js";
 import { RoleRepository } from "../../db/repositories/role.repository.js";
 import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
-import { c, kv, section, ok, fail, warn } from "../ui.js";
+import { c, kv, section, ok, fail, warn, hint } from "../ui.js";
 import { sha256 } from "../../utils/crypto.js";
 import { saveLocalConfig } from "../local-config.js";
 import { randomBytes } from "node:crypto";
@@ -100,7 +100,7 @@ export async function initAction(opts: { username: string; password: string }): 
   console.log(kv("token", c.boldYellow(token)));
   console.log();
   ok(`Superadmin '${opts.username}' created successfully.`);
-  warn("Save the token above — it cannot be retrieved again.");
+  hint(`Use ${c.cyan("skill-mcp user get <userId>")} to view token later.`);
   console.log();
   closeDatabase();
 }

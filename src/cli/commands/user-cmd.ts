@@ -242,7 +242,7 @@ export async function userCreateAction(opts: { name?: string; roleIds?: string[]
     if (tokenExpiresAt) console.log(kv("expires", new Date(tokenExpiresAt).toISOString()));
     console.log(kv("tags", tags.join(", ") || c.dim("(none)")));
 
-    console.log(`\n  ${c.boldYellow("⚠")}  Save the token above — it cannot be retrieved again.\n`);
+    console.log(`\n  ${c.dim("→")}  Use ${c.cyan(`skill-mcp user get ${user.id}`)} to view token later.\n`);
   } catch (err) {
     if (err instanceof Error && (err instanceof ConflictError || err.message.includes("already exists"))) {
       fail(`Username "${opts.username}" already exists`);
