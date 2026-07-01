@@ -5,7 +5,7 @@ import { getDatabase, closeDatabase } from "../../db/connection.js";
 import { UserRepository } from "../../db/repositories/user.repository.js";
 import { RoleRepository } from "../../db/repositories/role.repository.js";
 import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
-import { c, kv, section, ok, fail, warn, hint } from "../ui.js";
+import { c, kv, section, ok, fail, hint } from "../ui.js";
 import { sha256 } from "../../utils/crypto.js";
 import { saveLocalConfig } from "../local-config.js";
 import { randomBytes } from "node:crypto";

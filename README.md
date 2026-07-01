@@ -19,6 +19,7 @@ A Model Context Protocol (MCP) server that provides a managed skill file system 
 - **Caching** — Layered memory (LRU) + file-based caching for fast skill retrieval
 - **SQLite Storage** — Persistent metadata storage via Drizzle ORM + better-sqlite3
 - **CLI Management** — Full command-line interface for importing, listing, searching, and managing skills
+- **Self-upgrade Check** — `skill-mcp upgrade` checks npm registry + mirror for newer versions
 
 ## 📚 Documentation Navigation
 
@@ -541,6 +542,7 @@ src/
 | `lint <path>` | Lint skill package |
 | `manifest:migrate <dir>` | Scan & migrate `manifest_schema` (P1-21, supports `--apply` / `--patch`) |
 | `migrate:check` | Check migration status |
+| `upgrade` | Check for newer version of skill-mcp on npm |
 | `pipeline validate` | Validate pipeline YAML |
 | `pipeline graph` | Visualize pipeline DAG |
 | `pipeline run` | Execute pipeline |

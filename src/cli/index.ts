@@ -20,6 +20,7 @@ import { evalListAction, evalRunAction, evalResultsAction } from "./commands/eva
 import { loginAction, logoutAction, whoamiAction, resetPasswordAction } from "./commands/auth-cmd.js";
 import { initAction } from "./commands/init-cmd.js";
 import { syncCheckAction, syncCheckAllAction, syncPullAction } from "./commands/sync-cmd.js";
+import { upgradeAction } from "./commands/upgrade-cmd.js";
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
@@ -74,7 +75,7 @@ export async function createCli(): Promise<Command> {
             { label: "Sync",      icon: "◆", names: ["sync"] },
             { label: "Quality",   icon: "◆", names: ["lint", "eval"] },
             { label: "Pipeline",  icon: "◆", names: ["pipeline"] },
-            { label: "System",    icon: "◆", names: ["init", "migrate:check", "manifest:migrate"] },
+            { label: "System",    icon: "◆", names: ["init", "migrate:check", "manifest:migrate", "upgrade"] },
             { label: "Admin",     icon: "◆", names: ["auth", "user", "role"] },
           ];
 
@@ -449,6 +450,11 @@ export async function createCli(): Promise<Command> {
     .action(async (opts) => {
       await initAction({ username: opts.username, password: opts.password });
     });
+
+  program
+    .command("upgrade")
+    .description("Check for newer version of skill-mcp and show upgrade instructions")
+    .action(async () => { await upgradeAction(); });
 
   // ── Auth commands ─────────────────────────────────────────────────
   const authCmd = program
