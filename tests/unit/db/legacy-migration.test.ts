@@ -146,7 +146,7 @@ describe("legacy migration backfill (T-304)", () => {
       expect(colNames).not.toContain("assigned_groups");
       expect(colNames).toContain("slug");
       expect(colNames).toContain("content_hash");
-      expect(colNames).toContain("tenant_id");
+      expect(colNames).not.toContain("tenant_id");
 
       // Legacy data is intentionally dropped — the clean-slate approach avoids
       // FK cascade errors that plagued the old in-place rebuild.

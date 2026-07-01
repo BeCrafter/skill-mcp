@@ -1,5 +1,6 @@
 import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
+import type { HttpContext } from "../../context.js";
 import { json, readJsonBody } from "../../helpers.js";
 import { BadRequestError, AppError } from "../../../utils/errors.js";
 import type { WebhookEntity } from "../../../db/repositories/webhook.repository.js";
@@ -83,10 +84,10 @@ interface PatchWebhookBody {
 export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies): void {
   if (!deps.webhookService || !deps.webhookRepo || !deps.webhookDeliveryRepo) return;
   const { webhookService, webhookRepo, webhookDeliveryRepo } = deps;
+  const tenantId = (ctx: HttpContext) => ctx.requestContext?.tenantId ?? "default";
 
   router.get("/api/admin/webhooks", async (ctx) => {
-    const tenantId = ctx.requestContext?.tenantId ?? "default";
-    const rows = webhookRepo.listByTenant(tenantId);
+    const rows = webhookRepo.listByTenant(tenantId(ctx));
     json(ctx.res, 200, {
       success: true,
       data: rows.map((w) => webhookToJson(w, false)),
@@ -96,11 +97,11 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
 
   router.post("/api/admin/webhooks", async (ctx) => {
     requireSuperadmin(ctx.requestContext!);
-    const tenantId = ctx.requestContext?.tenantId ?? "default";
+    const tid = tenantId(ctx);
     const data = await readJsonBody<PostWebhookBody>(ctx.req);
     if (typeof data.url !== "string") throw new BadRequestError("url is required");
     const w = await webhookService.create({
-      tenantId,
+      tenantId: tid,
       url: data.url,
       eventTypes: data.event_types,
       description: data.description ?? null,

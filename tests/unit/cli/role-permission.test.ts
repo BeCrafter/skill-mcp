@@ -72,22 +72,22 @@ function seedUser(db: Database.Database, opts: {
 }): void {
   const token = `tok-${opts.id}`;
   db.prepare(
-    `INSERT INTO users (id, username, token, user_type, status, tenant_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'default', ?, ?)`,
+    `INSERT INTO users (id, username, token, user_type, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(opts.id, opts.username, token, opts.userType, opts.status ?? "active", Date.now(), Date.now());
 }
 
 function seedRole(db: Database.Database, opts: { id: string; name: string; tags?: string[] }): void {
   db.prepare(
-    `INSERT INTO roles (id, name, tags, tenant_id, created_at, updated_at)
-     VALUES (?, ?, ?, 'default', ?, ?)`,
+    `INSERT INTO roles (id, name, tags, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
   ).run(opts.id, opts.name, JSON.stringify(opts.tags ?? []), Date.now(), Date.now());
 }
 
 function seedUserRole(db: Database.Database, userId: string, roleId: string): void {
   db.prepare(
-    `INSERT INTO user_roles (id, tenant_id, user_id, role_id, created_at)
-     VALUES (?, 'default', ?, ?, ?)`,
+    `INSERT INTO user_roles (id, user_id, role_id, created_at)
+     VALUES (?, ?, ?, ?)`,
   ).run(`ur-${userId}-${roleId}`, userId, roleId, Date.now());
 }
 

@@ -1,5 +1,6 @@
 import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
+import type { HttpContext } from "../../context.js";
 import { json } from "../../helpers.js";
 import { BadRequestError, ConfigurationError } from "../../../utils/errors.js";
 import type { AggregateRow } from "../../../db/repositories/usage-event.repository.js";
@@ -44,12 +45,15 @@ function rowsToCsv(rows: AggregateRow[]): string {
   return header + (body ? body + "\n" : "");
 }
 
+function getTenantId(ctx: HttpContext): string {
+  return ctx.query.get("tenantId") ?? "default";
+}
+
 export function registerAdminUsageRoutes(router: Router, deps: AppDependencies): void {
   if (!deps.usageMeter) return;
   const { usageMeter } = deps;
-
   router.get("/api/admin/usage/aggregate", async (ctx) => {
-    const tenantId = ctx.query.get("tenantId") ?? "default";
+    const tenantId = getTenantId(ctx);
     const fromBucket = validateBucket("fromBucket", ctx.query.get("fromBucket"));
     const toBucket = validateBucket("toBucket", ctx.query.get("toBucket"));
     const eventType = validateEventType(ctx.query.get("eventType"));
@@ -87,7 +91,7 @@ export function registerAdminUsageRoutes(router: Router, deps: AppDependencies):
     if (!deps.usageEventRepo) {
       throw new ConfigurationError("usageEventRepo not configured");
     }
-    const tenantId = ctx.query.get("tenantId") ?? "default";
+    const tenantId = getTenantId(ctx);
     const fromBucket = validateBucket("fromBucket", ctx.query.get("fromBucket"));
     const toBucket = validateBucket("toBucket", ctx.query.get("toBucket"));
     const eventType = validateEventType(ctx.query.get("eventType"));

@@ -346,27 +346,27 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 
 | 表 | 关键列 | 索引 | 外键 |
 |---|---|---|---|
-| `skills` | `id` PK / `tenantId` / `slug` UNIQUE / `name` / `displayName` / `description` / `version` / `contentHash` / `storagePath` / `status` / `visibility` / `entryFile` / `category` / `attributes` JSON / `retrievalMeta` JSON / `importSource` / `importUrl` / `importBranch` / `importSubDir` / `importedAt` | `idx_skills_{name,status,visibility,tenant_id}` / `unique_name_content_hash` | — |
+| `skills` | `id` PK / `slug` UNIQUE / `name` / `displayName` / `description` / `version` / `contentHash` / `storagePath` / `status` / `visibility` / `entryFile` / `category` / `attributes` JSON / `retrievalMeta` JSON / `importSource` / `importUrl` / `importBranch` / `importSubDir` / `importedAt` | `idx_skills_{name,status,visibility}` / `unique_name_content_hash` | — |
 | `skill_tags` | `(skillId, tag)` 复合 PK | `idx_skill_tags_tag` | → `skills` CASCADE |
-| `skill_files` | `id` / `tenantId` / `skillId` / `filePath` / `fileType` / `fileSize` / `mimeType` / `checksum` | `idx_skill_files_skill_id` | → `skills` CASCADE |
-| `skill_versions` | `id` / `tenantId` / `skillId` / `version` / `contentHash` / `storagePath` / `entryFile` / `fileCount` / `createdBy` / `changeSummary` / `isCurrent` | `idx_skill_versions_{skill_id,version,created_at}` | → `skills` CASCADE |
-| `access_logs` | `id` / `tenantId` / `skillId` / `skillSlug` / `action` / `filePaths` JSON / `latencyMs` / `userId` / `sessionId` / `createdAt` | `idx_access_logs_created_at` / `idx_access_logs_tenant_id` | → `skills` CASCADE |
-| `skill_feedbacks` | `id` / `tenantId` / `skillId` / `skillSlug` / `userId` / `sessionId` / `outcome` / `context` / `agentComment` / `version` | `idx_feedbacks_{skill_slug,created_at,outcome}` | → `skills` CASCADE |
-| `users` | `id` / `tenantId` / `token` UNIQUE / `name` / `username` UNIQUE / `passwordHash` / `userType` / `status` / `tokenPlaintext` ⚠️安全敏感 / `tokenExpiresAt` / `previousToken` / `previousTokenExpiresAt` | `idx_users_token` / `idx_users_previous_token` / `idx_users_tenant_id` / `idx_users_username` | — |
-| `roles` | `id` / `tenantId` / `name` UNIQUE / `description` / `tags` JSON / `createdAt` / `updatedAt` | `idx_roles_tenant_id` | — |
-| `user_roles` | `id` / `tenantId` / `(userId, roleId)` / `createdAt` | `uk_user_roles_user_role` / `idx_user_roles_role_id` | → users, roles CASCADE |
+| `skill_files` | `id` / `skillId` / `filePath` / `fileType` / `fileSize` / `mimeType` / `checksum` | `idx_skill_files_skill_id` | → `skills` CASCADE |
+| `skill_versions` | `id` / `skillId` / `version` / `contentHash` / `storagePath` / `entryFile` / `fileCount` / `createdBy` / `changeSummary` / `isCurrent` | `idx_skill_versions_{skill_id,version,created_at}` | → `skills` CASCADE |
+| `access_logs` | `id` / `skillId` / `skillSlug` / `action` / `filePaths` JSON / `latencyMs` / `userId` / `sessionId` / `createdAt` | `idx_access_logs_created_at` | → `skills` CASCADE |
+| `skill_feedbacks` | `id` / `skillId` / `skillSlug` / `userId` / `sessionId` / `outcome` / `context` / `agentComment` / `version` | `idx_feedbacks_{skill_slug,created_at,outcome}` | → `skills` CASCADE |
+| `users` | `id` / `token` UNIQUE / `name` / `username` UNIQUE / `passwordHash` / `userType` / `status` / `tokenPlaintext` ⚠️安全敏感 / `tokenExpiresAt` / `previousToken` / `previousTokenExpiresAt` | `idx_users_token` / `idx_users_previous_token` / `idx_users_username` | — |
+| `roles` | `id` / `name` UNIQUE / `description` / `tags` JSON / `createdAt` / `updatedAt` | — | — |
+| `user_roles` | `id` / `(userId, roleId)` / `createdAt` | `uk_user_roles_user_role` / `idx_user_roles_role_id` | → users, roles CASCADE |
 | `tenants` | `id` PK / `name` / `description` / `status` / `createdAt` / `updatedAt` | — | — |
-| `import_jobs` | `id` / `tenantId` / `status` / `source` / `optionsJson` / `progress` / `message` / `resultJson` / `errorMessage` / `createdByUserId` / `createdAt` / `startedAt` / `finishedAt` | `idx_import_jobs_{status,created_at}` | — |
-| `cache_global_epoch` | `id` PK / `tenantId` / `epoch` / `updatedAt` | — | — |
-| `cache_user_epochs` | `userId` PK / `tenantId` / `epoch` / `updatedAt` | — | — |
+| `import_jobs` | `id` / `status` / `source` / `optionsJson` / `progress` / `message` / `resultJson` / `errorMessage` / `createdByUserId` / `createdAt` / `startedAt` / `finishedAt` | `idx_import_jobs_{status,created_at}` | — |
+| `cache_global_epoch` | `id` PK / `epoch` / `updatedAt` | — | — |
+| `cache_user_epochs` | `userId` PK / `epoch` / `updatedAt` | — | — |
 | `usage_events` | `id` / `tenantId` / `userId` / `eventType` / `resourceId` / `quantity` / `metadata` JSON / `hourBucket` / `createdAt` | `idx_usage_events_{tenant_bucket,tenant_event,created_at}` | — |
-| `pipeline_runs` | `id` / `tenantId` / `name` / `status` / `definitionJson` / `inputsJson` / `batchesJson` / `completedStagesJson` / `currentBatchIndex` / `startedAt` / `finishedAt` | `idx_pipeline_runs_{status,started_at}` | — |
+| `pipeline_runs` | `id` / `name` / `status` / `definitionJson` / `inputsJson` / `batchesJson` / `completedStagesJson` / `currentBatchIndex` / `startedAt` / `finishedAt` | `idx_pipeline_runs_{status,started_at}` | — |
 | `tenant_quotas` | `id` / `tenantId` / `tier` / `maxUsers` / `maxSkills` / `maxStorageBytes` / `maxApiCallsPerDay` / `maxPipelineRunsPerDay` / `effectiveFrom` / `effectiveUntil` / `notes` | `idx_tenant_quotas_tenant` | — |
 | `tenant_quota_overrides` | `id` / `tenantId` / `fieldName` / `overrideValue` / `reason` / `grantedBy` / `grantedAt` / `expiresAt` | `idx_tenant_quota_overrides_lookup` | — |
 | `webhooks` | `id` / `tenantId` / `url` / `secret` / `eventTypes` JSON / `enabled` / `description` / `secretRotatedAt` | `idx_webhooks_{tenant,enabled}` | — |
 | `webhook_deliveries` | `id` / `webhookId` / `tenantId` / `eventType` / `deliveryId` / `payload` / `attempt` / `status` / `responseStatus` / `responseBody` / `errorMessage` / `nextRetryAt` / `firstAttemptedAt` / `lastAttemptedAt` / `completedAt` | `idx_webhook_deliveries_{delivery_id,due,tenant,webhook}` | — |
-| `skill_eval_cases` | `id` / `tenantId` / `skillId` / `caseName` / `input` / `expectationsJson` / `createdAt` / `updatedAt` | `uk_skill_eval_cases_skill_case` / `idx_skill_eval_cases_skill_id` | → `skills` CASCADE |
-| `skill_eval_runs` | `id` / `tenantId` / `skillId` / `skillVersion` / `caseName` / `status` / `runner` / `toolsUsedJson` / `output` / `failureReason` / `latencyMs` / `createdAt` | `idx_skill_eval_runs_{skill_version,created_at}` | → `skills` CASCADE |
+| `skill_eval_cases` | `id` / `skillId` / `caseName` / `input` / `expectationsJson` / `createdAt` / `updatedAt` | `uk_skill_eval_cases_skill_case` / `idx_skill_eval_cases_skill_id` | → `skills` CASCADE |
+| `skill_eval_runs` | `id` / `skillId` / `skillVersion` / `caseName` / `status` / `runner` / `toolsUsedJson` / `output` / `failureReason` / `latencyMs` / `createdAt` | `idx_skill_eval_runs_{skill_version,created_at}` | → `skills` CASCADE |
 | `skill_embeddings` | `skillId` PK / `modelName` / `dimension` / `vector` BLOB / `contentHash` | `idx_skill_embeddings_model` | → `skills` CASCADE |
 | `audit_logs` | `id` / `action` / `entityType` / `entityId` / `operatorId` / `beforeJson` / `afterJson` / `createdAt` | `idx_audit_logs_{entity,created}` | — |
 
