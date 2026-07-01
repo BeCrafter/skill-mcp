@@ -290,7 +290,14 @@ curl -X POST http://localhost:3000/api/auth/login \
     "access_token": "eyJhbGciOi...",
     "refresh_token": "eyJhbGciOi...",
     "token_type": "Bearer",
-    "expires_in": 7200
+    "expires_in": 7200,
+    "user": {
+      "id": "usr_xxx",
+      "username": "admin",
+      "name": "System Admin",
+      "user_type": "superadmin",
+      "tags": ["all-skills"]
+    }
   }
 }
 ```
@@ -306,6 +313,17 @@ curl -X POST http://localhost:3000/api/auth/refresh \
   -d '{"refresh_token": "eyJhbGciOi..."}'
 ```
 
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "eyJhbGciOi...",
+    "expires_in": 7200
+  }
+}
+```
+
 ### POST /api/auth/change-password
 
 Change the authenticated user's password. Requires a valid Bearer token.
@@ -315,7 +333,14 @@ Change the authenticated user's password. Requires a valid Bearer token.
 curl -X POST http://localhost:3000/api/auth/change-password \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
-  -d '{"current_password": "old", "new_password": "new"}'
+  -d '{"old_password": "old", "new_password": "new"}'
+```
+
+**Response**:
+```json
+{
+  "success": true
+}
 ```
 
 ---
@@ -579,9 +604,11 @@ Create a new user.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `username` | string | **Required.** Username |
-| `password` | string | User password |
-| `userType` | string | User type (`admin`, `superadmin`, `user`) |
+| `username` | string | Username |
+| `password` | string | User password (optional, min 8 chars) |
+| `user_type` | string | User type (`admin`, `superadmin`, `user`). Default: `user` |
+| `name` | string | Display name |
+| `role_ids` | string[] | Initial role IDs to assign |
 | `token_expires_at` | number? | Custom token expiry timestamp (ms) |
 | `expires_in` | number? | Token TTL in seconds |
 
@@ -591,10 +618,41 @@ Create a new user.
 
 Get a specific user by ID.
 
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "usr_xxx",
+    "name": "System Admin",
+    "username": "admin",
+    "user_type": "superadmin",
+    "status": "active",
+    "roles": [
+      { "id": "role-id", "name": "superadmin", "tags": ["all-skills"] }
+    ],
+    "tags": ["all-skills"],
+    "token_plaintext": "abc123...",
+    "token_expires_at": 1735689600000,
+    "created_at": 1735689600000,
+    "updated_at": 1735689600000
+  }
+}
+```
+
+**Note**: `token_plaintext` is only included if the caller has permission to operate on this user (own account or superadmin). `roles` contains the assigned role objects with `id`, `name`, and `tags`. `tags` is the aggregated permission tags from all assigned roles.
+
 #### PUT /api/admin/users/{userId}
 
 Update a user. `superadmin` targets are protected — only the superadmin can operate on themselves.
 
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string? | Display name |
+| `status` | string? | User status (string) |
+| `user_type` | string? | User type (requires superadmin) |
 #### DELETE /api/admin/users/{userId}
 
 Delete a user. `superadmin` targets cannot be deleted. `admin` targets require a `superadmin` caller.
@@ -602,6 +660,32 @@ Delete a user. `superadmin` targets cannot be deleted. `admin` targets require a
 #### POST /api/admin/users/{userId}/rotate-token
 
 Rotate the API token for a user. Returns the new token (shown once).
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `token_expires_at` | number? | Token expiry timestamp (ms) |
+| `expires_in` | number? | Token TTL in seconds |
+| `grace_seconds` | number? | Grace period for old token (seconds) |
+
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "usr_xxx",
+    "name": "System Admin",
+    "token": "abc123...",
+    "token_expires_at": 1735689600000,
+    "previous_token_expires_at": 1735084800000,
+    "grace_seconds": 604800
+  }
+}
+```
+
+**Note**: `token` is the new API token (shown once). `previous_token_expires_at` is the expiry of the old token (still valid during grace period). `grace_seconds` defaults to 604800 (7 days) and can be overridden via the `grace_seconds` request body field.
 
 #### DELETE /api/admin/users/{userId}/previous-token
 
@@ -613,12 +697,19 @@ Assign roles to a user.
 
 **Request Body**:
 ```json
-{ "roleIds": ["role-id-1", "role-id-2"] }
+{ "role_ids": ["role-id-1", "role-id-2"] }
 ```
 
 #### POST /api/admin/users/{username}/reset-password
 
 Reset a user's password. Admin can only reset own password; superadmin can reset any admin.
+
+**Request Body**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `new_password` | string | **Required.** New password (min 8 chars) |
+
 
 ### 5.3 Roles Management
 
@@ -675,12 +766,12 @@ Change the tier or individual quota limits.
 | Field | Type | Description |
 |-------|------|-------------|
 | `tier` | `"free" \| "team" \| "enterprise"` | Set tier (resets limits to tier defaults) |
-| `maxSkills` | number? | Max number of skills |
-| `maxStorageBytes` | number? | Max storage in bytes |
-| `maxApiCallsPerHour` | number? | Max API calls per hour |
-| `maxWebhooks` | number? | Max webhook subscriptions |
-| `maxFileSizeBytes` | number? | Max single file size |
-| `maxConcurrentImports` | number? | Max concurrent import jobs |
+| `max_users` | number? | Max number of users |
+| `max_skills` | number? | Max number of skills |
+| `max_storage_bytes` | number? | Max storage in bytes |
+| `max_api_calls_per_day` | number? | Max API calls per day |
+| `max_pipeline_runs_per_day` | number? | Max pipeline runs per day |
+| `notes` | string? | Admin notes (max 1024 chars) |
 
 #### GET /api/admin/tenants/{tenantId}/quota/history
 
@@ -698,10 +789,11 @@ Create a quota override. Requires an audit-grade reason.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `field` | string | **Required.** Quota field to override |
-| `value` | number | **Required.** Override value |
+| `field_name` | string | **Required.** Quota field to override |
+| `override_value` | number | **Required.** Override value |
 | `reason` | string | **Required.** Audit reason |
-| `expiresAt` | number? | Expiry timestamp (ms) |
+| `granted_by` | string | **Required.** Who granted this override |
+| `expires_at` | number? | Expiry timestamp (ms) |
 
 #### DELETE /api/admin/quota-overrides/{overrideId}
 
@@ -713,6 +805,27 @@ Remove a single quota override.
 
 List all webhook subscriptions (secrets are hidden).
 
+**Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "wh_xxx",
+      "tenant_id": "default",
+      "url": "https://example.com/webhook",
+      "event_types": ["skill.view", "skill.download"],
+      "enabled": true,
+      "description": "My webhook",
+      "created_at": 1735689600000,
+      "updated_at": 1735689600000,
+      "secret_rotated_at": null
+    }
+  ],
+  "total": 1
+}
+```
+
 #### POST /api/admin/webhooks
 
 Create a new webhook subscription. The secret is returned **once** in this response.
@@ -722,8 +835,8 @@ Create a new webhook subscription. The secret is returned **once** in this respo
 | Field | Type | Description |
 |-------|------|-------------|
 | `url` | string | **Required.** Webhook delivery URL |
-| `event_types` | string[] | **Required.** Event types to subscribe to |
-| `enabled` | boolean? | Enable/disable (default: `true`) |
+| `tenant_id` | string | Tenant ID (optional, default: `"default"`) |
+| `event_types` | string[] | Event types to subscribe to (optional, defaults to all events) |
 | `description` | string? | Human-readable description |
 
 #### GET /api/admin/webhooks/{id}
@@ -754,6 +867,34 @@ Delete a webhook subscription (cascade-deletes orphan deliveries).
 #### GET /api/admin/webhooks/{id}/deliveries
 
 Get the last N deliveries for audit.
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "del_xxx",
+      "webhook_id": "wh_xxx",
+      "tenant_id": "default",
+      "event_type": "skill.view",
+      "delivery_id": "evt_xxx",
+      "payload": { "skill_slug": "my-skill" },
+      "attempt": 1,
+      "status": "delivered",
+      "response_status": 200,
+      "response_body": "{\"ok\":true}",
+      "error_message": null,
+      "next_retry_at": null,
+      "first_attempted_at": 1735689600000,
+      "last_attempted_at": 1735689600000,
+      "completed_at": 1735689600000,
+      "created_at": 1735689600000
+    }
+  ],
+  "total": 1
+}
+```
 
 **Query Parameters**:
 
@@ -793,7 +934,7 @@ List raw usage events.
 | `fromBucket` | string | Start bucket (`YYYY-MM-DDTHH` format) |
 | `toBucket` | string | End bucket (`YYYY-MM-DDTHH` format) |
 | `eventType` | string | Filter by event type |
-| `limit` | number | Max events (default: 100, max: 10000) |
+| `limit` | number | Max events (default: 1000, max: 10000) |
 
 ### 5.7 Import Jobs
 
@@ -811,6 +952,11 @@ Enqueue an async skill import job.
 | `slug` | string? | Custom slug |
 | `branch` | string? | Git branch |
 | `sub_dir` | string? | Subdirectory |
+| `description` | string? | Skill description |
+| `target_id` | string? | Target skill ID for overwrite |
+| `version_bump` | string? | Version bump: `major`, `minor`, `patch` |
+| `overwrite` | boolean? | Overwrite if exists |
+| `allow_duplicate` | boolean? | Allow duplicate import |
 
 #### GET /api/admin/jobs
 
@@ -1022,6 +1168,11 @@ Get the file tree structure of a skill.
 ---
 
 ## 7. Kubernetes Probe Endpoints
+
+
+### GET /api/health
+
+**Deprecated.** Legacy health check endpoint, use `/api/livez` instead. Returns same response as `/api/livez` with `Sunset` and `Deprecation` headers.
 
 These endpoints are used by kubelet for health checking in k8s deployments.
 

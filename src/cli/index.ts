@@ -263,6 +263,7 @@ export async function createCli(): Promise<Command> {
     .command("list")
     .description("List all skills")
     .option("--tags <tags>", "Filter by tags")
+    .option("--name <name>", "Filter by name")
     .action(async (opts) => {
       await listAction({ name: opts.name, tags: opts.tags, serverUrl: opts.serverUrl });
     });
@@ -374,6 +375,8 @@ export async function createCli(): Promise<Command> {
   program
     .command("manifest:migrate <dir>")
     .description("Add manifest_schema field to skill packages missing it")
+    .option("--apply", "Rewrite SKILL.md files in place (default: dry-run)")
+    .option("--patch", "Emit unified diff to stdout (suitable for git apply)")
     .action(async (dir, opts) => {
       await manifestMigrateAction(dir, {
         apply: opts.apply as boolean | undefined,

@@ -33,7 +33,7 @@ node dist/index.js auth login
 
 ```bash
 # 1. 启动 HTTP 服务器
-node dist/index.js serve --transport http --port 3000
+node dist/index.js serve --transport http --port 3000 --host 0.0.0.0 --mode standalone --auth-token my-secret
 
 # 2. 登录获取 JWT token
 node dist/index.js auth login --server-url http://localhost:3000
@@ -110,11 +110,17 @@ node dist/index.js import ./my-skill --overwrite
 # 允许重复导入（不同 slug）
 node dist/index.js import ./my-skill --allow-duplicate
 
-# 指定版本号
+# 指定描述信息
+node dist/index.js import ./my-skill --description "My skill description"
+
+# 指定版本号递增类型
 node dist/index.js import ./my-skill --version-bump minor
 
 # 从 Git 仓库导入
 node dist/index.js import https://github.com/user/repo --branch main --sub-dir skills/my-skill
+
+# 指定目标技能 ID 进行覆盖更新
+node dist/index.js import ./my-skill --id <skill-id>
 ```
 
 ### 1.3 远程模式导入
@@ -144,13 +150,19 @@ node dist/index.js list
     data-analyst         v0.1.0      draft                                       Data analysis tool
 ```
 
-> `⎈` 标记表示 Git 远程导入的技能，无标记表示本地导入
+> `⎇` 标记表示 Git 远程导入的技能，无标记表示本地导入
 
 ### 2.2 按标签过滤
 
 ```bash
 node dist/index.js list --tags prompt
 node dist/index.js list --tags prompt,engineering
+```
+
+### 2.3 按名称过滤
+
+```bash
+node dist/index.js list --name prompt
 ```
 ---
 
@@ -189,6 +201,7 @@ node dist/index.js info prompt-writer
 
     Version       v1.2.0
     Status        published
+    Visibility    public
     Category      writing
     Tags          prompt, engineering
     Updated       2026-06-25 14:20:00
@@ -263,14 +276,14 @@ node dist/index.js versions prompt-writer
 > `→` 标记表示当前版本
 
 ```bash
-node dist/index.js versions prompt-writer --show v1.1.0
+node dist/index.js versions prompt-writer --show 1.1.0
 ```
 
 输出示例：
 ```
   ── prompt-writer v1.1.0 ───────────────────────
 
-      hash          b2c3d4e5f6a7…
+      hash          b2c3d4e5f6a78901…
       files         4
       storage       skills/prompt-writer/v1.1.0/
       created       2026-06-22 09:15:00
@@ -281,7 +294,7 @@ node dist/index.js versions prompt-writer --show v1.1.0
 
 ```bash
 # 对比两个版本
-node dist/index.js versions prompt-writer --diff v1.0.0..v1.2.0
+node dist/index.js versions prompt-writer --diff 1.0.0..1.2.0
 ```
 
 输出示例：
@@ -305,10 +318,10 @@ node dist/index.js versions prompt-writer --diff v1.0.0..v1.2.0
 
 ```bash
 # 回滚到指定版本
-node dist/index.js rollback prompt-writer --to v1.0.0
+node dist/index.js rollback prompt-writer --to 1.0.0
 
 # 回滚并指定版本号递增类型
-node dist/index.js rollback prompt-writer --to v1.0.0 --bump minor
+node dist/index.js rollback prompt-writer --to 1.0.0 --bump minor
 ```
 
 输出示例：
@@ -348,12 +361,14 @@ node dist/index.js remove prompt-writer --force
 
 ---
 
-## 10. 技能同步 (sync)
+## 9. 技能同步 (sync)
 
-### 10.1 检查单个技能是否有更新
+### 9.1 检查单个技能是否有更新
 
 ```bash
 node dist/index.js sync check prompt-writer
+# 或省略 slug 检查所有远程技能
+node dist/index.js sync check
 ```
 
 输出示例（有更新）：
@@ -387,7 +402,7 @@ node dist/index.js sync check prompt-writer
   ✓  Already up to date
 ```
 
-### 10.2 检查所有远程技能
+### 9.2 检查所有远程技能
 
 ```bash
 node dist/index.js sync check --all
@@ -407,7 +422,7 @@ node dist/index.js sync check --all
   ✓ 1 skill(s) already up to date
 ```
 
-### 10.3 拉取更新
+### 9.3 拉取更新
 
 ```bash
 node dist/index.js sync pull prompt-writer
@@ -420,37 +435,24 @@ node dist/index.js sync pull prompt-writer
     branch        main
 ```
 
-## 9. 技能质量检查 (lint)
+## 10. 技能质量检查 (lint)
 
 ```bash
 # 检查技能目录
 node dist/index.js lint ./my-skill
 ```
 
-输出示例：
 ```
-  ── Lint Results ────────────────────────────────
+  ✗  SKILL.md not found
 
-  CHECKS:
-    ✓ SKILL.md  2.3 KB
-    ✓ name  "my-skill"
-    ✓ manifest_schema  "v1"
-    ✓ retrieval signals present (triggers + whenToUse)
-    ✓ eval_cases  3 case(s)
-    ✓ version  "1.0.0" (valid semver)
-    ✓ No suspicious patterns
-    ✓ All referenced files exist
-    ✓ No path traversal patterns
-    ✓ All files are text
-
-  RESULT: 0 errors, 0 warnings
+  ✗  FAIL  0 info  0 warn  1 error
 ```
 
 ---
 
-## 10. 完整工作流示例
+## 11. 完整工作流示例
 
-### 10.1 创建并导入新技能
+### 11.1 创建并导入新技能
 
 ```bash
 # 1. 创建技能目录
@@ -492,7 +494,7 @@ node dist/index.js list
 node dist/index.js info my-new-skill
 ```
 
-### 10.2 更新技能并创建新版本
+### 11.2 更新技能并创建新版本
 
 ```bash
 # 1. 修改技能文件
@@ -508,10 +510,10 @@ node dist/index.js import ./my-new-skill --overwrite
 node dist/index.js versions my-new-skill
 
 # 5. 对比版本差异
-node dist/index.js versions my-new-skill --diff v1.0.0..v1.1.0
+node dist/index.js versions my-new-skill --diff 1.0.0..1.1.0
 ```
 
-### 10.3 回滚到旧版本
+### 11.3 回滚到旧版本
 
 ```bash
 # 1. 查看当前版本
@@ -520,8 +522,8 @@ node dist/index.js info my-new-skill
 # 2. 查看版本历史
 node dist/index.js versions my-new-skill
 
-# 3. 回滚到 v1.0.0
-node dist/index.js rollback my-new-skill --to v1.0.0
+# 3. 回滚到 1.0.0
+node dist/index.js rollback my-new-skill --to 1.0.0
 
 # 4. 验证回滚
 node dist/index.js info my-new-skill
@@ -529,9 +531,9 @@ node dist/index.js info my-new-skill
 
 ---
 
-## 11. 远程模式操作
+## 12. 远程模式操作
 
-### 11.1 配置远程服务器
+### 12.1 配置远程服务器
 
 ```bash
 # 设置环境变量
@@ -541,7 +543,7 @@ export SKILL_MCP_SERVER_URL=http://localhost:3000
 node dist/index.js list --server-url http://localhost:3000
 ```
 
-### 11.2 远程导入
+### 12.2 远程导入
 
 ```bash
 # 登录远程服务器
@@ -556,7 +558,7 @@ node dist/index.js list --server-url http://localhost:3000
 
 ---
 
-## 12. 环境变量参考
+## 13. 环境变量参考
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -570,9 +572,29 @@ node dist/index.js list --server-url http://localhost:3000
 
 ---
 
-## 13. 故障排查
+## 14. 版本升级 (upgrade)
 
-### 13.1 数据库未初始化
+```bash
+# 检查是否有新版本并显示升级说明
+node dist/index.js upgrade
+```
+
+输出示例：
+```
+  Checking for updates
+  ────────────────────────────────────────────────────────────────────────
+
+    current       0.1.1-beta.0
+    latest        0.1.0
+
+  ✓  Already on the latest version
+```
+
+---
+
+## 15. 故障排查
+
+### 15.1 数据库未初始化
 
 ```
 Error: no such table: skills
@@ -583,7 +605,7 @@ Error: no such table: skills
 node dist/index.js init --username admin --password admin888
 ```
 
-### 13.2 未登录
+### 15.2 未登录
 
 ```
 Error: Not logged in. Run `skill-mcp auth login` first.
@@ -594,7 +616,7 @@ Error: Not logged in. Run `skill-mcp auth login` first.
 node dist/index.js auth login
 ```
 
-### 13.3 技能已存在
+### 15.3 技能已存在
 
 ```
 Error: Skill "my-skill" already exists
@@ -609,7 +631,7 @@ node dist/index.js import ./my-skill --overwrite
 node dist/index.js import ./my-skill --allow-duplicate
 ```
 
-### 13.4 版本不存在
+### 15.4 版本不存在
 
 ```
 Error: Version v2.0.0 not found
@@ -621,5 +643,5 @@ Error: Version v2.0.0 not found
 node dist/index.js versions my-skill
 
 # 使用正确的版本号
-node dist/index.js rollback my-skill --to v1.0.0
+node dist/index.js rollback my-skill --to 1.0.0
 ```

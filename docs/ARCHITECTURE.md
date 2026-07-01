@@ -346,29 +346,29 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 
 | 表 | 关键列 | 索引 | 外键 |
 |---|---|---|---|
-| `skills` | `id` PK / `tenantId` / `slug` UNIQUE / `name` / `displayName` / `version` / `contentHash` / `storagePath` / `status` / `visibility` / `entryFile` / `category` / `attributes` JSON / `retrievalMeta` JSON | `idx_skills_{name,status,visibility,tenant_id}` / `unique_name_content_hash` | — |
+| `skills` | `id` PK / `tenantId` / `slug` UNIQUE / `name` / `displayName` / `description` / `version` / `contentHash` / `storagePath` / `status` / `visibility` / `entryFile` / `category` / `attributes` JSON / `retrievalMeta` JSON / `importSource` / `importUrl` / `importBranch` / `importSubDir` / `importedAt` | `idx_skills_{name,status,visibility,tenant_id}` / `unique_name_content_hash` | — |
 | `skill_tags` | `(skillId, tag)` 复合 PK | `idx_skill_tags_tag` | → `skills` CASCADE |
 | `skill_files` | `id` / `tenantId` / `skillId` / `filePath` / `fileType` / `fileSize` / `mimeType` / `checksum` | `idx_skill_files_skill_id` | → `skills` CASCADE |
-| `skill_versions` | `id` / `tenantId` / `skillId` / `version` / `contentHash` / `storagePath` / `fileCount` / `createdBy` / `changeSummary` / `isCurrent` | `idx_skill_versions_{skill_id,version,created_at}` | → `skills` CASCADE |
-| `access_logs` | `id` / `tenantId` / `skillId` / `skillSlug` / `action` / `latencyMs` / `userId` / `sessionId` | `idx_access_logs_created_at` / `idx_access_logs_tenant_id` | → `skills` CASCADE |
-| `skill_feedbacks` | `id` / `tenantId` / `skillId` / `skillSlug` / `outcome` / `context` / `agentComment` / `version` | `idx_feedbacks_{skill_slug,created_at,outcome}` | → `skills` CASCADE |
-| `users` | `id` / `tenantId` / `token` UNIQUE / `name` / `username` UNIQUE / `passwordHash` / `userType` / `status` / `tokenExpiresAt` / `previousToken` / `previousTokenExpiresAt` | `idx_users_token` / `idx_users_previous_token` / `idx_users_tenant_id` / `idx_users_username` | — |
-| `roles` | `id` / `tenantId` / `name` UNIQUE / `tags` JSON | `idx_roles_tenant_id` | — |
-| `user_roles` | `id` / `tenantId` / `(userId, roleId)` | `uk_user_roles_user_role` / `idx_user_roles_role_id` | → users, roles CASCADE |
-| `tenants` | `id` PK / `name` / `description` / `status` | — | — |
-| `import_jobs` | `id` / `tenantId` / `status` / `source` / `optionsJson` / `progress` / `resultJson` / `errorMessage` / `createdByUserId` | `idx_import_jobs_{status,created_at}` | — |
+| `skill_versions` | `id` / `tenantId` / `skillId` / `version` / `contentHash` / `storagePath` / `entryFile` / `fileCount` / `createdBy` / `changeSummary` / `isCurrent` | `idx_skill_versions_{skill_id,version,created_at}` | → `skills` CASCADE |
+| `access_logs` | `id` / `tenantId` / `skillId` / `skillSlug` / `action` / `filePaths` JSON / `latencyMs` / `userId` / `sessionId` / `createdAt` | `idx_access_logs_created_at` / `idx_access_logs_tenant_id` | → `skills` CASCADE |
+| `skill_feedbacks` | `id` / `tenantId` / `skillId` / `skillSlug` / `userId` / `sessionId` / `outcome` / `context` / `agentComment` / `version` | `idx_feedbacks_{skill_slug,created_at,outcome}` | → `skills` CASCADE |
+| `users` | `id` / `tenantId` / `token` UNIQUE / `name` / `username` UNIQUE / `passwordHash` / `userType` / `status` / `tokenPlaintext` ⚠️安全敏感 / `tokenExpiresAt` / `previousToken` / `previousTokenExpiresAt` | `idx_users_token` / `idx_users_previous_token` / `idx_users_tenant_id` / `idx_users_username` | — |
+| `roles` | `id` / `tenantId` / `name` UNIQUE / `description` / `tags` JSON / `createdAt` / `updatedAt` | `idx_roles_tenant_id` | — |
+| `user_roles` | `id` / `tenantId` / `(userId, roleId)` / `createdAt` | `uk_user_roles_user_role` / `idx_user_roles_role_id` | → users, roles CASCADE |
+| `tenants` | `id` PK / `name` / `description` / `status` / `createdAt` / `updatedAt` | — | — |
+| `import_jobs` | `id` / `tenantId` / `status` / `source` / `optionsJson` / `progress` / `message` / `resultJson` / `errorMessage` / `createdByUserId` / `createdAt` / `startedAt` / `finishedAt` | `idx_import_jobs_{status,created_at}` | — |
 | `cache_global_epoch` | `id` PK / `tenantId` / `epoch` / `updatedAt` | — | — |
 | `cache_user_epochs` | `userId` PK / `tenantId` / `epoch` / `updatedAt` | — | — |
-| `usage_events` | `id` / `tenantId` / `userId` / `eventType` / `resourceId` / `quantity` / `metadata` JSON / `hourBucket` | `idx_usage_events_{tenant_bucket,tenant_event,created_at}` | — |
+| `usage_events` | `id` / `tenantId` / `userId` / `eventType` / `resourceId` / `quantity` / `metadata` JSON / `hourBucket` / `createdAt` | `idx_usage_events_{tenant_bucket,tenant_event,created_at}` | — |
 | `pipeline_runs` | `id` / `tenantId` / `name` / `status` / `definitionJson` / `inputsJson` / `batchesJson` / `completedStagesJson` / `currentBatchIndex` / `startedAt` / `finishedAt` | `idx_pipeline_runs_{status,started_at}` | — |
 | `tenant_quotas` | `id` / `tenantId` / `tier` / `maxUsers` / `maxSkills` / `maxStorageBytes` / `maxApiCallsPerDay` / `maxPipelineRunsPerDay` / `effectiveFrom` / `effectiveUntil` / `notes` | `idx_tenant_quotas_tenant` | — |
 | `tenant_quota_overrides` | `id` / `tenantId` / `fieldName` / `overrideValue` / `reason` / `grantedBy` / `grantedAt` / `expiresAt` | `idx_tenant_quota_overrides_lookup` | — |
 | `webhooks` | `id` / `tenantId` / `url` / `secret` / `eventTypes` JSON / `enabled` / `description` / `secretRotatedAt` | `idx_webhooks_{tenant,enabled}` | — |
-| `webhook_deliveries` | `id` / `webhookId` / `tenantId` / `eventType` / `deliveryId` / `payload` / `attempt` / `status` / `responseStatus` / `nextRetryAt` | `idx_webhook_deliveries_{delivery_id,due,tenant,webhook}` | — |
-| `skill_eval_cases` | `id` / `tenantId` / `skillId` / `caseName` / `input` / `expectationsJson` | `uk_skill_eval_cases_skill_case` / `idx_skill_eval_cases_skill_id` | → `skills` CASCADE |
-| `skill_eval_runs` | `id` / `tenantId` / `skillId` / `skillVersion` / `caseName` / `status` / `runner` / `toolsUsedJson` / `output` / `failureReason` / `latencyMs` | `idx_skill_eval_runs_{skill_version,created_at}` | → `skills` CASCADE |
+| `webhook_deliveries` | `id` / `webhookId` / `tenantId` / `eventType` / `deliveryId` / `payload` / `attempt` / `status` / `responseStatus` / `responseBody` / `errorMessage` / `nextRetryAt` / `firstAttemptedAt` / `lastAttemptedAt` / `completedAt` | `idx_webhook_deliveries_{delivery_id,due,tenant,webhook}` | — |
+| `skill_eval_cases` | `id` / `tenantId` / `skillId` / `caseName` / `input` / `expectationsJson` / `createdAt` / `updatedAt` | `uk_skill_eval_cases_skill_case` / `idx_skill_eval_cases_skill_id` | → `skills` CASCADE |
+| `skill_eval_runs` | `id` / `tenantId` / `skillId` / `skillVersion` / `caseName` / `status` / `runner` / `toolsUsedJson` / `output` / `failureReason` / `latencyMs` / `createdAt` | `idx_skill_eval_runs_{skill_version,created_at}` | → `skills` CASCADE |
 | `skill_embeddings` | `skillId` PK / `modelName` / `dimension` / `vector` BLOB / `contentHash` | `idx_skill_embeddings_model` | → `skills` CASCADE |
-| `audit_logs` | `id` / `action` / `entityType` / `entityId` / `operatorId` / `beforeJson` / `afterJson` | `idx_audit_logs_{entity,created}` | — |
+| `audit_logs` | `id` / `action` / `entityType` / `entityId` / `operatorId` / `beforeJson` / `afterJson` / `createdAt` | `idx_audit_logs_{entity,created}` | — |
 
 ### 6.2 关键约束
 
@@ -468,7 +468,7 @@ CLI 管理命令支持本地/远程两种操作模式：
 ### 7.3 缓存
 
 - 两层：`MemoryLRU`（默认 500 条）→ `FileCache`（磁盘）。
-- L2 TTL = L1 TTL × `CACHE_L2_TTL_MULTIPLIER`（默认 2）。
+- L2 TTL = L1 TTL × `l2TtlMultiplier`（`CompositeCacheProvider` 构造函数参数，默认 2，非环境变量）。
 - read-promotion：L2 命中后以剩余 TTL 提升至 L1，确保 L1 不晚于 L2 过期。
 - 写策略：`set()` 同时写 L1 + L2，无 write-back。
 - 缓存键约定（**修改前必读**）：
@@ -499,7 +499,7 @@ CLI 管理命令支持本地/远程两种操作模式：
 
 ### 7.6 安全
 
-- `scanForInjection`（`utils/security.ts`）：10 条正则，扫 manifest 与 SKILL.md。无开关，固定执行。
+- `scanForInjection`（`utils/security.ts`）：10 条正则，扫 manifest 与 SKILL.md。可通过 `SECURITY_INJECTION_SCAN=false` 关闭导入阶段的注入扫描（`validator.ts`）；`skill.service.ts` 中的扫描不受此开关控制，始终执行。
 - `validateFilePath`：segment-aware 检查，拒绝 `..` 段与绝对路径前缀；合法文件名包含 `..` 子串（如 `foo..bar.md`、`v1..2/notes.md`）通过（T-735）。
 - `isTextFile` / `getMimeType`：白名单扩展名。
 - token 长度上限：4096 字节（见 T-402，已修复）。JWT token 通常 1-3KB，在此范围内。
