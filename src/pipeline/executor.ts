@@ -7,7 +7,6 @@ import { ExecutionContext } from "./context.js";
 import type { PipelineRunStore, PipelineRun } from "./run-store.js";
 import { withSpan } from "../telemetry/spans.js";
 import type { UsageMeterService } from "../services/usage-meter.service.js";
-import { DEFAULT_TENANT_ID } from "../types/index.js";
 
 export class PipelineExecutor {
   // T-709 — per-runId mutex. resume() does check-then-act on completedStages
@@ -35,7 +34,6 @@ export class PipelineExecutor {
   ): void {
     if (!this.usageMeter) return;
     void this.usageMeter.record({
-      tenantId: requestContext?.tenantId ?? DEFAULT_TENANT_ID,
       userId: requestContext?.userId,
       eventType: "pipeline.run",
       resourceId: pipelineName,
@@ -139,7 +137,6 @@ export class PipelineExecutor {
     this.recordPipelineRun(pipeline.name, results.length, status, requestContext);
     this.eventBus?.publish({
       type: "pipeline:completed",
-      tenantId: requestContext?.tenantId ?? DEFAULT_TENANT_ID,
       pipelineName: pipeline.name,
       status,
       stageCount: results.length,
@@ -317,7 +314,6 @@ export class PipelineExecutor {
       this.recordPipelineRun(run.pipeline.name, run.completedStages.size, "success", requestContext);
       this.eventBus?.publish({
         type: "pipeline:completed",
-        tenantId: requestContext?.tenantId ?? DEFAULT_TENANT_ID,
         runId,
         pipelineName: run.pipeline.name,
         status: "success",

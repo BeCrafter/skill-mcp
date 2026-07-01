@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DEFAULT_TENANT_ID, type RequestContext } from "../types/index.js";
+import { type RequestContext } from "../types/index.js";
 import type { UserRepository } from "../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../db/repositories/user-role.repository.js";
 import { looksLikeJwt, verifyJwt } from "../auth/jwt.service.js";
@@ -16,7 +16,7 @@ export interface McpExtra {
 }
 
 function anonymousContext(sessionId: string): RequestContext {
-  return { tenantId: DEFAULT_TENANT_ID, userId: "anonymous", sessionId, tags: new Set(), isAuthenticated: false, userType: undefined };
+  return { userId: "anonymous", sessionId, tags: new Set(), isAuthenticated: false, userType: undefined };
 }
 
 async function resolveContextForToken(
@@ -46,7 +46,6 @@ async function resolveContextForToken(
         }
         const tags = new Set<string>(Array.isArray(payload.tags) ? payload.tags : []);
         return {
-          tenantId: DEFAULT_TENANT_ID,
           userId: payload.sub,
           sessionId,
           tags,
@@ -67,10 +66,8 @@ async function resolveContextForToken(
     if (!user || user.status !== "active") {
       throw new AuthenticationError("Invalid or expired token");
     }
-
     const tags = await userRoleRepo.getAggregatedTagsByUserId(user.id);
     return {
-      tenantId: user.tenantId ?? DEFAULT_TENANT_ID,
       userId: user.id,
       sessionId,
       tags: new Set(tags),

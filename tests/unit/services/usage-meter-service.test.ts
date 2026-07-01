@@ -19,19 +19,19 @@ function fakeLogger(): Logger {
 }
 
 describe("UsageMeterService (P1-13)", () => {
-  it("record() delegates to repo.create with default tenant injected", async () => {
+  it("record() delegates to repo.create with input passed through", async () => {
     const create = vi.fn();
     const repo = { create } as unknown as UsageEventRepository;
     const svc = new UsageMeterService(repo, fakeLogger());
 
     await svc.record({
-      tenantId: "",
+      tenantId: "test-tenant",
       eventType: "skill.view",
       resourceId: "demo",
     });
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      tenantId: "default",
+      tenantId: "test-tenant",
       eventType: "skill.view",
       resourceId: "demo",
     }));

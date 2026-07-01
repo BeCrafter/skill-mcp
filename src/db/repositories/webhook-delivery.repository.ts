@@ -184,6 +184,7 @@ export class WebhookDeliveryRepository {
     return rows.map(r => this.toEntity(r));
   }
 
+
   /** Hard delete (admin / retention job). */
   delete(id: string): boolean {
     const result = this.db.delete(webhookDeliveries).where(eq(webhookDeliveries.id, id)).run();

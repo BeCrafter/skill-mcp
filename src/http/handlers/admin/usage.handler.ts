@@ -2,7 +2,6 @@ import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
 import { json } from "../../helpers.js";
 import { BadRequestError, ConfigurationError } from "../../../utils/errors.js";
-import { DEFAULT_TENANT_ID } from "../../../types/index.js";
 import type { AggregateRow } from "../../../db/repositories/usage-event.repository.js";
 
 // P1-13 — Admin usage metering endpoints (review §9.1).
@@ -39,8 +38,6 @@ function validateEventType(value: string | null): string | undefined {
 
 function rowsToCsv(rows: AggregateRow[]): string {
   const header = "tenant_id,event_type,hour_bucket,total_quantity,event_count\n";
-  // Tenant / event_type / hour_bucket are validated upstream — no commas /
-  // newlines / quotes possible — so a hand-rolled join is safe and fast.
   const body = rows
     .map(r => `${r.tenantId},${r.eventType},${r.hourBucket},${r.totalQuantity},${r.eventCount}`)
     .join("\n");
@@ -52,7 +49,7 @@ export function registerAdminUsageRoutes(router: Router, deps: AppDependencies):
   const { usageMeter } = deps;
 
   router.get("/api/admin/usage/aggregate", async (ctx) => {
-    const tenantId = ctx.query.get("tenantId") ?? DEFAULT_TENANT_ID;
+    const tenantId = ctx.query.get("tenantId") ?? "default";
     const fromBucket = validateBucket("fromBucket", ctx.query.get("fromBucket"));
     const toBucket = validateBucket("toBucket", ctx.query.get("toBucket"));
     const eventType = validateEventType(ctx.query.get("eventType"));
@@ -86,12 +83,11 @@ export function registerAdminUsageRoutes(router: Router, deps: AppDependencies):
       total: rows.length,
     });
   });
-
   router.get("/api/admin/usage/events", async (ctx) => {
     if (!deps.usageEventRepo) {
       throw new ConfigurationError("usageEventRepo not configured");
     }
-    const tenantId = ctx.query.get("tenantId") ?? DEFAULT_TENANT_ID;
+    const tenantId = ctx.query.get("tenantId") ?? "default";
     const fromBucket = validateBucket("fromBucket", ctx.query.get("fromBucket"));
     const toBucket = validateBucket("toBucket", ctx.query.get("toBucket"));
     const eventType = validateEventType(ctx.query.get("eventType"));

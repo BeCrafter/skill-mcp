@@ -31,7 +31,7 @@ export interface UsageEventEntity {
 }
 
 export interface UsageEventCreate {
-  tenantId: string;
+  tenantId?: string;
   userId?: string | null;
   eventType: string;
   resourceId?: string | null;
@@ -102,7 +102,7 @@ export class UsageEventRepository {
     const quantity = input.quantity ?? 1;
     this.db.insert(usageEvents).values({
       id,
-      tenantId: input.tenantId,
+      tenantId: input.tenantId ?? "default",
       userId: input.userId ?? null,
       eventType: input.eventType,
       resourceId: input.resourceId ?? null,
@@ -113,7 +113,7 @@ export class UsageEventRepository {
     }).run();
     return {
       id,
-      tenantId: input.tenantId,
+      tenantId: input.tenantId ?? "default",
       userId: input.userId ?? null,
       eventType: input.eventType,
       resourceId: input.resourceId ?? null,
@@ -134,7 +134,7 @@ export class UsageEventRepository {
       const createdAt = input.createdAt ?? Date.now();
       return {
         id: shortId(),
-        tenantId: input.tenantId,
+        tenantId: input.tenantId ?? "default",
         userId: input.userId ?? null,
         eventType: input.eventType,
         resourceId: input.resourceId ?? null,
@@ -154,11 +154,11 @@ export class UsageEventRepository {
    * `idx_usage_events_tenant_bucket`. Both are covering for this query.
    */
   aggregate(opts: AggregateOptions): AggregateRow[] {
-    const conditions = [eq(usageEvents.tenantId, opts.tenantId)];
+    const conditions: ReturnType<typeof eq>[] = [eq(usageEvents.tenantId, opts.tenantId)];
     if (opts.fromBucket) conditions.push(gte(usageEvents.hourBucket, opts.fromBucket));
     if (opts.toBucket) conditions.push(lte(usageEvents.hourBucket, opts.toBucket));
     if (opts.eventType) conditions.push(eq(usageEvents.eventType, opts.eventType));
-    const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+    const where = and(...conditions);
     const rows = this.db
       .select({
         tenantId: usageEvents.tenantId,
@@ -187,11 +187,11 @@ export class UsageEventRepository {
    * aggregate(). Returns 0 when nothing matches (never throws).
    */
   sumQuantity(opts: AggregateOptions): number {
-    const conditions = [eq(usageEvents.tenantId, opts.tenantId)];
+    const conditions: ReturnType<typeof eq>[] = [eq(usageEvents.tenantId, opts.tenantId)];
     if (opts.fromBucket) conditions.push(gte(usageEvents.hourBucket, opts.fromBucket));
     if (opts.toBucket) conditions.push(lte(usageEvents.hourBucket, opts.toBucket));
     if (opts.eventType) conditions.push(eq(usageEvents.eventType, opts.eventType));
-    const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+    const where = and(...conditions);
     const row = this.db
       .select({ total: sql<number>`COALESCE(SUM(${usageEvents.quantity}), 0)` })
       .from(usageEvents)
@@ -200,13 +200,12 @@ export class UsageEventRepository {
     return Number(row?.total ?? 0);
   }
 
-  /** List raw events (admin debugging / CSV export). */
   list(opts: ListOptions): UsageEventEntity[] {
-    const conditions = [eq(usageEvents.tenantId, opts.tenantId)];
+    const conditions: ReturnType<typeof eq>[] = [eq(usageEvents.tenantId, opts.tenantId)];
     if (opts.eventType) conditions.push(eq(usageEvents.eventType, opts.eventType));
     if (opts.fromBucket) conditions.push(gte(usageEvents.hourBucket, opts.fromBucket));
     if (opts.toBucket) conditions.push(lte(usageEvents.hourBucket, opts.toBucket));
-    const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+    const where = and(...conditions);
     const limit = Math.min(10000, Math.max(1, opts.limit ?? 1000));
     const rows = this.db
       .select()

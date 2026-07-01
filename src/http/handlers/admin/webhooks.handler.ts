@@ -4,7 +4,6 @@ import { json, readJsonBody } from "../../helpers.js";
 import { BadRequestError, AppError } from "../../../utils/errors.js";
 import type { WebhookEntity } from "../../../db/repositories/webhook.repository.js";
 import type { WebhookDeliveryEntity } from "../../../db/repositories/webhook-delivery.repository.js";
-import { DEFAULT_TENANT_ID } from "../../../types/index.js";
 import { requireSuperadmin } from "../../middleware/admin-auth.js";
 
 // P1-16 — Admin webhook CRUD + delivery audit + replay (review §5.5.1).
@@ -37,7 +36,6 @@ function requireWebhookId(value: string | undefined): string {
 function webhookToJson(w: WebhookEntity, includeSecret: boolean): Record<string, unknown> {
   return {
     id: w.id,
-    tenant_id: w.tenantId,
     url: w.url,
     event_types: w.eventTypes,
     enabled: w.enabled,
@@ -53,7 +51,6 @@ function deliveryToJson(d: WebhookDeliveryEntity): Record<string, unknown> {
   return {
     id: d.id,
     webhook_id: d.webhookId,
-    tenant_id: d.tenantId,
     event_type: d.eventType,
     delivery_id: d.deliveryId,
     payload: d.payload,
@@ -74,7 +71,6 @@ interface PostWebhookBody {
   url?: string;
   event_types?: unknown;
   description?: string | null;
-  tenant_id?: string;
 }
 
 interface PatchWebhookBody {
@@ -89,7 +85,7 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
   const { webhookService, webhookRepo, webhookDeliveryRepo } = deps;
 
   router.get("/api/admin/webhooks", async (ctx) => {
-    const tenantId = ctx.query.get("tenantId") ?? DEFAULT_TENANT_ID;
+    const tenantId = ctx.requestContext?.tenantId ?? "default";
     const rows = webhookRepo.listByTenant(tenantId);
     json(ctx.res, 200, {
       success: true,
@@ -100,9 +96,9 @@ export function registerAdminWebhookRoutes(router: Router, deps: AppDependencies
 
   router.post("/api/admin/webhooks", async (ctx) => {
     requireSuperadmin(ctx.requestContext!);
+    const tenantId = ctx.requestContext?.tenantId ?? "default";
     const data = await readJsonBody<PostWebhookBody>(ctx.req);
     if (typeof data.url !== "string") throw new BadRequestError("url is required");
-    const tenantId = data.tenant_id ?? DEFAULT_TENANT_ID;
     const w = await webhookService.create({
       tenantId,
       url: data.url,

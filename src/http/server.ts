@@ -14,7 +14,6 @@ import type { UserRepository } from "../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../db/repositories/user-role.repository.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { UsageMeterService } from "../services/usage-meter.service.js";
-import { DEFAULT_TENANT_ID } from "../types/index.js";
 import { checkLiveness, checkReadiness } from "./probes.js";
 
 export interface RequestHandlerDeps {
@@ -68,10 +67,8 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
     // the metering ledger. Skip /metrics to avoid feedback loops where a
     // Prometheus scrape registers as an api.call.
     if (deps.usageMeter && route !== UNMATCHED_ROUTE_LABEL && route !== "/metrics") {
-      const tenantId = ctx?.requestContext?.tenantId ?? DEFAULT_TENANT_ID;
       const userId = ctx?.requestContext?.userId;
       void deps.usageMeter.record({
-        tenantId,
         userId,
         eventType: "api.call",
         resourceId: route,

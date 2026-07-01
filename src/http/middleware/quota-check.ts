@@ -3,7 +3,6 @@ import type { HttpContext } from "../context.js";
 import { named } from "../compose.js";
 import { json } from "../helpers.js";
 import { metrics } from "../../telemetry/metrics.js";
-import { DEFAULT_TENANT_ID } from "../../types/index.js";
 import type { QuotaService, QuotaDimension } from "../../services/quota.service.js";
 
 // P1-13.5 — Quota check middleware (review §11 #13.5).
@@ -44,7 +43,7 @@ export interface QuotaCheckOptions {
 }
 
 const DEFAULT_TENANT_EXTRACTOR = (ctx: HttpContext): string =>
-  ctx.requestContext?.tenantId || DEFAULT_TENANT_ID;
+  ctx.requestContext?.tenantId ?? "default";
 
 const DEFAULT_SKIP = (ctx: HttpContext): boolean =>
   ctx.method === "GET" && (ctx.url === "/api/gateway/health" || ctx.url === "/health");

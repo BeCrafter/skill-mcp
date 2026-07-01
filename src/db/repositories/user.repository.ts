@@ -7,7 +7,6 @@ import { ConflictError } from "../../utils/errors.js";
 
 export interface UserEntity {
   id: string;
-  tenantId: string;
   name: string | null;
   username: string | null;
   passwordHash: string | null;
@@ -182,7 +181,6 @@ export class UserRepository {
   private toEntity(row: typeof users.$inferSelect): UserEntity {
     return {
       id: row.id,
-      tenantId: row.tenantId ?? "default",
       name: row.name,
       username: row.username ?? null,
       passwordHash: row.passwordHash ?? null,

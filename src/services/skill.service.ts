@@ -44,7 +44,7 @@ const ADMIN_PUT_ALLOWED = [
   "attributes", "status", "visibility", "entryFile", "tags",
 ] as const;
 import type { SkillMeta, SkillMetaPublic, SkillFileContent, FileInfo, RequestContext, VersionBump, SkillStatus, ImportOptions, ImportResult, AccessLogEntry, SkillRetrievalMeta } from "../types/index.js";
-import { DEFAULT_TENANT_ID, toSkillMetaPublic } from "../types/index.js";
+import { toSkillMetaPublic } from "../types/index.js";
 
 /**
  * Optional dependencies required by the admin convergence methods (P0-A).
@@ -89,7 +89,7 @@ export interface TransitionLifecycleOptions {
 const SKILL_LIST_TTL_SECONDS = 600;
 
 function anonymousContext(): RequestContext {
-  return { tenantId: DEFAULT_TENANT_ID, userId: "anonymous", sessionId: "anonymous", tags: new Set(), isAuthenticated: false, userType: undefined };
+  return { userId: "anonymous", sessionId: "anonymous", tags: new Set(), isAuthenticated: false, userType: undefined };
 }
 
 export interface VersionDiffFile {
@@ -460,7 +460,6 @@ export class SkillService {
     // errors so a metering DB hiccup never blocks or fails a view request.
     if (this.usageMeter) {
       void this.usageMeter.record({
-        tenantId: ctx.tenantId,
         userId: ctx.userId,
         eventType: "skill.view",
         resourceId: skill.slug,

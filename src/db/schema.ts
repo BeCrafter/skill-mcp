@@ -1,23 +1,7 @@
 import { sqliteTable, text, integer, blob, index, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-// P0-3 — multi-tenant skeleton (review §2.1). Tenants are a thin organizational
-// boundary above users/roles/skills. Single-tenant deployments leave the
-// `default` row in place and never read this table directly; everything keys
-// off `tenant_id = 'default'` so the existing CLI / MCP / HTTP surface
-// continues to work unchanged. Future multi-tenant work (per-tenant token
-// scopes, billing, quota) hangs additional columns here.
-export const tenants = sqliteTable("tenants", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description"),
-  status: text("status").notNull().default("active"),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-});
-
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
   displayName: text("display_name"),
@@ -43,7 +27,6 @@ export const skills = sqliteTable("skills", {
   index("idx_skills_name").on(table.name),
   index("idx_skills_status").on(table.status),
   index("idx_skills_visibility").on(table.visibility),
-  index("idx_skills_tenant_id").on(table.tenantId),
   uniqueIndex("unique_name_content_hash").on(table.name, table.contentHash),
 ]);
 
@@ -57,7 +40,6 @@ export const skillTags = sqliteTable("skill_tags", {
 
 export const skillFiles = sqliteTable("skill_files", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   filePath: text("file_path").notNull(),
   fileType: text("file_type").notNull(),
@@ -71,7 +53,6 @@ export const skillFiles = sqliteTable("skill_files", {
 
 export const accessLogs = sqliteTable("access_logs", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   skillSlug: text("skill_slug").notNull(),
   action: text("action").notNull(),
@@ -82,12 +63,10 @@ export const accessLogs = sqliteTable("access_logs", {
   createdAt: integer("created_at").notNull(),
 }, (table) => [
   index("idx_access_logs_created_at").on(table.createdAt),
-  index("idx_access_logs_tenant_id").on(table.tenantId),
 ]);
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   name: text("name"),
   username: text("username"),
   passwordHash: text("password_hash"),
@@ -115,25 +94,20 @@ export const users = sqliteTable("users", {
 }, (table) => [
   index("idx_users_token").on(table.token),
   index("idx_users_previous_token").on(table.previousToken),
-  index("idx_users_tenant_id").on(table.tenantId),
   uniqueIndex("idx_users_username").on(table.username),
 ]);
 
 export const roles = sqliteTable("roles", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   name: text("name").notNull().unique(),
   description: text("description"),
   tags: text("tags").notNull(),
   createdAt: integer("created_at"),
   updatedAt: integer("updated_at"),
-}, (table) => [
-  index("idx_roles_tenant_id").on(table.tenantId),
-]);
+});
 
 export const userRoles = sqliteTable("user_roles", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
   createdAt: integer("created_at"),
@@ -146,7 +120,6 @@ export const userRoles = sqliteTable("user_roles", {
 
 export const skillFeedbacks = sqliteTable("skill_feedbacks", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   skillSlug: text("skill_slug").notNull(),
   userId: text("user_id"),
@@ -164,7 +137,6 @@ export const skillFeedbacks = sqliteTable("skill_feedbacks", {
 
 export const skillVersions = sqliteTable("skill_versions", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   version: text("version").notNull(),
   contentHash: text("content_hash").notNull(),
@@ -193,7 +165,6 @@ export const skillVersions = sqliteTable("skill_versions", {
 // them back up. Failed rows are kept for audit (`error` carries the message).
 export const importJobs = sqliteTable("import_jobs", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   status: text("status", { enum: ["queued", "running", "succeeded", "failed"] }).notNull().default("queued"),
   source: text("source").notNull(),
   optionsJson: text("options_json").notNull().default("{}"),
@@ -225,14 +196,12 @@ export const importJobs = sqliteTable("import_jobs", {
 // worst, which the old design already accepted.
 export const cacheGlobalEpoch = sqliteTable("cache_global_epoch", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   epoch: integer("epoch").notNull().default(0),
   updatedAt: integer("updated_at").notNull(),
 });
 
 export const cacheUserEpochs = sqliteTable("cache_user_epochs", {
   userId: text("user_id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   epoch: integer("epoch").notNull().default(0),
   updatedAt: integer("updated_at").notNull(),
 });
@@ -270,7 +239,6 @@ export const usageEvents = sqliteTable("usage_events", {
 // hydrate time from these snapshots.
 export const pipelineRuns = sqliteTable("pipeline_runs", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   name: text("name").notNull(),
   status: text("status", { enum: ["running", "completed", "failed"] }).notNull(),
   definitionJson: text("definition_json").notNull(),
@@ -396,7 +364,6 @@ export const webhookDeliveries = sqliteTable("webhook_deliveries", {
 //      with `WHERE skill_id = ?` without parsing JSON envelopes per request.
 export const skillEvalCases = sqliteTable("skill_eval_cases", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   caseName: text("case_name").notNull(),
   input: text("input").notNull(),
@@ -424,7 +391,6 @@ export const skillEvalCases = sqliteTable("skill_eval_cases", {
 // reparsing output.
 export const skillEvalRuns = sqliteTable("skill_eval_runs", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   skillVersion: text("skill_version").notNull(),
   caseName: text("case_name").notNull(),

@@ -33,7 +33,6 @@ let contextManager: AsyncLocalStorageContextManager;
 
 function authCtx(): RequestContext {
   return {
-    tenantId: "tenant-1",
     userId: "user-1",
     sessionId: "sess-1",
     tags: new Set(["alpha"]),
@@ -95,12 +94,11 @@ function span(name: string) {
 }
 
 describe("SkillService spans (§17.6)", () => {
-  it("emits skill.service.listSkillsIndex with tenant/user attrs", async () => {
+  it("emits skill.service.listSkillsIndex with user attrs", async () => {
     const svc = new SkillService(mockProvider(), mockCache(), mockLogger());
     await svc.listSkillsIndex(authCtx());
     const s = span("skill.service.listSkillsIndex");
     expect(s).toBeDefined();
-    expect(s!.attributes["skill_mcp.tenant_id"]).toBe("tenant-1");
     expect(s!.attributes["skill_mcp.user_id"]).toBe("user-1");
   });
 
@@ -132,7 +130,6 @@ describe("TagPermissionFilter span (§17.6)", () => {
     expect(s).toBeDefined();
     expect(s!.attributes["perm.input_count"]).toBe(2);
     expect(s!.attributes["perm.is_admin"]).toBe(false);
-    expect(s!.attributes["skill_mcp.tenant_id"]).toBe("tenant-1");
   });
 });
 

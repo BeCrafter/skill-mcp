@@ -19,7 +19,6 @@ import {
   withSpan,
   withSpanSync,
   activeTraceId,
-  ATTR_TENANT_ID,
   ATTR_USER_ID,
   ATTR_SESSION_ID,
 } from "../../../src/telemetry/spans.js";
@@ -29,9 +28,8 @@ let exporter: InMemorySpanExporter;
 let provider: BasicTracerProvider;
 let contextManager: AsyncLocalStorageContextManager;
 
-function fakeCtx(overrides: Partial<{ tenantId: string; userId: string; sessionId: string }> = {}) {
+function fakeCtx(overrides: Partial<{ userId: string; sessionId: string }> = {}) {
   return {
-    tenantId: overrides.tenantId ?? "tenant-x",
     userId: overrides.userId ?? "user-y",
     sessionId: overrides.sessionId,
   };
@@ -63,10 +61,9 @@ describe("withSpan / withSpanSync", () => {
     expect(spans[0].name).toBe("test.span");
   });
 
-  it("attaches tenant_id / user_id / session_id from RequestContext", async () => {
+  it("attaches user_id / session_id from RequestContext", async () => {
     await withSpan("test.span", { ctx: fakeCtx({ sessionId: "sess-1" }) }, async () => undefined);
     const span = exporter.getFinishedSpans()[0];
-    expect(span.attributes[ATTR_TENANT_ID]).toBe("tenant-x");
     expect(span.attributes[ATTR_USER_ID]).toBe("user-y");
     expect(span.attributes[ATTR_SESSION_ID]).toBe("sess-1");
   });
@@ -81,7 +78,6 @@ describe("withSpan / withSpanSync", () => {
     await withSpan("test.span", { ctx: fakeCtx(), attributes: { "skill.id": "abc" } }, async () => undefined);
     const span = exporter.getFinishedSpans()[0];
     expect(span.attributes["skill.id"]).toBe("abc");
-    expect(span.attributes[ATTR_TENANT_ID]).toBe("tenant-x");
   });
 
   it("records exceptions and sets status=ERROR on throw", async () => {
@@ -108,7 +104,6 @@ describe("withSpan / withSpanSync", () => {
     expect(result).toBe("ok");
     const span = exporter.getFinishedSpans()[0];
     expect(span.name).toBe("sync.span");
-    expect(span.attributes[ATTR_TENANT_ID]).toBe("tenant-x");
   });
 
   it("withSpanSync records exceptions and rethrows", () => {

@@ -310,7 +310,7 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
     const config = getConfig();
     const allowPlaintext = config.app.env !== "production";
     const webhookService = new WebhookService(webhookRepo, webhookDeliveryRepo, getLogger(), { allowPlaintext });
-    webhookService.publishEvent("user.token_rotated", rotated.tenantId, {
+    webhookService.publishEvent("user.token_rotated", "default", {
       user_id: rotated.id,
       rotated_at: Date.now(),
       previous_token_expires_at: rotated.previousTokenExpiresAt ?? null,

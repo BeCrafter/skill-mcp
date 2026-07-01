@@ -100,8 +100,15 @@ export class WebhookRepository {
     return row ? this.toEntity(row) : null;
   }
 
+  listAll(): WebhookEntity[] {
+    const rows = this.db.select().from(webhooks).all();
+    return rows.map(r => this.toEntity(r));
+  }
+
   listByTenant(tenantId: string): WebhookEntity[] {
-    const rows = this.db.select().from(webhooks).where(eq(webhooks.tenantId, tenantId)).all();
+    const rows = this.db.select().from(webhooks)
+      .where(eq(webhooks.tenantId, tenantId))
+      .all();
     return rows.map(r => this.toEntity(r));
   }
 
@@ -112,7 +119,7 @@ export class WebhookRepository {
    */
   listEnabledForEvent(tenantId: string, eventType: WebhookEventType): WebhookEntity[] {
     const rows = this.db.select().from(webhooks)
-      .where(and(eq(webhooks.tenantId, tenantId), eq(webhooks.enabled, 1)))
+      .where(and(eq(webhooks.enabled, 1), eq(webhooks.tenantId, tenantId)))
       .all();
     return rows
       .map(r => this.toEntity(r))
@@ -153,7 +160,6 @@ export class WebhookRepository {
     const result = this.db.delete(webhooks).where(eq(webhooks.id, id)).run();
     return (result.changes ?? 0) > 0;
   }
-
   private toEntity(row: typeof webhooks.$inferSelect): WebhookEntity {
     let eventTypes: WebhookEventType[] = [];
     try {

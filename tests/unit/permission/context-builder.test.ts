@@ -185,7 +185,7 @@ describe("buildRequestContext / buildRequestContextFromHttp", () => {
   it("returns anonymous context with provided sessionId when token is missing", async () => {
     const { userRepo, userRoleRepo } = makeRepos({ user: null });
     const ctx = await buildRequestContext({ sessionId: "sess-1" }, userRepo, userRoleRepo);
-    expect(ctx).toEqual({ tenantId: "default", userId: "anonymous", sessionId: "sess-1", tags: new Set(), isAuthenticated: false });
+    expect(ctx).toEqual({ userId: "anonymous", sessionId: "sess-1", tags: new Set(), isAuthenticated: false, userType: undefined });
     expect((userRepo.findByToken as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
   });
 
@@ -246,39 +246,6 @@ describe("buildRequestContext / buildRequestContextFromHttp", () => {
     expect(ctx.isAuthenticated).toBe(false);
   });
 
-  it("anonymous fallback always carries tenantId='default' (P0-3)", async () => {
-    const { userRepo, userRoleRepo } = makeRepos({ user: null });
-    const ctx = await buildRequestContext({ sessionId: "s" }, userRepo, userRoleRepo);
-    expect(ctx.tenantId).toBe("default");
-  });
-
-  it("authenticated context carries tenantId from the user row (P0-3)", async () => {
-    const { userRepo, userRoleRepo } = makeRepos({
-      user: { id: "u-acme", status: "active", tenantId: "acme" } as never,
-      tags: [],
-    });
-    const ctx = await buildRequestContext(
-      { sessionId: "s", authInfo: { token: "tok" } },
-      userRepo,
-      userRoleRepo,
-    );
-    expect(ctx.tenantId).toBe("acme");
-    expect(ctx.userId).toBe("u-acme");
-    expect(ctx.isAuthenticated).toBe(true);
-  });
-
-  it("authenticated context falls back to 'default' when the user row lacks tenantId (P0-3 backfill)", async () => {
-    const { userRepo, userRoleRepo } = makeRepos({
-      user: { id: "u-legacy", status: "active" },
-      tags: [],
-    });
-    const ctx = await buildRequestContext(
-      { sessionId: "s", authInfo: { token: "tok" } },
-      userRepo,
-      userRoleRepo,
-    );
-    expect(ctx.tenantId).toBe("default");
-  });
 });
 
 describe("createContextBuilder", () => {

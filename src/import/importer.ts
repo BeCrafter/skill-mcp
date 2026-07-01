@@ -32,7 +32,6 @@ function isUniqueConstraintError(err: unknown): boolean {
 }
 import type { DomainEventBus } from "../events/event-bus.js";
 import type { UsageMeterService } from "../services/usage-meter.service.js";
-import { DEFAULT_TENANT_ID } from "../types/index.js";
 import { LocalSourceResolver } from "./local-source.js";
 import { GitSourceResolver } from "./git-source.js";
 import { validateSkillPackage } from "./validator.js";
@@ -502,7 +501,6 @@ export class SkillImporter {
     if (this.usageMeter) {
       const bytes = skillFiles.reduce((acc, f) => acc + f.buffer.byteLength, 0);
       void this.usageMeter.record({
-        tenantId: DEFAULT_TENANT_ID,
         eventType: "storage.write",
         resourceId: slug,
         quantity: bytes,

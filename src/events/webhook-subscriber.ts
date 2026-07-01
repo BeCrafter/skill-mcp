@@ -1,12 +1,11 @@
 import type { DomainEventBus } from "./event-bus.js";
 import type { WebhookService } from "../services/webhook.service.js";
-import { DEFAULT_TENANT_ID } from "../types/index.js";
 
 // P1-16 — bridge DomainEventBus → WebhookService.publishEvent. Keeps the
 // producer call sites unaware of webhooks; new event types are added here.
 export function setupWebhookSubscribers(bus: DomainEventBus, webhookService: WebhookService): void {
   bus.on("skill:imported", (event) => {
-    webhookService.publishEvent("skill.published", event.tenantId ?? DEFAULT_TENANT_ID, {
+    webhookService.publishEvent("skill.published", "default", {
       slug: event.slug,
       name: event.name,
       version: event.version,
@@ -17,7 +16,7 @@ export function setupWebhookSubscribers(bus: DomainEventBus, webhookService: Web
   });
 
   bus.on("skill:deprecated", (event) => {
-    webhookService.publishEvent("skill.deprecated", event.tenantId ?? DEFAULT_TENANT_ID, {
+    webhookService.publishEvent("skill.deprecated", "default", {
       slug: event.slug,
       version: event.version,
       visibility: event.visibility,
@@ -26,7 +25,7 @@ export function setupWebhookSubscribers(bus: DomainEventBus, webhookService: Web
   });
 
   bus.on("pipeline:completed", (event) => {
-    webhookService.publishEvent("pipeline.completed", event.tenantId ?? DEFAULT_TENANT_ID, {
+    webhookService.publishEvent("pipeline.completed", "default", {
       run_id: event.runId,
       pipeline_name: event.pipelineName,
       status: event.status,
@@ -35,7 +34,7 @@ export function setupWebhookSubscribers(bus: DomainEventBus, webhookService: Web
   });
 
   bus.on("user:token_rotated", (event) => {
-    webhookService.publishEvent("user.token_rotated", event.tenantId, {
+    webhookService.publishEvent("user.token_rotated", "default", {
       user_id: event.userId,
       rotated_at: event.rotatedAt,
       previous_token_expires_at: event.previousTokenExpiresAt ?? null,
@@ -43,14 +42,14 @@ export function setupWebhookSubscribers(bus: DomainEventBus, webhookService: Web
   });
 
   bus.on("user:logged_in", (event) => {
-    webhookService.publishEvent("user.logged_in", DEFAULT_TENANT_ID, {
+    webhookService.publishEvent("user.logged_in", "default", {
       user_id: event.userId,
       username: event.username,
     });
   });
 
   bus.on("user:password_changed", (event) => {
-    webhookService.publishEvent("user.password_changed", DEFAULT_TENANT_ID, {
+    webhookService.publishEvent("user.password_changed", "default", {
       user_id: event.userId,
     });
   });

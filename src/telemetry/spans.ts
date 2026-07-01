@@ -22,20 +22,19 @@
  *   pipeline.stage.persist
  *   pipeline.persist   — final pipeline persist
  *
- * Every span carries `tenant_id` / `user_id` when a RequestContext is
- * available so multi-tenant + per-user filtering works in the trace UI.
+ * Every span carries `user_id` / `session_id` when a RequestContext is
+ * available so per-user filtering works in the trace UI.
  */
 import { SpanStatusCode, trace, type Attributes, type Tracer } from "@opentelemetry/api";
 import type { RequestContext } from "../types/index.js";
 import { getTracer } from "./tracing.js";
 
-export const ATTR_TENANT_ID = "skill_mcp.tenant_id";
 export const ATTR_USER_ID = "skill_mcp.user_id";
 export const ATTR_SESSION_ID = "skill_mcp.session_id";
 
 export interface SpanOpts {
   attributes?: Attributes;
-  ctx?: Pick<RequestContext, "tenantId" | "userId" | "sessionId"> | null;
+  ctx?: Pick<RequestContext, "userId" | "sessionId"> | null;
   tracer?: Tracer;
 }
 
@@ -43,7 +42,6 @@ function attachContextAttrs(attrs: Attributes, ctx: SpanOpts["ctx"]): Attributes
   if (!ctx) return attrs;
   return {
     ...attrs,
-    [ATTR_TENANT_ID]: ctx.tenantId,
     [ATTR_USER_ID]: ctx.userId,
     ...(ctx.sessionId ? { [ATTR_SESSION_ID]: ctx.sessionId } : {}),
   };

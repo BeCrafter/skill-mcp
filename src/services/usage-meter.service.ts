@@ -8,7 +8,6 @@ import type {
   UsageEventEntity,
 } from "../db/repositories/usage-event.repository.js";
 import { metrics } from "../telemetry/metrics.js";
-import { DEFAULT_TENANT_ID } from "../types/index.js";
 
 // P1-13 — Usage metering service (review §9.1).
 //
@@ -54,14 +53,13 @@ export class UsageMeterService {
   }
 
   private _recordImpl(input: UsageEventCreate): void {
-    const tenantId = input.tenantId || DEFAULT_TENANT_ID;
     try {
-      this.repo.create({ ...input, tenantId });
+      this.repo.create(input);
       metrics.usageEventsRecorded.inc({ event_type: input.eventType, status: "ok" });
     } catch (err) {
       metrics.usageEventsRecorded.inc({ event_type: input.eventType, status: "error" });
       this.logger.warn(
-        { err, tenantId, eventType: input.eventType, resourceId: input.resourceId },
+        { err, eventType: input.eventType, resourceId: input.resourceId },
         "Failed to record usage event (fire-and-forget; request continues)",
       );
     }

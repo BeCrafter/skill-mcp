@@ -216,17 +216,10 @@ export type DeploymentMode = "standalone" | "gateway" | "cloud";
 /** Storage type */
 export type StorageType = "local-fs" | "aliyun-oss";
 
-/** Default tenant id used by single-tenant deployments and as the
- *  backfill for legacy data without an explicit tenant. The value also
- *  matches `DEFAULT 'default'` on every `tenant_id` column. */
-export const DEFAULT_TENANT_ID = "default";
 
 /** Request context for permission and session tracking */
 export interface RequestContext {
-  /** P0-3 — tenant boundary. Defaults to {@link DEFAULT_TENANT_ID} for
-   *  single-tenant / anonymous callers; the user table will eventually
-   *  carry a `tenant_id` column that the context builder reads. */
-  tenantId: string;
+  tenantId?: string;
   userId: string;
   sessionId: string;
   tags: Set<string>;

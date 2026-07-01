@@ -163,8 +163,8 @@ export class WebhookService {
     return this.webhookRepo.findById(id);
   }
 
-  listByTenant(tenantId: string): WebhookEntity[] {
-    return this.webhookRepo.listByTenant(tenantId);
+  listAll(): WebhookEntity[] {
+    return this.webhookRepo.listAll();
   }
 
   // --- Event fan-out ------------------------------------------------------
@@ -192,14 +192,14 @@ export class WebhookService {
         const payload = {
           id: eventId,
           type: eventType,
-          created_at: createdAt,
           tenant_id: tenantId,
+          created_at: createdAt,
           data,
         };
         try {
           const delivery = await this.deliveryRepo.enqueue({
             webhookId: sub.id,
-            tenantId,
+            tenantId: sub.tenantId,
             eventType,
             payload: JSON.stringify(payload),
           });
@@ -210,7 +210,7 @@ export class WebhookService {
       }
       return enqueued;
     } catch (err) {
-      this.logger.warn({ err, eventType, tenantId }, "publishEvent failed");
+      this.logger.warn({ err, eventType }, "publishEvent failed");
       return [];
     }
   }

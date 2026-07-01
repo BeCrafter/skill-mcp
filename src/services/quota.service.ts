@@ -7,7 +7,6 @@ import type {
 } from "../db/repositories/tenant-quota.repository.js";
 import type { UsageMeterService } from "./usage-meter.service.js";
 import { hourBucketOf } from "../db/repositories/usage-event.repository.js";
-import { DEFAULT_TENANT_ID } from "../types/index.js";
 
 // P1-13.5 — Quota service (review §9.1, §11 #13.5).
 //
@@ -135,7 +134,7 @@ export class QuotaService {
    * `ok: false`.
    */
   async check(opts: CheckOptions): Promise<CheckResult> {
-    const tenantId = opts.tenantId || DEFAULT_TENANT_ID;
+    const tenantId = opts.tenantId || "default";
     const dimension = opts.dimension;
     const increment = opts.increment ?? 1;
     const now = opts.now ?? Date.now();
