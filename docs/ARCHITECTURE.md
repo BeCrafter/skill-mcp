@@ -361,8 +361,6 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 | `cache_user_epochs` | `userId` PK / `epoch` / `updatedAt` | — | — |
 | `usage_events` | `id` / `tenantId` / `userId` / `eventType` / `resourceId` / `quantity` / `metadata` JSON / `hourBucket` / `createdAt` | `idx_usage_events_{tenant_bucket,tenant_event,created_at}` | — |
 | `pipeline_runs` | `id` / `name` / `status` / `definitionJson` / `inputsJson` / `batchesJson` / `completedStagesJson` / `currentBatchIndex` / `startedAt` / `finishedAt` | `idx_pipeline_runs_{status,started_at}` | — |
-| `tenant_quotas` | `id` / `tenantId` / `tier` / `maxUsers` / `maxSkills` / `maxStorageBytes` / `maxApiCallsPerDay` / `maxPipelineRunsPerDay` / `effectiveFrom` / `effectiveUntil` / `notes` | `idx_tenant_quotas_tenant` | — |
-| `tenant_quota_overrides` | `id` / `tenantId` / `fieldName` / `overrideValue` / `reason` / `grantedBy` / `grantedAt` / `expiresAt` | `idx_tenant_quota_overrides_lookup` | — |
 | `webhooks` | `id` / `tenantId` / `url` / `secret` / `eventTypes` JSON / `enabled` / `description` / `secretRotatedAt` | `idx_webhooks_{tenant,enabled}` | — |
 | `webhook_deliveries` | `id` / `webhookId` / `tenantId` / `eventType` / `deliveryId` / `payload` / `attempt` / `status` / `responseStatus` / `responseBody` / `errorMessage` / `nextRetryAt` / `firstAttemptedAt` / `lastAttemptedAt` / `completedAt` | `idx_webhook_deliveries_{delivery_id,due,tenant,webhook}` | — |
 | `skill_eval_cases` | `id` / `skillId` / `caseName` / `input` / `expectationsJson` / `createdAt` / `updatedAt` | `uk_skill_eval_cases_skill_case` / `idx_skill_eval_cases_skill_id` | → `skills` CASCADE |

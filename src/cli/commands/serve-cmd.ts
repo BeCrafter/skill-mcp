@@ -100,9 +100,7 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   const usageEventRepo = new UsageEventRepository(db);
   const usageMeter = new UsageMeterService(usageEventRepo, logger);
   // P1-13.5 — tier limits + per-field overrides (review §11 #13.5). The
-  // QuotaService reads usage_events for daily counters, so we wire it after
-  // usageMeter. Single-tenant deployments auto-seed a free-tier row on
-  // first read; multi-tenant deployments will manage tiers via Admin REST.
+  // QuotaService reads usage_events for daily counters
   const tenantQuotaRepo = new TenantQuotaRepository(db);
   const quotaService = new QuotaService(tenantQuotaRepo, usageMeter, logger);
 

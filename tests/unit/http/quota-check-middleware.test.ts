@@ -28,15 +28,13 @@ function makeRes() {
   return res as never;
 }
 
-function makeCtx(method: string, url: string, tenantId?: string): HttpContext {
+function makeCtx(method: string, url: string): HttpContext {
   const req = { headers: {} } as never;
   return {
     req, res: makeRes(),
     url, method, params: {}, query: new URLSearchParams(),
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
-    requestContext: tenantId ? {
-      tenantId, userId: "u1", roles: [], tags: [], isAdmin: false,
-    } as never : undefined,
+    requestContext: { userId: "u1", tags: new Set(), isAuthenticated: true } as never,
   };
 }
 
@@ -64,17 +62,7 @@ describe("createQuotaCheck (P1-13.5)", () => {
       expect(map["X-Quota-Source"]).toBe("tier");
     });
 
-    it("uses requestContext.tenantId when present", async () => {
-      const { quotaService, check } = makeQuotaService({
-        ok: true, used: 0, limit: 100, remaining: 100, source: "tier",
-      });
-      const mw = createQuotaCheck({ quotaService, dimension: "api_calls", scope: "gateway" });
-      const ctx = makeCtx("GET", "/api/gateway/skills", "tenant-x");
-      await mw(ctx, vi.fn());
-      expect(check).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "tenant-x" }));
-    });
-
-    it("falls back to DEFAULT_TENANT_ID when requestContext is missing", async () => {
+    it("always uses default tenantId", async () => {
       const { quotaService, check } = makeQuotaService({
         ok: true, used: 0, limit: 100, remaining: 100, source: "tier",
       });

@@ -77,7 +77,7 @@ export function hourBucketOf(ts: number): string {
   return `${yyyy}-${mm}-${dd}T${hh}`;
 }
 
-const DEFAULT_TENANT = "default";
+const GLOBAL = "default";
 
 export class UsageEventRepository {
   constructor(private db: DrizzleDB) {}
@@ -88,7 +88,7 @@ export class UsageEventRepository {
       return !!row;
     });
     const createdAt = input.createdAt ?? Date.now();
-    const tenantId = input.tenantId ?? DEFAULT_TENANT;
+    const tenantId = input.tenantId ?? GLOBAL;
     const row = {
       id, tenantId, userId: input.userId ?? null, eventType: input.eventType,
       resourceId: input.resourceId ?? null, quantity: input.quantity ?? 1,
@@ -105,7 +105,7 @@ export class UsageEventRepository {
     const rows = inputs.map(input => {
       const createdAt = input.createdAt ?? now;
       return {
-        id: shortId(), tenantId: input.tenantId ?? DEFAULT_TENANT,
+        id: shortId(), tenantId: input.tenantId ?? GLOBAL,
         userId: input.userId ?? null, eventType: input.eventType,
         resourceId: input.resourceId ?? null, quantity: input.quantity ?? 1,
         metadata: input.metadata ? JSON.stringify(input.metadata) : null,

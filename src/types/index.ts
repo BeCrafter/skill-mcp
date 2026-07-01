@@ -219,13 +219,14 @@ export type StorageType = "local-fs" | "aliyun-oss";
 
 /** Request context for permission and session tracking */
 export interface RequestContext {
-  tenantId?: string;
   userId: string;
   sessionId: string;
   tags: Set<string>;
   isAuthenticated: boolean;
   /** User type for permission checks (admin route access, superadmin guards). */
   userType?: "superadmin" | "admin" | "user";
+  /** Tenant identifier for quota/webhook isolation. Defaults to "default". */
+  tenantId?: string;
 }
 
 /** Skill feedback entry */

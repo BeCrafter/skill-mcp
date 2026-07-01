@@ -12,7 +12,7 @@ import type { QuotaService, QuotaDimension } from "../../services/quota.service.
 // distinction in the response body so clients can branch — automation
 // retries 429 with backoff, alerts on 403.
 //
-// Performance: the QuotaService caches resolved limits per-tenant for 5s,
+// Performance: the QuotaService caches resolved limits per-user for 5s,
 // so the hot-path overhead per request is one `usage_events` index probe
 // (a `SUM(quantity)` over the day window). With WAL mode that's well
 // under a millisecond at free/team tier volumes; for enterprise we can
@@ -23,10 +23,9 @@ export interface QuotaCheckOptions {
   /** Dimension to check. Most callers pass `"api_calls"` (per request). */
   dimension: QuotaDimension;
   /**
-   * Resolve `tenantId` per request. Defaults to `ctx.requestContext.tenantId`
    * with a `default` fallback so anonymous traffic shares one bucket.
    */
-  tenantExtractor?: (ctx: HttpContext) => string;
+  identityExtractor?: (ctx: HttpContext) => string;
   /**
    * How many units this dimension consumes per request. Default 1. For
    * dimensions where the unit varies per request (e.g. `storage_bytes`),
@@ -42,8 +41,6 @@ export interface QuotaCheckOptions {
   scope: "admin" | "gateway";
 }
 
-const DEFAULT_TENANT_EXTRACTOR = (ctx: HttpContext): string =>
-  ctx.requestContext?.tenantId ?? "default";
 
 const DEFAULT_SKIP = (ctx: HttpContext): boolean =>
   ctx.method === "GET" && (ctx.url === "/api/gateway/health" || ctx.url === "/health");
@@ -52,7 +49,6 @@ export function createQuotaCheck(options: QuotaCheckOptions): Middleware {
   const {
     quotaService,
     dimension,
-    tenantExtractor = DEFAULT_TENANT_EXTRACTOR,
     increment = 1,
     skip = DEFAULT_SKIP,
     scope,
@@ -63,9 +59,8 @@ export function createQuotaCheck(options: QuotaCheckOptions): Middleware {
       await next();
       return;
     }
-    const tenantId = tenantExtractor(ctx);
     const inc = typeof increment === "function" ? increment(ctx) : increment;
-    const result = await quotaService.check({ tenantId, dimension, increment: inc });
+    const result = await quotaService.check({ tenantId: ctx.requestContext?.tenantId ?? "default", dimension, increment: inc });
 
     // Always surface limit + remaining as headers so clients can self-meter
     // even on success. Match `X-RateLimit-*` shape so consumers don't need

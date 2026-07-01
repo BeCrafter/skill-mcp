@@ -254,7 +254,6 @@ export const pipelineRuns = sqliteTable("pipeline_runs", {
 ]);
 
 // P1-13.5 — Tier limits table (review §9.1). Stores the *current* tier window
-// for a tenant; one row per tenant. `effective_until` is non-null only on
 // rows preserved as historical record after a tier change (the previous row
 // gets stamped with `now`, then a new row is inserted). Only one row per
 // tenant should have `effective_until IS NULL` at any time — application

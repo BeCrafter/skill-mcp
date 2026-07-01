@@ -32,7 +32,7 @@ export class FileCacheProvider implements ICacheProvider {
   private keyIndex = new Map<string, string>();
   private indexReady: Promise<void> | null = null;
   // T-403 — periodic GC. lazy-on-get already evicts entries that the caller
-  // happens to read after expiry, but cold keys (e.g. a tenant who stops
+  // happens to read after expiry, but cold keys (e.g. an org who stops
   // calling) would otherwise sit on disk forever. The timer wakes up on a
   // fixed interval, walks the in-memory index, and unlinks any meta whose
   // `expires` is in the past. unref()'d so it never blocks process exit.

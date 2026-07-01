@@ -215,7 +215,7 @@ export const metrics = {
   // the tenant hit a per-tier limit (daily counter or storage cap).
   quotaCheckDenied: new Counter({
     name: "skill_mcp_quota_check_denied_total",
-    help: "Total HTTP requests rejected by the per-tenant quota check",
+    help: "Total HTTP requests rejected by the per-user quota check",
     labelNames: ["scope", "dimension"], // scope=admin|gateway, dimension=api_calls|...
     registers: [registry],
   }),

@@ -133,7 +133,7 @@ export async function createSseMcpHandler(
 
       // T-701 — drop the "single-session fallback". Previously, when exactly
       // one SSE connection was active, an authenticated POST without a
-      // sessionId would be auto-routed to that session. In a multi-tenant
+      // sessionId would be auto-routed to that session.
       // gateway this lets caller B's POST land in caller A's MCP session.
       // Require an explicit sessionId; missing or unknown → 400.
       json(res, 400, { error: "No active SSE session" });
