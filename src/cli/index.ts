@@ -71,16 +71,16 @@ export async function createCli(): Promise<Command> {
         if (isRoot) {
           // ── Root: grouped category layout ──
           const CATEGORIES: Array<{ label: string; icon: string; names: string[] }> = [
-            { label: "Skills",    icon: "◆", names: ["serve", "import", "list", "info", "search", "remove", "update", "versions", "rollback"] },
-            { label: "Sync",      icon: "◆", names: ["sync"] },
-            { label: "Quality",   icon: "◆", names: ["lint", "eval"] },
-            { label: "Pipeline",  icon: "◆", names: ["pipeline"] },
-            { label: "System",    icon: "◆", names: ["init", "migrate:check", "manifest:migrate", "upgrade"] },
-            { label: "Admin",     icon: "◆", names: ["auth", "user", "role"] },
+            { label: "Skills",       icon: "◆", names: ["list", "search", "info", "import", "update", "versions", "rollback", "remove", "lint", "sync"] },
+            { label: "Admin",        icon: "◆", names: ["auth", "user", "role"] },
+            { label: "Tools",        icon: "◆", names: ["migrate:check", "manifest:migrate"] },
           ];
 
           const allCmds = subs;
           const used = new Set<string>();
+
+          // Hidden experimental commands
+          for (const name of ["eval", "pipeline"]) used.add(name);
 
           // Options
           if (opts.length > 0) {
@@ -89,11 +89,29 @@ export async function createCli(): Promise<Command> {
             lines.push("");
           }
 
+          // Flat commands (no group heading)
+          const flatNames = ["init", "serve", "upgrade"];
+          const flatCmds = allCmds
+            .filter(s => flatNames.includes(s.name()))
+            .sort((a, b) => flatNames.indexOf(a.name()) - flatNames.indexOf(b.name()));
+          if (flatCmds.length > 0) {
+            for (const sub of flatCmds) {
+              used.add(sub.name());
+              const styled = styleUsage(sub.name());
+              const args = sub.usage().replace(/\[options\]\s*/g, "").trim();
+              const fullUsage = args ? `${styled} ${args}` : styled;
+              lines.push(`  ${c.boldGreen(fullUsage)}${" ".repeat(Math.max(1, 24 - fullUsage.length))}${c.dim(sub.description())}`);
+            }
+            lines.push("");
+          }
+
           // Categories
           for (const cat of CATEGORIES) {
-            const cmds = allCmds.filter(s => cat.names.includes(s.name()));
+            const cmds = allCmds
+              .filter(s => cat.names.includes(s.name()))
+              .sort((a, b) => cat.names.indexOf(a.name()) - cat.names.indexOf(b.name()));
             if (cmds.length === 0) continue;
-            lines.push(`  ${c.bold(cat.label.toUpperCase())}`);
+            lines.push(`  ${cat.label === "Experimental" ? c.boldYellow(cat.label.toUpperCase()) : c.bold(cat.label.toUpperCase())}`);
             for (const sub of cmds) {
               used.add(sub.name());
               const subCmds = helper.visibleCommands(sub).filter(s => s.name() !== "help");
