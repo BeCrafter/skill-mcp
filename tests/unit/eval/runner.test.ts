@@ -13,7 +13,7 @@ type DrizzleDB = BetterSQLite3Database<typeof schema>;
 
 /**
  * P1-12 stage 2 — EvalRunner contract pins:
- *   - evaluateExpectations: ALL semantics for tools + contains; NONE for not-contains.
+ *   - evaluateExpectations: ALL semantics for contains; NONE for not-contains.
  *   - runForSlug: persists one row per case; produces RunSummary with right tallies.
  *   - Provider throw → status="error", failureReason populated, run continues.
  *   - Unknown slug → SkillNotFoundError.
@@ -75,19 +75,10 @@ class StubProvider implements EvalProvider {
 }
 
 describe("evaluateExpectations", () => {
-  const base = { expectedTools: [] as string[], expectedOutputContains: [] as string[], expectedOutputNotContains: [] as string[] };
+  const base = { expectedOutputContains: [] as string[], expectedOutputNotContains: [] as string[] };
 
   it("passes when no expectations", () => {
     expect(evaluateExpectations(base, "anything", [])).toBeNull();
-  });
-
-  it("fails when expected tool not used", () => {
-    const r = evaluateExpectations({ ...base, expectedTools: ["search", "edit"] }, "out", ["search"]);
-    expect(r).toMatch(/expected_tools missing: edit/);
-  });
-
-  it("passes when all expected tools present (extras allowed)", () => {
-    expect(evaluateExpectations({ ...base, expectedTools: ["search"] }, "out", ["search", "extra"])).toBeNull();
   });
 
   it("fails when output is missing a required substring", () => {
@@ -108,15 +99,6 @@ describe("evaluateExpectations", () => {
 
   it("passes when no forbidden substrings appear", () => {
     expect(evaluateExpectations({ ...base, expectedOutputNotContains: ["error"] }, "ok", [])).toBeNull();
-  });
-
-  it("surfaces tools failure first when multiple checks would fail", () => {
-    const r = evaluateExpectations(
-      { expectedTools: ["t"], expectedOutputContains: ["x"], expectedOutputNotContains: [] },
-      "y",
-      [],
-    );
-    expect(r).toMatch(/expected_tools missing/);
   });
 });
 
@@ -181,22 +163,6 @@ describe("EvalRunner.runForSlug", () => {
     expect(persisted[0].output).toBe("hello world");
   });
 
-  it("Echo case with expected_tools fails (no tools called)", async () => {
-    const id = await makeSkill("s");
-    evalRepo.replaceAllForSkill(id, [
-      { name: "needs-tool", input: "find foo", expectedTools: ["search"] },
-    ]);
-    const runner = new EvalRunner(skillRepo, evalRepo, new EchoEvalProvider());
-    const sum = await runner.runForSlug("s");
-    expect(sum.failed).toBe(1);
-    expect(sum.passed).toBe(0);
-    expect(sum.cases[0].status).toBe("fail");
-    expect(sum.cases[0].failureReason).toMatch(/expected_tools missing: search/);
-    const rows = evalRepo.findRunsBySkillVersion(id, sum.version);
-    expect(rows[0].status).toBe("fail");
-    expect(rows[0].failureReason).toMatch(/search/);
-  });
-
   it("provider throw → status=error, failureReason set, other cases continue", async () => {
     const id = await makeSkill("s");
     evalRepo.replaceAllForSkill(id, [
@@ -226,7 +192,7 @@ describe("EvalRunner.runForSlug", () => {
   it("persists toolsUsed when provider reports them", async () => {
     const id = await makeSkill("s");
     evalRepo.replaceAllForSkill(id, [
-      { name: "with-tools", input: "go", expectedTools: ["alpha"] },
+      { name: "with-tools", input: "go" },
     ]);
     const provider = new StubProvider(() => ({ output: "done", toolsUsed: ["alpha", "beta"] }));
     const runner = new EvalRunner(skillRepo, evalRepo, provider);

@@ -30,7 +30,6 @@ import {
   SkillNotFoundError,
   VersionNotFoundError,
 } from "../utils/errors.js";
-import { bumpVersion } from "../db/repositories/skill.repository.js";
 import { pMap } from "../utils/concurrency.js";
 import { shortId, isLegacyUuid } from "../utils/id.js";
 
@@ -43,7 +42,7 @@ const ADMIN_PUT_ALLOWED = [
   "description", "displayName", "version", "category",
   "attributes", "status", "visibility", "entryFile", "tags",
 ] as const;
-import type { SkillMeta, SkillMetaPublic, SkillFileContent, FileInfo, RequestContext, VersionBump, SkillStatus, ImportOptions, ImportResult, AccessLogEntry, SkillRetrievalMeta } from "../types/index.js";
+import type { SkillMeta, SkillMetaPublic, SkillFileContent, FileInfo, RequestContext, SkillStatus, ImportOptions, ImportResult, AccessLogEntry, SkillRetrievalMeta } from "../types/index.js";
 import { toSkillMetaPublic } from "../types/index.js";
 
 /**
@@ -654,7 +653,7 @@ export class SkillService {
   }
 
   /** Rollback skill to a specific version */
-  async rollbackToVersion(slug: string, targetVersion: string, bump: VersionBump = "patch"): Promise<void> {
+  async rollbackToVersion(slug: string, targetVersion: string): Promise<void> {
     if (!this.versionRepo || !this.skillRepo || !this.storage) {
       throw new ConfigurationError("Version repository, skill repository, or storage not configured");
     }
@@ -705,7 +704,6 @@ export class SkillService {
 
     const runId = shortId();
     const stagingPath = `${ROLLBACK_STAGING_ROOT}/${runId}/`;
-    const newVersion = bumpVersion(skill.version, bump);
     let dbUpdated = false;
     let storageCommitted = false;
 
@@ -750,7 +748,7 @@ export class SkillService {
 
       // 4. DB version pointer update (single atomic row update).
       await this.skillRepo.update(skill.id, {
-        version: newVersion,
+        version: targetVersion,
         contentHash: version.contentHash,
       });
       dbUpdated = true;
@@ -771,19 +769,8 @@ export class SkillService {
         await this.skillFileRepo.replaceAll(skill.id, fileRows);
       }
 
-      // 4c. Record the new rolled-back version as current
-      if (this.versionRepo) {
-        this.versionRepo.create({
-          skillId: skill.id,
-          version: newVersion,
-          contentHash: version.contentHash,
-          storagePath: skill.storagePath,
-          entryFile: skill.entryFile,
-          fileCount: versionFiles.length,
-          changeSummary: `Rolled back to ${targetVersion}`,
-          isCurrent: true,
-        });
-      }
+      // 4c. Switch current pointer to the target version
+      this.versionRepo.markCurrent(skill.id, version.id);
 
       // 5. Synchronous cache invalidation — close the read-after-rollback window.
       // T-711 — DB and storage are already committed at this point; a transient
@@ -837,7 +824,7 @@ export class SkillService {
       });
     }
 
-    this.logger.info({ slug, from: skill.version, to: newVersion, restored: targetVersion }, "Skill rolled back");
+    this.logger.info({ slug, from: skill.version, to: targetVersion }, "Skill rolled back");
   }
 
   /**
@@ -1034,12 +1021,11 @@ export class SkillService {
   async adminRollbackToVersion(
     slug: string,
     targetVersion: string,
-    bump: VersionBump = "patch",
   ): Promise<void> {
-    await this.rollbackToVersion(slug, targetVersion, bump);
+    await this.rollbackToVersion(slug, targetVersion);
     if (!this.skillRepo) return;
     const skillAfter = await this.skillRepo.findBySlug(slug);
-    if (this.auditRepo) this.auditRepo.log({ action: "skill.rollback", entityType: "skill", entityId: skillAfter?.id ?? slug, after: { targetVersion, bump, newVersion: skillAfter?.version } });
+    if (this.auditRepo) this.auditRepo.log({ action: "skill.rollback", entityType: "skill", entityId: skillAfter?.id ?? slug, after: { targetVersion, version: skillAfter?.version } });
     if (this.eventBus) {
       this.eventBus.publish({
         type: "skill:updated",

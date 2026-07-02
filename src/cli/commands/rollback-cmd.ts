@@ -15,14 +15,14 @@ import { getServerUrl, apiCall } from "../remote-client.js";
 
 export async function rollbackAction(
   slug: string,
-  options: { to: string; bump?: "major" | "minor" | "patch"; serverUrl?: string },
+  options: { to: string; serverUrl?: string },
 ): Promise<void> {
   const serverUrl = getServerUrl(options);
 
   if (serverUrl) {
     const creds = requireAuth();
     await apiCall(serverUrl, "POST", `/api/admin/skills/${slug}/rollback`, {
-      body: { version: options.to, bump: options.bump ?? "patch" },
+      body: { version: options.to },
       credentials: creds,
     });
     ok(`Rolled back ${c.boldCyan(slug)} to v${options.to}`);
@@ -64,14 +64,11 @@ export async function rollbackAction(
     }
 
     console.log(`\n  ${c.dim("Rolling back")}  ${c.boldCyan(slug)}  ${c.dim(skill.version + " → " + options.to)}`);
-    await skillService.rollbackToVersion(slug, options.to, options.bump ?? "patch");
+    await skillService.rollbackToVersion(slug, options.to);
 
-    const updated = await skillRepo.findBySlug(slug);
-    const bump = options.bump ?? "patch";
-
-    console.log(section("rollback complete", undefined, kvWidth(12, "v" + updated!.version, String(version.fileCount))));
+    console.log(section("rollback complete", undefined, kvWidth(12, "v" + options.to, String(version.fileCount))));
     console.log();
-    console.log(kv("new version", `${c.dim("v" + updated!.version)}  ${c.dim("(" + bump + " bump)")}`));
+    console.log(kv("version", `${c.dim("v" + options.to)}`));
     console.log(kv("files restored", String(version.fileCount)));
     console.log();
   } catch (error: unknown) {

@@ -707,7 +707,6 @@ Rollback a skill to a previous version.
 | Field | Type | Description |
 |-------|------|-------------|
 | `version` | string | **Required.** Target version to rollback to |
-| `bump` | `"major" \| "minor" \| "patch"` | Version bump strategy for the new version |
 
 #### PUT /api/admin/skills/{slug}/retrieval
 

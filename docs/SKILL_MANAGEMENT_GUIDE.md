@@ -319,9 +319,6 @@ node dist/index.js versions prompt-writer --diff 1.0.0..1.2.0
 ```bash
 # 回滚到指定版本
 node dist/index.js rollback prompt-writer --to 1.0.0
-
-# 回滚并指定版本号递增类型
-node dist/index.js rollback prompt-writer --to 1.0.0 --bump minor
 ```
 
 输出示例：
@@ -332,7 +329,7 @@ node dist/index.js rollback prompt-writer --to 1.0.0 --bump minor
 
   ── rollback complete ───────────────────────────
 
-      new version   v1.3.0  (patch bump)
+      version       v1.0.0
       files restored  3
 ```
 

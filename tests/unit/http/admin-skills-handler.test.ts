@@ -257,9 +257,9 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
 
   it("POST /api/admin/skills/:slug/rollback delegates to adminRollbackToVersion", async () => {
     const { router, skillService } = setup();
-    const ctx = makeCtx("POST", "/api/admin/skills/demo/rollback", new URLSearchParams(), { version: "1.0.0", bump: "minor" });
+    const ctx = makeCtx("POST", "/api/admin/skills/demo/rollback", new URLSearchParams(), { version: "1.0.0" });
     await router.dispatch(ctx);
-    expect(skillService.adminRollbackToVersion).toHaveBeenCalledWith("demo", "1.0.0", "minor");
+    expect(skillService.adminRollbackToVersion).toHaveBeenCalledWith("demo", "1.0.0");
     expect(bodyOf(ctx).statusCode).toBe(200);
   });
 

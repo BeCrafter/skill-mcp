@@ -117,7 +117,6 @@ describe("parseSkillMeta eval_cases (P1-12 stage 1)", () => {
       `eval_cases:`,
       `  - name: "basic"`,
       `    input: "find foo"`,
-      `    expected_tools: ["search"]`,
       `    expected_output_contains: ["matched"]`,
       `    expected_output_not_contains: ["error"]`,
     ].join("\n"));
@@ -126,7 +125,6 @@ describe("parseSkillMeta eval_cases (P1-12 stage 1)", () => {
     expect(meta.evalCases![0]).toEqual({
       name: "basic",
       input: "find foo",
-      expectedTools: ["search"],
       expectedOutputContains: ["matched"],
       expectedOutputNotContains: ["error"],
     });
@@ -138,16 +136,16 @@ describe("parseSkillMeta eval_cases (P1-12 stage 1)", () => {
     expect(meta.evalCases).toBeUndefined();
   });
 
-  it("accepts camelCase keys verbatim", () => {
+  it("parses minimal eval case with only name and input", () => {
     writeSkill([
       `name: combo`,
       `eval_cases:`,
       `  - name: "via-camel"`,
       `    input: "x"`,
-      `    expectedTools: ["a"]`,
     ].join("\n"));
     const meta = parseSkillMeta(dirPath);
     expect(meta.evalCases).toHaveLength(1);
-    expect(meta.evalCases![0].expectedTools).toEqual(["a"]);
+    expect(meta.evalCases![0].name).toBe("via-camel");
+    expect(meta.evalCases![0].input).toBe("x");
   });
 });

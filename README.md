@@ -42,6 +42,7 @@ A Model Context Protocol (MCP) server that provides a managed skill file system 
 
 **🧪 QA / Testing**
 - [Testing Guide](./docs/TESTING_GUIDE.md) — How to run tests
+- [CLI Verification Checklist](./docs/CLI_VERIFICATION_CHECKLIST.md) — Full CLI command acceptance checklist
 
 **📦 Publishing & Release**
 - [Publishing Guide](./docs/PUBLISHING.md) — How to publish to npm
@@ -549,7 +550,6 @@ src/
 | `eval list` | List eval cases |
 | `eval run` | Run eval cases |
 | `eval results` | Show eval results |
-| `migrate:check` | Check migration status |
 | `user list/create/get/delete/assign-roles` | Manage users (requires admin+ login, supports remote mode) |
 | `user create --username <u> --password <p> --user-type <type>` | Create user with login credentials (admin/superadmin only for --user-type admin) |
 | `role list/create/get/update/delete` | Manage roles (requires admin+ login, supports remote mode) |

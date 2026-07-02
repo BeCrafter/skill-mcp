@@ -171,19 +171,19 @@ describe("validateSkillMeta field caps (T-705)", () => {
   // pattern: validation rejects malformed shapes + cap violations + cases
   // with no expectations.
   describe("eval_cases (P1-12 stage 1)", () => {
-    it("accepts a well-formed minimal case (expected_tools only)", () => {
+    it("accepts a well-formed minimal case", () => {
       expect(() =>
         validateSkillMeta(
           {
             name: "ok",
-            evalCases: [{ name: "case-a", input: "do thing", expectedTools: ["search"] }],
+            evalCases: [{ name: "case-a", input: "do thing", expectedOutputContains: ["result"] }],
           },
           dirPath,
         ),
       ).not.toThrow();
     });
 
-    it("accepts a case with all three expectation lists", () => {
+    it("accepts a case with both expectation lists", () => {
       expect(() =>
         validateSkillMeta(
           {
@@ -192,7 +192,6 @@ describe("validateSkillMeta field caps (T-705)", () => {
               {
                 name: "full",
                 input: "compose the answer",
-                expectedTools: ["fetch", "format"],
                 expectedOutputContains: ["Hello"],
                 expectedOutputNotContains: ["error"],
               },
@@ -216,7 +215,7 @@ describe("validateSkillMeta field caps (T-705)", () => {
       const cases = Array.from({ length: 33 }, (_, i) => ({
         name: `c-${i}`,
         input: "x",
-        expectedTools: ["a"],
+        expectedOutputContains: ["a"],
       }));
       expect(() =>
         validateSkillMeta({ name: "ok", evalCases: cases }, dirPath),
@@ -226,7 +225,7 @@ describe("validateSkillMeta field caps (T-705)", () => {
     it("rejects a case with empty name", () => {
       expect(() =>
         validateSkillMeta(
-          { name: "ok", evalCases: [{ name: "", input: "x", expectedTools: ["a"] }] },
+          { name: "ok", evalCases: [{ name: "", input: "x", expectedOutputContains: ["a"] }] },
           dirPath,
         ),
       ).toThrow(/name is required/);
@@ -237,7 +236,7 @@ describe("validateSkillMeta field caps (T-705)", () => {
         validateSkillMeta(
           {
             name: "ok",
-            evalCases: [{ name: "n".repeat(129), input: "x", expectedTools: ["a"] }],
+            evalCases: [{ name: "n".repeat(129), input: "x", expectedOutputContains: ["a"] }],
           },
           dirPath,
         ),
@@ -250,8 +249,8 @@ describe("validateSkillMeta field caps (T-705)", () => {
           {
             name: "ok",
             evalCases: [
-              { name: "dup", input: "x", expectedTools: ["a"] },
-              { name: "dup", input: "y", expectedTools: ["b"] },
+              { name: "dup", input: "x", expectedOutputContains: ["a"] },
+              { name: "dup", input: "y", expectedOutputContains: ["b"] },
             ],
           },
           dirPath,
@@ -262,7 +261,7 @@ describe("validateSkillMeta field caps (T-705)", () => {
     it("rejects empty input", () => {
       expect(() =>
         validateSkillMeta(
-          { name: "ok", evalCases: [{ name: "c", input: "", expectedTools: ["a"] }] },
+          { name: "ok", evalCases: [{ name: "c", input: "", expectedOutputContains: ["a"] }] },
           dirPath,
         ),
       ).toThrow(/input is required/);
@@ -273,33 +272,14 @@ describe("validateSkillMeta field caps (T-705)", () => {
         validateSkillMeta(
           {
             name: "ok",
-            evalCases: [{ name: "c", input: "x".repeat(4097), expectedTools: ["a"] }],
+            evalCases: [{ name: "c", input: "x".repeat(4097), expectedOutputContains: ["a"] }],
           },
           dirPath,
         ),
       ).toThrow(/input exceeds max length/);
     });
 
-    it("rejects a case with no expectations at all", () => {
-      expect(() =>
-        validateSkillMeta(
-          { name: "ok", evalCases: [{ name: "c", input: "x" }] },
-          dirPath,
-        ),
-      ).toThrow(/at least one of expected_tools/);
-    });
-
-    it("rejects too many expected_tools (>16)", () => {
-      const tools = Array.from({ length: 17 }, (_, i) => `tool-${i}`);
-      expect(() =>
-        validateSkillMeta(
-          { name: "ok", evalCases: [{ name: "c", input: "x", expectedTools: tools }] },
-          dirPath,
-        ),
-      ).toThrow(/expected_tools exceed max count/);
-    });
-
-    it("rejects oversized expected_output_contains entry (>1024 chars)", () => {
+    it("rejects oversized input (>4096 chars)", () => {
       expect(() =>
         validateSkillMeta(
           {
@@ -331,22 +311,5 @@ describe("validateSkillMeta field caps (T-705)", () => {
       ).toThrow(/non-empty/);
     });
 
-    it("rejects non-string expectation entry", () => {
-      expect(() =>
-        validateSkillMeta(
-          {
-            name: "ok",
-            evalCases: [
-              {
-                name: "c",
-                input: "x",
-                expectedTools: [42 as unknown as string],
-              },
-            ],
-          },
-          dirPath,
-        ),
-      ).toThrow(/entries must be strings/);
     });
-  });
 });

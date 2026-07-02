@@ -28,6 +28,8 @@ export interface RunSummary {
 export interface EvalRunnerOptions {
   timeoutMs?: number;
   retries?: number;
+  /** SKILL.md content passed to the eval provider as system prompt. */
+  skillEntry?: string;
 }
 
 export class EvalRunner {
@@ -81,7 +83,7 @@ export class EvalRunner {
     const timeoutMs = this.options.timeoutMs ?? 30_000;
     const maxAttempts = 1 + (this.options.retries ?? 1);
 
-    const evalInput: EvalInput = { input: c.input };
+    const evalInput: EvalInput = { input: c.input, skillEntry: this.options.skillEntry };
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
@@ -135,15 +137,10 @@ export class EvalRunner {
 }
 
 export function evaluateExpectations(
-  c: Pick<SkillEvalCaseRow, "expectedTools" | "expectedOutputContains" | "expectedOutputNotContains">,
+  c: Pick<SkillEvalCaseRow, "expectedOutputContains" | "expectedOutputNotContains">,
   output: string,
-  toolsUsed: string[],
+  _toolsUsed: string[],
 ): string | null {
-  if (c.expectedTools.length > 0) {
-    const seen = new Set(toolsUsed);
-    const missing = c.expectedTools.filter((t) => !seen.has(t));
-    if (missing.length > 0) return `expected_tools missing: ${missing.join(", ")}`;
-  }
   if (c.expectedOutputContains.length > 0) {
     const missing = c.expectedOutputContains.filter((s) => !output.includes(s));
     if (missing.length > 0) return `expected_output_contains missing: ${JSON.stringify(missing)}`;

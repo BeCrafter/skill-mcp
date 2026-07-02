@@ -22,7 +22,6 @@ export interface SkillEvalCaseRow {
   skillId: string;
   caseName: string;
   input: string;
-  expectedTools: string[];
   expectedOutputContains: string[];
   expectedOutputNotContains: string[];
   createdAt: number;
@@ -58,7 +57,6 @@ export interface AppendEvalRunInput {
 }
 
 interface ExpectationsEnvelope {
-  expectedTools?: string[];
   expectedOutputContains?: string[];
   expectedOutputNotContains?: string[];
 }
@@ -80,7 +78,6 @@ export class SkillEvalRepository {
       if (cases.length === 0) return;
       for (const c of cases) {
         const envelope: ExpectationsEnvelope = {};
-        if (c.expectedTools && c.expectedTools.length > 0) envelope.expectedTools = c.expectedTools;
         if (c.expectedOutputContains && c.expectedOutputContains.length > 0) envelope.expectedOutputContains = c.expectedOutputContains;
         if (c.expectedOutputNotContains && c.expectedOutputNotContains.length > 0) envelope.expectedOutputNotContains = c.expectedOutputNotContains;
         tx.insert(skillEvalCases).values({
@@ -196,7 +193,6 @@ export class SkillEvalRepository {
       skillId: row.skillId,
       caseName: row.caseName,
       input: row.input,
-      expectedTools: env.expectedTools ?? [],
       expectedOutputContains: env.expectedOutputContains ?? [],
       expectedOutputNotContains: env.expectedOutputNotContains ?? [],
       createdAt: row.createdAt,
@@ -236,7 +232,6 @@ function parseExpectations(raw: string): ExpectationsEnvelope {
     if (!parsed || typeof parsed !== "object") return {};
     const e = parsed as Record<string, unknown>;
     const out: ExpectationsEnvelope = {};
-    if (Array.isArray(e.expectedTools)) out.expectedTools = e.expectedTools.filter((s): s is string => typeof s === "string");
     if (Array.isArray(e.expectedOutputContains)) out.expectedOutputContains = e.expectedOutputContains.filter((s): s is string => typeof s === "string");
     if (Array.isArray(e.expectedOutputNotContains)) out.expectedOutputNotContains = e.expectedOutputNotContains.filter((s): s is string => typeof s === "string");
     return out;

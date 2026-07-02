@@ -320,8 +320,7 @@ export const skillEvalCases = sqliteTable("skill_eval_cases", {
   skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
   caseName: text("case_name").notNull(),
   input: text("input").notNull(),
-  // JSON: { expectedTools?: string[]; expectedOutputContains?: string[];
-  //         expectedOutputNotContains?: string[] }
+  // JSON: { expectedOutputContains?: string[]; expectedOutputNotContains?: string[] }
   expectationsJson: text("expectations_json").notNull().default("{}"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),

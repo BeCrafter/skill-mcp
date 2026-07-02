@@ -21,7 +21,7 @@ const v100: SkillVersion = {
   id: "v1", skillId: "s1", version: "1.0.0",
   contentHash: "hash-100", storagePath: "demo/.versions/1.0.0/",
   entryFile: "SKILL.md", fileCount: 2,
-  createdBy: null, changeSummary: null, createdAt: 0,
+  createdBy: null, changeSummary: null, isCurrent: false, createdAt: 0,
 };
 
 function makeProvider(s: SkillMeta | null = skill): ISkillProvider {
@@ -77,6 +77,7 @@ function makeVersionRepo(existingVersion: unknown = v100) {
     findByVersion: vi.fn().mockReturnValue(existingVersion),
     create: vi.fn(),
     update: vi.fn(),
+    markCurrent: vi.fn(),
   } as unknown as SkillVersionRepository;
 }
 
@@ -108,8 +109,7 @@ describe("SkillService.rollbackToVersion", () => {
     await expect(service.rollbackToVersion("demo", "9.9.9"))
       .rejects.toThrow(/Version 9.9.9 not found/);
   });
-
-  it("happy path: snapshots current, restores target, bumps version, clears caches", async () => {
+  it("happy path: snapshots current, restores target, switches version pointer, clears caches", async () => {
     const versionRepo = makeVersionRepo();
     const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
     const cache = makeCache();
@@ -125,7 +125,7 @@ describe("SkillService.rollbackToVersion", () => {
       undefined, undefined, versionRepo, skillRepo, storage,
     );
 
-    await service.rollbackToVersion("demo", "1.0.0", "patch");
+    await service.rollbackToVersion("demo", "1.0.0");
 
     // Snapshot put: 2 files (excluding .versions/*) into demo/.versions/1.2.0/
     expect(storage.put).toHaveBeenCalledWith("demo/.versions/1.2.0/SKILL.md", expect.any(Buffer));
@@ -135,43 +135,21 @@ describe("SkillService.rollbackToVersion", () => {
     expect(storage.put).toHaveBeenCalledWith("demo/SKILL.md", expect.any(Buffer));
     expect(storage.put).toHaveBeenCalledWith("demo/ref.md", expect.any(Buffer));
 
-    // DB updated: bumped patch (1.2.0 → 1.2.1) and contentHash from target version
+    // DB updated: version points to target, contentHash from target version
     expect(skillRepo.update).toHaveBeenCalledWith("s1", {
-      version: "1.2.1",
+      version: "1.0.0",
       contentHash: "hash-100",
     });
 
-    // New version record created for the rolled-back version
-    expect(versionRepo.create).toHaveBeenCalledWith(expect.objectContaining({
-      skillId: "s1",
-      version: "1.2.1",
-      contentHash: "hash-100",
-      isCurrent: true,
-    }));
+    // Current pointer switched to target version (no new version record created)
+    expect(versionRepo.markCurrent).toHaveBeenCalledWith("s1", "v1");
+    expect(versionRepo.create).not.toHaveBeenCalled();
 
     // Caches cleared for entry + file
     expect(cache.clearByPrefix).toHaveBeenCalledWith("skill:entry:demo");
     expect(cache.clearByPrefix).toHaveBeenCalledWith("skill:file:demo");
   });
 
-  it("respects the bump argument when computing the new version", async () => {
-    const versionRepo = makeVersionRepo();
-    const skillRepo = { update: vi.fn().mockResolvedValue(skill) } as unknown as SkillRepository;
-    const storage = makeStorage({
-      listRecursive: vi.fn().mockResolvedValue([]),
-    });
-
-    const service = new SkillService(
-      makeProvider(), makeCache(), makeLogger(),
-      undefined, undefined, versionRepo, skillRepo, storage,
-    );
-
-    await service.rollbackToVersion("demo", "1.0.0", "minor");
-    expect(skillRepo.update).toHaveBeenCalledWith("s1", expect.objectContaining({ version: "1.3.0" }));
-
-    await service.rollbackToVersion("demo", "1.0.0", "major");
-    expect(skillRepo.update).toHaveBeenCalledWith("s1", expect.objectContaining({ version: "2.0.0" }));
-  });
 
   it("storage commit failure mid-way restores from pre-rollback snapshot and does not advance DB", async () => {
     const versionRepo = makeVersionRepo();

@@ -103,7 +103,6 @@ describe("SkillEvalRepository", () => {
         {
           name: "basic",
           input: "find foo",
-          expectedTools: ["search"],
           expectedOutputContains: ["matched"],
           expectedOutputNotContains: ["error"],
         },
@@ -112,7 +111,6 @@ describe("SkillEvalRepository", () => {
       expect(cases).toHaveLength(1);
       expect(cases[0].caseName).toBe("basic");
       expect(cases[0].input).toBe("find foo");
-      expect(cases[0].expectedTools).toEqual(["search"]);
       expect(cases[0].expectedOutputContains).toEqual(["matched"]);
       expect(cases[0].expectedOutputNotContains).toEqual(["error"]);
     });
@@ -120,10 +118,9 @@ describe("SkillEvalRepository", () => {
     it("normalizes empty arrays to absent (round-trips as []) ", async () => {
       const id = await makeSkill("ripgrep");
       repo.replaceAllForSkill(id, [
-        { name: "tools-only", input: "x", expectedTools: ["search"] },
+        { name: "tools-only", input: "x" },
       ]);
       const cases = repo.findCasesBySkillId(id);
-      expect(cases[0].expectedTools).toEqual(["search"]);
       expect(cases[0].expectedOutputContains).toEqual([]);
       expect(cases[0].expectedOutputNotContains).toEqual([]);
     });
@@ -131,24 +128,23 @@ describe("SkillEvalRepository", () => {
     it("replaces the full set on re-call (drops removed cases)", async () => {
       const id = await makeSkill("ripgrep");
       repo.replaceAllForSkill(id, [
-        { name: "a", input: "in-a", expectedTools: ["x"] },
-        { name: "b", input: "in-b", expectedTools: ["y"] },
+        { name: "a", input: "in-a" },
+        { name: "b", input: "in-b" },
       ]);
       expect(repo.findCasesBySkillId(id)).toHaveLength(2);
 
       repo.replaceAllForSkill(id, [
-        { name: "a", input: "in-a-v2", expectedTools: ["z"] },
+        { name: "a", input: "in-a-v2" },
       ]);
       const cases = repo.findCasesBySkillId(id);
       expect(cases).toHaveLength(1);
       expect(cases[0].caseName).toBe("a");
       expect(cases[0].input).toBe("in-a-v2");
-      expect(cases[0].expectedTools).toEqual(["z"]);
     });
 
     it("empty input clears all cases", async () => {
       const id = await makeSkill("ripgrep");
-      repo.replaceAllForSkill(id, [{ name: "a", input: "x", expectedTools: ["y"] }]);
+      repo.replaceAllForSkill(id, [{ name: "a", input: "x" }]);
       repo.replaceAllForSkill(id, []);
       expect(repo.findCasesBySkillId(id)).toHaveLength(0);
     });
@@ -156,8 +152,8 @@ describe("SkillEvalRepository", () => {
     it("scopes to the given skill (other skills untouched)", async () => {
       const a = await makeSkill("a");
       const b = await makeSkill("b");
-      repo.replaceAllForSkill(a, [{ name: "ca", input: "in", expectedTools: ["t"] }]);
-      repo.replaceAllForSkill(b, [{ name: "cb", input: "in", expectedTools: ["t"] }]);
+      repo.replaceAllForSkill(a, [{ name: "ca", input: "in" }]);
+      repo.replaceAllForSkill(b, [{ name: "cb", input: "in" }]);
       repo.replaceAllForSkill(a, []);
       expect(repo.findCasesBySkillId(a)).toHaveLength(0);
       expect(repo.findCasesBySkillId(b)).toHaveLength(1);
@@ -167,7 +163,7 @@ describe("SkillEvalRepository", () => {
   describe("findCaseByName", () => {
     it("returns the case by name", async () => {
       const id = await makeSkill("s");
-      repo.replaceAllForSkill(id, [{ name: "the-case", input: "i", expectedTools: ["t"] }]);
+      repo.replaceAllForSkill(id, [{ name: "the-case", input: "i" }]);
       const got = repo.findCaseByName(id, "the-case");
       expect(got).not.toBeNull();
       expect(got!.caseName).toBe("the-case");
@@ -188,9 +184,9 @@ describe("SkillEvalRepository", () => {
     it("counts replaced rows correctly", async () => {
       const id = await makeSkill("s");
       repo.replaceAllForSkill(id, [
-        { name: "a", input: "i", expectedTools: ["t"] },
-        { name: "b", input: "i", expectedTools: ["t"] },
-        { name: "c", input: "i", expectedTools: ["t"] },
+        { name: "a", input: "i" },
+        { name: "b", input: "i" },
+        { name: "c", input: "i" },
       ]);
       expect(repo.countCasesBySkillId(id)).toBe(3);
     });
@@ -275,7 +271,7 @@ describe("SkillEvalRepository", () => {
   describe("ON DELETE CASCADE", () => {
     it("removes cases AND runs when skill is deleted", async () => {
       const id = await makeSkill("s");
-      repo.replaceAllForSkill(id, [{ name: "c", input: "i", expectedTools: ["t"] }]);
+      repo.replaceAllForSkill(id, [{ name: "c", input: "i" }]);
       await repo.appendRun({ skillId: id, skillVersion: "1.0.0", caseName: "c", status: "pass", runner: "echo" });
       expect(repo.countCasesBySkillId(id)).toBe(1);
       expect(repo.findRecentRuns(id, 10)).toHaveLength(1);

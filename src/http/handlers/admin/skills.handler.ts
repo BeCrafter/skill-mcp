@@ -264,9 +264,9 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
 
   router.post("/api/admin/skills/:slug/rollback", async (ctx) => {
     const slug = requireSlug(ctx);
-    const data = await readJsonBody<{ version?: string; bump?: "major" | "minor" | "patch" }>(ctx.req);
+    const data = await readJsonBody<{ version?: string }>(ctx.req);
     if (!data.version) throw new BadRequestError("version is required");
-    await skillService.adminRollbackToVersion(slug, data.version, data.bump ?? "patch");
+    await skillService.adminRollbackToVersion(slug, data.version);
     json(ctx.res, 200, { success: true, message: `Rolled back to version ${data.version}` });
   });
 

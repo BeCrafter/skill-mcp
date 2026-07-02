@@ -57,7 +57,6 @@ function makeCase(name: string): SkillEvalCaseRow {
     skillId: "sk-1",
     caseName: name,
     input: `input-${name}`,
-    expectedTools: [],
     expectedOutputContains: [],
     expectedOutputNotContains: [],
     createdAt: 0,

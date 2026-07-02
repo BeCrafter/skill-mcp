@@ -1,21 +1,25 @@
 import { getConfig } from "../../config/index.js";
 import { runMigrations } from "../../db/migrate.js";
-import { getDatabase } from "../../db/connection.js";
+import { getDatabase, type DrizzleDB } from "../../db/connection.js";
 import { SkillRepository } from "../../db/repositories/skill.repository.js";
 import { SkillEvalRepository } from "../../db/repositories/skill-eval.repository.js";
 import { EchoEvalProvider } from "../../eval/echo-provider.js";
+import { LLMEvalProvider } from "../../eval/llm-eval-provider.js";
 import { EvalRunner } from "../../eval/runner.js";
+import type { EvalProvider } from "../../eval/provider.interface.js";
+import { LocalFileSystemProvider } from "../../storage/local-fs.provider.js";
 import { c, fail, kv, fmtDate, table, section, warn } from "../ui.js";
 import { SkillNotFoundError } from "../../utils/errors.js";
 import { requireAuth } from "./auth-cmd.js";
 import { getServerUrl, apiCall } from "../remote-client.js";
 
-interface EvalCase { caseName: string; input?: string; expectedTools: string[]; expectedOutputContains: string[]; }
+interface EvalCase { caseName: string; input?: string; expectedOutputContains: string[]; }
 interface EvalRunResult { caseName: string; status: string; }
 interface EvalSummary { slug: string; version: string; totalCases: number; passed: number; failed: number; errored: number; cases: EvalRunResult[]; }
 interface EvalHistoryRow { skillVersion: string; caseName: string; status: string; createdAt: number; }
 
 export async function evalListAction(slug: string, opts: { serverUrl?: string } = {}): Promise<void> {
+  warn("The eval command is experimental and may change without notice.");
   const serverUrl = getServerUrl(opts);
 
   if (serverUrl) {
@@ -28,7 +32,6 @@ export async function evalListAction(slug: string, opts: { serverUrl?: string } 
     for (const ec of cases) {
       console.log(kv("case", c.bold(ec.caseName)));
       if (ec.input) console.log(kv("input", c.dim(ec.input)));
-      if (ec.expectedTools?.length) console.log(kv("tools", ec.expectedTools.join(", ")));
       if (ec.expectedOutputContains?.length) console.log(kv("contains", ec.expectedOutputContains.join(", ")));
       console.log();
     }
@@ -54,13 +57,13 @@ export async function evalListAction(slug: string, opts: { serverUrl?: string } 
   for (const ec of cases) {
     console.log(kv("case", c.bold(ec.caseName)));
     if (ec.input) console.log(kv("input", c.dim(ec.input)));
-    if (ec.expectedTools.length) console.log(kv("tools", ec.expectedTools.join(", ")));
     if (ec.expectedOutputContains.length) console.log(kv("contains", ec.expectedOutputContains.join(", ")));
     console.log();
   }
 }
 
 export async function evalRunAction(slug: string, opts: { serverUrl?: string } = {}): Promise<void> {
+  warn("The eval command is experimental and may change without notice.");
   const serverUrl = getServerUrl(opts);
 
   if (serverUrl) {
@@ -73,9 +76,38 @@ export async function evalRunAction(slug: string, opts: { serverUrl?: string } =
   }
 
   // Local mode
+  const config = getConfig();
   const { skillRepo, evalRepo } = await bootstrap();
-  const provider = new EchoEvalProvider();
-  const runner = new EvalRunner(skillRepo, evalRepo, provider);
+
+  // Resolve provider from config
+  let provider: EvalProvider;
+  if (config.eval.provider === "llm") {
+    provider = new LLMEvalProvider();
+  } else {
+    provider = new EchoEvalProvider();
+  }
+
+  // Read SKILL.md content for LLM provider
+  let skillEntry: string | undefined;
+  if (config.eval.provider === "llm") {
+    const skill = await skillRepo.findBySlug(slug);
+    if (skill && config.storage.type === "local-fs") {
+      const storage = new LocalFileSystemProvider(config.storage.basePath);
+      const entryPath = `${skill.storagePath}${skill.entryFile}`;
+      try {
+        const buffer = await storage.get(entryPath);
+        if (buffer) skillEntry = buffer.toString("utf-8");
+      } catch {
+        // skill entry not readable — provider will fall back to generic prompt
+      }
+    }
+  }
+
+  const runner = new EvalRunner(skillRepo, evalRepo, provider, undefined, {
+    timeoutMs: config.eval.timeout,
+    retries: config.eval.retries,
+    skillEntry,
+  });
 
   let summary: EvalSummary;
   try {
@@ -121,6 +153,7 @@ function renderEvalSummary(summary: EvalSummary): void {
 }
 
 export async function evalResultsAction(slug: string, options: { limit?: number; serverUrl?: string } = {}): Promise<void> {
+  warn("The eval command is experimental and may change without notice.");
   const serverUrl = getServerUrl(options);
 
   if (serverUrl) {
@@ -188,11 +221,12 @@ function renderEvalResults(slug: string, runs: EvalHistoryRow[]): void {
   console.log();
 }
 
-async function bootstrap(): Promise<{ skillRepo: SkillRepository; evalRepo: SkillEvalRepository }> {
+async function bootstrap(): Promise<{ db: DrizzleDB; skillRepo: SkillRepository; evalRepo: SkillEvalRepository }> {
   const config = getConfig();
   runMigrations(config.database.path);
   const db = getDatabase(config.database.path);
   return {
+    db,
     skillRepo: new SkillRepository(db),
     evalRepo: new SkillEvalRepository(db),
   };

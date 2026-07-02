@@ -321,11 +321,9 @@ export async function createCli(): Promise<Command> {
     .command("rollback <slug>")
     .description("Roll back to a previous version")
     .requiredOption("--to <version>", "Target version to rollback to")
-    .option("--bump <type>", "Version bump type: major|minor|patch", "patch")
     .action(async (slug, opts) => {
       await rollbackAction(slug, {
         to: opts.to as string,
-        bump: (opts.bump as "major" | "minor" | "patch") ?? "patch",
         serverUrl: opts.serverUrl as string | undefined,
       });
     });
@@ -424,7 +422,7 @@ export async function createCli(): Promise<Command> {
   // =========================================================
   const evalCmd = program
     .command("eval")
-    .description("Manage skill evaluation")
+    .description("[EXPERIMENTAL] Manage skill evaluation")
 
   evalCmd
     .command("list <slug>")

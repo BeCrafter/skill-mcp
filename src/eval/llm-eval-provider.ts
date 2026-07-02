@@ -20,8 +20,8 @@ export class LLMEvalProvider implements EvalProvider {
 
   constructor(opts: LLMEvalProviderOptions = {}) {
     this.apiKey = opts.apiKey ?? process.env.OPENAI_API_KEY ?? "";
-    this.model = opts.model ?? "gpt-4o-mini";
-    this.baseUrl = opts.baseUrl ?? "https://api.openai.com/v1";
+    this.model = opts.model ?? process.env.OPENAI_EVAL_MODEL ?? "gpt-4o-mini";
+    this.baseUrl = opts.baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
     this.name = `llm-${this.model}`;
   }
 

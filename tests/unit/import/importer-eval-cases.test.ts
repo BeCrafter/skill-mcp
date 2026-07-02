@@ -112,9 +112,6 @@ describe("SkillImporter wires eval_cases into SkillEvalRepository", () => {
       "  - name: basic",
       "    input: hello",
       "    expected_output_contains: [hello]",
-      "  - name: tools",
-      "    input: search query",
-      "    expected_tools: [search]",
       "---",
       "",
       "# Demo",
@@ -132,12 +129,10 @@ describe("SkillImporter wires eval_cases into SkillEvalRepository", () => {
     expect(evalRepo.replaceAllForSkill).toHaveBeenCalledTimes(1);
     const [skillId, cases] = (evalRepo.replaceAllForSkill as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(skillId).toBe("sk-1");
-    expect(cases).toHaveLength(2);
+    expect(cases).toHaveLength(1);
     expect(cases[0].name).toBe("basic");
     expect(cases[0].input).toBe("hello");
     expect(cases[0].expectedOutputContains).toEqual(["hello"]);
-    expect(cases[1].name).toBe("tools");
-    expect(cases[1].expectedTools).toEqual(["search"]);
   });
 
   it("invokes replaceAllForSkill with [] when frontmatter has no eval_cases (prunes)", async () => {

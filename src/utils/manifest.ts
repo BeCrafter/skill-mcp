@@ -79,8 +79,8 @@ function safeJoin(base: string, child: string): string {
 }
 
 /**
- * P1-12 stage 1 — accept either snake_case (`expected_tools`) or camelCase
- * (`expectedTools`) in the YAML frontmatter, normalize to camelCase. Returns
+ * P1-12 stage 1 — parse eval_cases from YAML frontmatter. Accepts both
+ * snake_case and camelCase keys, normalizes to camelCase. Returns
  * `undefined` when the input is missing / not an array so downstream callers
  * can preserve "absent" vs "explicitly empty" distinctions.
  *
@@ -101,8 +101,6 @@ export function parseEvalCases(raw: unknown): SkillEvalCase[] | undefined {
       name: r["name"] as string,
       input: r["input"] as string,
     };
-    const tools = r["expected_tools"] ?? r["expectedTools"];
-    if (tools !== undefined) out.expectedTools = tools as string[];
     const contains = r["expected_output_contains"] ?? r["expectedOutputContains"];
     if (contains !== undefined) out.expectedOutputContains = contains as string[];
     const notContains = r["expected_output_not_contains"] ?? r["expectedOutputNotContains"];
@@ -257,18 +255,8 @@ export function validateEvalCases(raw: unknown): void {
     if (ec.input.length > MAX_EVAL_INPUT_LENGTH) {
       throw new Error(`Skill eval_cases[${i}].input exceeds max length (${MAX_EVAL_INPUT_LENGTH})`);
     }
-    validateExpectList(ec.expectedTools, `eval_cases[${i}].expected_tools`);
     validateExpectList(ec.expectedOutputContains, `eval_cases[${i}].expected_output_contains`);
     validateExpectList(ec.expectedOutputNotContains, `eval_cases[${i}].expected_output_not_contains`);
-    const hasAnyExpect =
-      (ec.expectedTools && ec.expectedTools.length > 0) ||
-      (ec.expectedOutputContains && ec.expectedOutputContains.length > 0) ||
-      (ec.expectedOutputNotContains && ec.expectedOutputNotContains.length > 0);
-    if (!hasAnyExpect) {
-      throw new Error(
-        `Skill eval_cases[${i}] must declare at least one of expected_tools / expected_output_contains / expected_output_not_contains — a case with no expectations cannot fail`,
-      );
-    }
   }
 }
 

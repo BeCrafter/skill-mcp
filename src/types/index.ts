@@ -30,21 +30,12 @@ export interface SkillRetrievalMeta {
  * P1-12 stage 1 — Skill eval case authored in SKILL.md frontmatter. Stage 1
  * only persists the contract (manifest validation + lint nudge); stage 2
  * adds DB persistence + runner; stage 3 wires version-transition gating.
- *
- * At least one of `expectedTools` / `expectedOutputContains` /
- * `expectedOutputNotContains` MUST be present — a case with zero
- * expectations cannot fail the regression and is therefore ignored.
  */
 export interface SkillEvalCase {
   /** Stable identifier for the case, unique within a skill. 1..128 chars. */
   name: string;
   /** Natural-language input the agent receives when running the case. 1..4096 chars. */
   input: string;
-  /**
-   * Tool names the agent is expected to call (in any order). EVERY entry
-   * must appear in the run's tool list. Empty / omitted skips this assertion.
-   */
-  expectedTools?: string[];
   /**
    * Output substrings the run must contain — EVERY entry must appear.
    * Empty / omitted skips this assertion.
