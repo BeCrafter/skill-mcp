@@ -64,8 +64,8 @@ npm start
 # 检查连接状态
 curl http://localhost:3000/api/health
 
-# 获取统计信息
-curl http://localhost:3000/api/stats
+# 查看 Prometheus 指标
+curl http://localhost:3000/metrics
 ```
 
 ## 场景 C2：分离部署（推荐生产）
@@ -93,7 +93,7 @@ cp src/config/examples/.env.scenario-c2-storage .env
 
 # 编辑配置（可选）
 # - 修改 STORAGE_TYPE (local-fs 或 aliyun-oss)
-# - 修改 API_KEYS 为强密钥
+# - 创建用户和角色以控制访问（见下方说明）
 
 # 启动
 npm start
@@ -110,7 +110,7 @@ cp src/config/examples/.env.scenario-c2-mcp .env
 
 # 编辑配置
 # - 修改 CLOUD_SERVICE_URL 为存储服务器地址
-# - 修改 AUTH_TOKEN 为相同的 API Key
+# - 修改 AUTH_TOKEN 为服务账号 Bearer Token
 
 # 启动
 npm start
@@ -178,8 +178,6 @@ services:
       TRANSPORT_PORT: 3000
       DEPLOYMENT_MODE: standalone
       MCP_ONLY_MODE: "true"
-      ENABLE_API_KEY_AUTH: "true"
-      API_KEYS: prod-storage-key-xyz
     ports:
       - "3000:3000"
     volumes:
@@ -263,9 +261,10 @@ STORAGE_REGION=oss-cn-beijing
 STORAGE_ACCESS_KEY_ID=xxx
 STORAGE_ACCESS_KEY_SECRET=xxx
 
-# 启用认证
-ENABLE_API_KEY_AUTH=true
-API_KEYS=$(openssl rand -hex 32),$(openssl rand -hex 32)
+# 配置 RBAC 认证
+# 1. 创建角色：skill-mcp role create --name gateway --tags "skill:read"
+# 2. 创建服务账号：skill-mcp user create --name svc-gateway --role-ids <role-id>
+# 客户端使用输出的 JWT token 作为 AUTH_TOKEN
 ```
 
 ### MCP 层
@@ -274,8 +273,8 @@ API_KEYS=$(openssl rand -hex 32),$(openssl rand -hex 32)
 # 多实例配置
 MCP_ONLY_MODE=true
 
-# 使用强 API Key
-AUTH_TOKEN=$(openssl rand -hex 32)
+# 使用服务账号 token
+AUTH_TOKEN=<jwt-token-from-user-create>
 
 # 增加缓存
 CACHE_MEMORY_MAX_SIZE=1000
@@ -374,11 +373,12 @@ docker-compose -f docker-compose.c2.yml up -d mcp-1
 ### 认证失败
 
 ```bash
-# 检查 API Key 是否同步
-# 存储服务 API_KEYS 应包含所有 MCP 实例的 AUTH_TOKEN
+# 检查 MCP 的 AUTH_TOKEN 是否与存储服务的用户 token 匹配
+# 运行 skill-mcp auth status 查看当前认证状态
 
-# 临时调整（仅用于调试）
-ENABLE_API_KEY_AUTH=false npm start
+# 验证 token 是否有效
+curl -H "Authorization: Bearer <your-token>" \
+  http://localhost:3000/api/gateway/skills
 ```
 
 ## 监控和日志
@@ -395,7 +395,7 @@ ENABLE_API_KEY_AUTH=false npm start
 [WARN] Request timeout after 10000ms
 
 # 认证问题
-[WARN] Invalid API key for /api/gateway/skills
+[WARN] Authentication failed for /api/gateway/skills
 
 # 缓存命中
 [DEBUG] Cache hit for skill:entry:my-skill
@@ -404,12 +404,11 @@ ENABLE_API_KEY_AUTH=false npm start
 ### 性能分析
 
 ```bash
-# 查看访问日志
-curl http://localhost:3000/api/logs?skill_slug=my-skill&limit=100
+# 查看 Prometheus 指标
+curl http://localhost:3000/metrics
 
-# 统计信息
-curl http://localhost:3000/api/stats
-# 返回：{"totalSkills": 42}
+# 检查健康状态
+curl http://localhost:3000/api/health
 ```
 
 ## 下一步

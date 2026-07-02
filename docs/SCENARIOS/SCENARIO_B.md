@@ -111,7 +111,7 @@ STORAGE_BASE_PATH=./data/skills         # 存储路径
 CACHE_MEMORY_MAX_SIZE=500              # 内存缓存大小
 ```
 
-> **认证说明**：API Key 认证已移除。`/api/gateway/*` 端点需要 Bearer Token 认证（`/api/gateway/health` 除外）。
+> **认证说明**：`/api/gateway/*` 端点需要 Bearer Token 认证（`/api/gateway/health` 除外）。
 > 创建用户和角色请参考：`skill-mcp init` 或 `skill-mcp user create`。
 
 ### 客户端配置 (.env.scenario-b-client)
@@ -354,8 +354,6 @@ services:
       DEPLOYMENT_MODE: standalone
       # RBAC: create a user+token via `skill-mcp init` or `skill-mcp user create`,
       # then clients use that token as AUTH_TOKEN.
-      # For quick local testing, uncomment to allow anonymous access:
-      # SKILL_MCP_ADMIN_AUTH_OPTIONAL: "true"
 
   mcp-client-1:
     image: skill-mcp:latest

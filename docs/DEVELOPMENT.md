@@ -44,18 +44,31 @@ skill-mcp/
 │   ├── app.ts             # MCP server entry point
 │   ├── index.ts           # CLI entry point
 │   ├── services/          # Business logic
-│   ├── db/                # Database layer
-│   ├── storage/           # Storage implementations
+│   ├── db/                # Database layer (drizzle + repositories)
+│   ├── storage/           # Storage implementations (local-fs, aliyun-oss)
 │   ├── provider/          # Skill providers (Local/Remote)
-│   ├── cache/             # Caching layer
+│   ├── cache/             # L1 + L2 caching layer
 │   ├── cli/               # CLI commands
-│   ├── config/            # Configuration management
+│   ├── config/            # Configuration management + .env examples
+│   ├── mcp/               # MCP server + tools
+│   ├── http/              # HTTP server, handlers, middleware, OpenAPI
+│   ├── auth/              # JWT authentication
+│   ├── telemetry/         # Prometheus metrics, tracing
+│   ├── pipeline/          # Pipeline executor
+│   ├── retrieval/         # Search: BM25 + embeddings
+│   ├── eval/              # Skill evaluation runner
+│   ├── import/            # Skill importer (local + git)
+│   ├── events/            # Event bus + subscribers
+│   ├── permission/        # RBAC tag filtering
+│   ├── prompt/            # MCP system prompt builder
+│   ├── types/             # Shared TypeScript types
 │   └── utils/             # Utility functions
 │
 ├── tests/                  # Test files
-│   ├── unit/              # Unit tests
-│   ├── integration/       # Integration tests
-│   └── e2e/               # End-to-end tests
+│   ├── unit/              # Unit tests (mirrors src/ layout)
+│   ├── integration/       # Component integration tests
+│   ├── e2e/               # End-to-end workflow tests
+│   └── fixtures/          # Test fixtures
 │
 ├── docs/                   # Documentation
 │   ├── DEVELOPMENT.md     # This file
@@ -65,7 +78,6 @@ skill-mcp/
 │
 ├── .env.example           # Environment variables template
 ├── package.json           # Dependencies and scripts
-├── CONTRIBUTING.md        # Contributing guidelines
 └── CLAUDE.md              # Architecture and deployment modes
 ```
 

@@ -337,10 +337,10 @@ jobs:
 
 - [ ] 存储服务器启动并响应健康检查
 - [ ] MCP 客户端启动并连接到存储
-- [ ] API Key 认证工作正常
-  - [ ] 有效 key 返回 200
-  - [ ] 无效 key 返回 401
-  - [ ] 缺少 key 返回 401
+- [ ] Bearer Token 认证工作正常
+  - [ ] 有效 JWT token 返回 200
+  - [ ] 无效/过期 token 返回 401
+  - [ ] 缺少 Authorization 头返回 401
 - [ ] 缓存机制工作正常
   - [ ] 第一次请求较慢
   - [ ] 后续请求更快
@@ -364,6 +364,5 @@ jobs:
 
 ## 下一步
 
-- 完成所有测试后，参考 [IMPLEMENTATION_SUMMARY.md](../IMPLEMENTATION_SUMMARY.md)
-- 为生产部署配置监控和日志
-- 参考 [SCENARIO_C.md](./SCENARIO_C.md) 中的 Docker 部署示例
+- 完成所有测试后，参考 [SCENARIO_C.md](./SCENARIOS/SCENARIO_C.md) 中的 Docker 部署示例
+- 为生产部署配置监控和日志，参考 [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md)

@@ -1,6 +1,6 @@
 # MCP Tools API Reference
 
-This document provides a complete reference for the three MCP tools exposed by skill-mcp: `skill_list`, `skill_view`, and `skill_file`. These tools implement the model compliance architecture described in [tech-dev-program.md](./tech-dev-program.md) Section 3.
+This document provides a complete reference for the six MCP tools exposed by skill-mcp: `skill_list`, `skill_view`, `skill_file`, `skill_search`, `skill_feedback`, and `skill_pipeline`. These tools implement the model compliance architecture described in [tech-dev-program.md](./tech-dev-program.md) Section 3.
 
 ---
 
@@ -18,7 +18,10 @@ This is the entry point for skill discovery. The model must scan this list on ev
 
 ### Parameters
 
-None
+| Parameter | Type | Required | Format | Notes |
+|-----------|------|----------|--------|-------|
+| `tags` | string[] | No | Array of tag strings | Filter skills by tags |
+| `query` | string | No | Free text | Search/filter skills by name or description |
 
 ### Response Format
 
@@ -176,20 +179,18 @@ This tool MUST be called with multiple file paths when the skill_view instructio
 
 ### Response Format
 
-Array of `SkillFileContent` objects, one per requested file:
+Returns MCP content blocks, one per requested file. Text files return a `{type: "text", text}` block; binary files return a `{type: "image", data, mimeType}` block:
 
 ```typescript
 [
   {
-    path: "references/framework.md",
-    content: "# File content...",
-    encoding: "utf-8"        // text files (.md, .txt, .json, etc.)
+    type: "text",
+    text: "# File content of references/framework.md..."
   },
   {
-    path: "assets/icon.png",
-    content: "iVBORw0KGgoAAAANS...",
-    encoding: "base64",       // binary files (.png, .jpg, .gif, etc.)
-    mimeType: "image/png"     // optional, present for binary files
+    type: "image",
+    data: "iVBORw0KGgoAAAANS...",
+    mimeType: "image/png"
   }
 ]
 ```
@@ -267,7 +268,165 @@ Array of `SkillFileContent` objects, one per requested file:
 
 ---
 
-## 4. Auth API Endpoints
+---
+
+## 4. skill_search
+
+**Purpose**: Search for skills using text queries with configurable search modes (BM25, vector, or hybrid).
+
+### Parameters
+
+| Parameter | Type | Required | Format | Notes |
+|-----------|------|----------|--------|-------|
+| `query` | string | Yes | Free text | Search query |
+| `limit` | number | No | Positive integer | Max results to return (default: 10) |
+| `tags` | string[] | No | Array of tag strings | Filter results by tags |
+| `mode` | string | No | `"bm25"` \| `"vector"` \| `"hybrid"` | Search mode (default: `"bm25"`) |
+| `hybridAlpha` | number | No | 0.0–1.0 | Weight balance for hybrid mode (default: 0.5). 0.0 = pure BM25, 1.0 = pure vector |
+
+### Response Format
+
+Ranked list of matching skills with relevance scores:
+
+```json
+{
+  "results": [
+    { "slug": "prompt-writer", "score": 0.92, "description": "Professional prompt writing..." },
+    { "slug": "code-review", "score": 0.78, "description": "Code review assistance..." }
+  ]
+}
+```
+
+### Example
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "skill_search",
+    "arguments": {
+      "query": "prompt optimization",
+      "limit": 5,
+      "mode": "hybrid"
+    }
+  }
+}
+```
+
+---
+
+## 5. skill_feedback
+
+**Purpose**: Submit outcome feedback for a skill invocation to improve skill ranking and quality.
+
+### Parameters
+
+| Parameter | Type | Required | Format | Notes |
+|-----------|------|----------|--------|-------|
+| `skill_slug` | string | Yes | kebab-case | The skill that was used |
+| `outcome` | string | Yes | `"success"` \| `"partial"` \| `"failure"` \| `"irrelevant"` | Outcome of the skill invocation |
+| `context` | string | No | Free text | Contextual description of the usage |
+| `agent_comment` | string | No | Free text | Freeform comment from the agent |
+| `version` | string | No | Semver string | Specific skill version to attach feedback to |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "feedback_id": "fb_xxx"
+}
+```
+
+### Example
+
+**Request**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "skill_feedback",
+    "arguments": {
+      "skill_slug": "prompt-writer",
+      "outcome": "success",
+      "context": "Used CRISPE framework for a marketing prompt",
+      "agent_comment": "Framework structure was clear and effective"
+    }
+  }
+}
+```
+
+---
+
+## 6. skill_pipeline
+
+**Purpose**: Run or resume a multi-stage skill pipeline. Either starts a new pipeline from a YAML definition or resumes an existing run with intermediate outputs.
+
+### Parameters
+
+| Parameter | Type | Required | Format | Notes |
+|-----------|------|----------|--------|-------|
+| `pipeline` | string | No | YAML string | Pipeline definition to start a new run |
+| `inputs` | object | No | Key-value pairs | Input variables for the pipeline |
+| `resume` | object | No | `{run_id, stage_outputs}` | Resume an existing run with stage outputs |
+
+Either `pipeline` (to start a new run) or `resume` (to continue an existing run) is required.
+
+### Response Format
+
+```json
+{
+  "run_id": "run_xxx",
+  "status": "running",
+  "current_stage": "review",
+  "outputs": {}
+}
+```
+
+### Example
+
+**Request** (start new pipeline):
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "skill_pipeline",
+    "arguments": {
+      "pipeline": "stages:\n  - name: generate\n    skill: prompt-writer\n  - name: review\n    skill: code-review",
+      "inputs": { "topic": "API documentation" }
+    }
+  }
+}
+```
+
+**Request** (resume existing run):
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "name": "skill_pipeline",
+    "arguments": {
+      "resume": {
+        "run_id": "run_xxx",
+        "stage_outputs": { "generate": { "prompt": "..." } }
+      }
+    }
+  }
+}
+```
+
+---
+
+## 7. Auth API Endpoints
 
 Authentication endpoints for obtaining and managing JWT access tokens.
 
@@ -345,7 +504,7 @@ curl -X POST http://localhost:3000/api/auth/change-password \
 
 ---
 
-## 5. Admin API Endpoints
+## 8. Admin API Endpoints
 
 All admin endpoints require **JWT Bearer Token** authentication with `userType` of `admin` or `superadmin`. The `enforceAdminAuth()` middleware validates the JWT, checks token expiry, and verifies the user has admin-level privileges. Requests without a valid token or with insufficient privileges are rejected with 401/403.
 
@@ -353,7 +512,7 @@ All admin endpoints require **JWT Bearer Token** authentication with `userType` 
 Authorization: Bearer <jwt_access_token>
 ```
 
-### 5.1 Skills Management
+### 8.1 Skills Management
 
 #### GET /api/admin/skills
 
@@ -580,7 +739,7 @@ Run eval cases against a skill. Requires an eval runner to be configured.
 
 Get eval results for a skill.
 
-### 5.2 Users Management
+### 8.2 Users Management
 
 #### GET /api/admin/users
 
@@ -711,7 +870,7 @@ Reset a user's password. Admin can only reset own password; superadmin can reset
 | `new_password` | string | **Required.** New password (min 8 chars) |
 
 
-### 5.3 Roles Management
+### 8.3 Roles Management
 
 Built-in roles (`superadmin`, `admin`, `user`) cannot be created, modified, or deleted.
 
@@ -751,7 +910,7 @@ Update a custom role. Cannot modify built-in roles.
 
 Delete a custom role. Cannot delete built-in roles. Users assigned to this role will have their skill list cache invalidated.
 
-### 5.4 Webhooks
+### 8.4 Webhooks
 
 #### GET /api/admin/webhooks
 
@@ -855,7 +1014,7 @@ Get the last N deliveries for audit.
 
 Re-queue a dead-lettered delivery.
 
-### 5.5 Usage Metering
+### 8.5 Usage Metering
 
 #### GET /api/admin/usage/aggregate
 
@@ -883,7 +1042,7 @@ List raw usage events.
 | `eventType` | string | Filter by event type |
 | `limit` | number | Max events (default: 1000, max: 10000) |
 
-### 5.6 Import Jobs
+### 8.6 Import Jobs
 
 #### POST /api/admin/skills/import/async
 
@@ -944,7 +1103,7 @@ Get a specific import job.
 
 Get just the progress counter for an import job (thin alias for shell scripts).
 
-### 5.8 Admin Misc
+### 8.7 Admin Misc
 
 #### GET /api/admin/logs
 
@@ -971,7 +1130,7 @@ Get server statistics.
 
 ---
 
-## 6. Gateway API Endpoints
+## 9. Gateway API Endpoints
 
 All Gateway endpoints require **JWT Bearer Token** authentication. The gateway validates the JWT and resolves the user's identity and permissions. Legacy API key tokens are also supported for backward compatibility.
 
@@ -1114,7 +1273,7 @@ Get the file tree structure of a skill.
 
 ---
 
-## 7. Kubernetes Probe Endpoints
+## 10. Kubernetes Probe Endpoints
 
 
 ### GET /api/health
@@ -1178,9 +1337,12 @@ These endpoints are used by kubelet for health checking in k8s deployments.
 ```json
 {
   "success": false,
-  "error": "Descriptive error message"
+  "error": "Descriptive error message",
+  "code": "ERROR_CODE"
 }
 ```
+
+The `code` field is optional and provides a machine-readable error identifier (e.g. `"SKILL_NOT_FOUND"`, `"INVALID_PATH"`, `"AUTH_REQUIRED"`). Omitted when no specific code applies.
 
 ---
 

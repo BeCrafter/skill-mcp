@@ -84,6 +84,7 @@ docs/
 ├── API_REFERENCE.md                 # MCP 工具和 Gateway API
 ├── TESTING_GUIDE.md                 # 测试框架和运行方法
 ├── PRODUCTION_DEPLOYMENT.md         # 生产部署指南
+├── PUBLISHING.md                    # 发布和版本管理指南
 │
 ├── SCENARIOS/                       # 部署场景文档
 │   ├── SCENARIO_A.md               # 本地 stdio 开发
@@ -206,7 +207,7 @@ data/
 
 ```bash
 # 清理编译产物
-npm run clean  # 或手动删除 dist/
+rm -rf dist/
 
 # 清理数据（仅本地开发）
 rm -rf data/

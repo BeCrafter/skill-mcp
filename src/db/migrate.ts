@@ -48,8 +48,6 @@ function resetAndRecreate(db: Database.Database): void {
     DROP TABLE IF EXISTS skill_eval_cases;
     DROP TABLE IF EXISTS skill_embeddings;
     DROP TABLE IF EXISTS audit_logs;
-    DROP TABLE IF EXISTS oidc_group_role_map;
-    DROP TABLE IF EXISTS oidc_identities;
     DROP TABLE IF EXISTS webhook_deliveries;
     DROP TABLE IF EXISTS webhooks;
     DROP TABLE IF EXISTS usage_events;

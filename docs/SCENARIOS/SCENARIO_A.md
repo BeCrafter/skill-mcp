@@ -82,7 +82,7 @@ claude-code --transport stdio /path/to/skill-mcp/npm start
 
 2. 在 Claude IDE 中配置 MCP 连接
 
-3. 连接后应该能看到 skill_list、skill_view、skill_file 三个工具
+3. 连接后应该能看到 skill_list、skill_view、skill_file、skill_search、skill_feedback、skill_pipeline 六个工具
 
 ## 导入示例技能
 
@@ -90,13 +90,13 @@ claude-code --transport stdio /path/to/skill-mcp/npm start
 
 ```bash
 # 从本地目录导入
-npm run import -- --source /path/to/skill/dir
+npm run import -- /path/to/skill/dir
 
 # 从 Git 仓库导入
-npm run import -- --source https://github.com/user/skill-repo.git
+npm run import -- https://github.com/user/skill-repo.git
 
 # 导入后查看
-npm run db:query -- "SELECT slug, name FROM skills"
+sqlite3 data/skill-mcp.db "SELECT slug, name FROM skills"
 ```
 
 ### 手动创建测试技能
@@ -107,10 +107,15 @@ npm run db:query -- "SELECT slug, name FROM skills"
 mkdir -p ./data/skills/my-test-skill
 ```
 
-2. 创建 SKILL.md
+2. 创建 SKILL.md（包含 frontmatter 元数据）
 
 ```bash
 cat > ./data/skills/my-test-skill/SKILL.md << 'EOF'
+---
+name: my-test-skill
+version: 0.0.1
+description: A test skill
+---
 # My Test Skill
 
 This is a test skill for scenario A.
@@ -127,23 +132,10 @@ Use this skill to test the MCP server.
 EOF
 ```
 
-3. 创建 manifest.json
+3. 导入到数据库
 
 ```bash
-cat > ./data/skills/my-test-skill/manifest.json << 'EOF'
-{
-  "name": "my-test-skill",
-  "version": "0.0.1",
-  "entry": "SKILL.md",
-  "description": "A test skill"
-}
-EOF
-```
-
-4. 导入到数据库
-
-```bash
-npm run import -- --source ./data/skills/my-test-skill
+npm run import -- ./data/skills/my-test-skill
 ```
 
 ## 测试 MCP 工具
@@ -179,7 +171,7 @@ npm run import -- --source ./data/skills/my-test-skill
 ```typescript
 // 输入：
 // - skillId: my-test-skill
-// - paths: ["manifest.json", "SKILL.md"]
+// - paths: ["templates/basic.md", "SKILL.md"]
 // 输出：文件内容列表
 ```
 
@@ -192,8 +184,7 @@ npm run import -- --source ./data/skills/my-test-skill
 ├── skill-mcp.db              # SQLite 数据库（元数据）
 ├── skills/                   # 技能文件存储
 │   └── my-test-skill/
-│       ├── SKILL.md
-│       └── manifest.json
+│       └── SKILL.md
 └── cache/                    # L2 文件缓存
     └── *.json
 ```
@@ -204,7 +195,7 @@ npm run import -- --source ./data/skills/my-test-skill
 
 ```bash
 # 查看数据库
-npm run db:query -- "SELECT id, slug, name, status FROM skills"
+sqlite3 data/skill-mcp.db "SELECT id, slug, name, status FROM skills"
 
 # 查看文件系统
 ls -la ./data/skills/

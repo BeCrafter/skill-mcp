@@ -182,7 +182,7 @@ npm start  # 会自动创建新数据库
 
 ### Q: 如何管理用户权限？
 
-项目使用基于角色的访问控制（RBAC）。API Key 认证已移除。
+项目使用基于角色的访问控制（RBAC）。
 
 ```bash
 # 初始化系统（首次）
@@ -196,6 +196,19 @@ npm start -- user create --name alice --role-ids <role-id>
 ```
 
 HTTP/SSE 客户端通过 `Authorization: Bearer <token>` 认证；stdio 模式设置 `SKILL_MCP_AUTH_TOKEN` 环境变量。
+
+## MCP 工具一览
+
+连接后可使用以下 6 个 MCP 工具：
+
+| 工具 | 功能 |
+|------|------|
+| `skill_list` | 列出所有可用技能 |
+| `skill_view` | 查看技能详情和 SKILL.md 内容 |
+| `skill_file` | 读取技能包中的特定文件 |
+| `skill_search` | 搜索技能（支持关键词和语义搜索） |
+| `skill_feedback` | 提交技能使用反馈和评分 |
+| `skill_pipeline` | 执行技能 Pipeline |
 
 ## 文档导航
 

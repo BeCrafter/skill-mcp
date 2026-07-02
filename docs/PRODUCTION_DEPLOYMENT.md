@@ -74,8 +74,6 @@ services:
       TRANSPORT_PORT: 3000
       DEPLOYMENT_MODE: standalone
       MCP_ONLY_MODE: "true"
-      ENABLE_API_KEY_AUTH: "true"
-      API_KEYS: ${STORAGE_API_KEY}
       STORAGE_TYPE: aliyun-oss
       STORAGE_BUCKET: ${OSS_BUCKET}
       STORAGE_REGION: ${OSS_REGION}
@@ -88,7 +86,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${STORAGE_API_KEY}", "http://localhost:3000/api/gateway/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/gateway/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -103,7 +101,7 @@ services:
       TRANSPORT_PORT: 4000
       DEPLOYMENT_MODE: gateway
       CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: ${STORAGE_API_KEY}
+      AUTH_TOKEN: ${GATEWAY_TOKEN}
       MCP_ONLY_MODE: "true"
       DATABASE_PATH: /data/skill-mcp.db
       CACHE_FILE_DIR: /data/cache
@@ -126,7 +124,7 @@ services:
       TRANSPORT_PORT: 4000
       DEPLOYMENT_MODE: gateway
       CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: ${STORAGE_API_KEY}
+      AUTH_TOKEN: ${GATEWAY_TOKEN}
       MCP_ONLY_MODE: "true"
       DATABASE_PATH: /data/skill-mcp.db
       CACHE_FILE_DIR: /data/cache
@@ -265,12 +263,14 @@ http {
 ```bash
 # 1. 创建 .env 文件
 cat > .env.production << 'EOF'
-STORAGE_API_KEY=your-strong-api-key-here
+# Gateway auth token (create via: skill-mcp user create --name svc-gateway --role-ids <id>)
+GATEWAY_TOKEN=your-strong-token-here
 OSS_BUCKET=your-oss-bucket
 OSS_REGION=oss-cn-beijing
 OSS_ACCESS_KEY_ID=your-access-key-id
 OSS_ACCESS_KEY_SECRET=your-access-key-secret
 EOF
+
 
 # 2. 构建镜像
 docker build -t skill-mcp:latest .
@@ -286,27 +286,23 @@ docker-compose -f docker-compose.production.yml ps
 
 ### Prometheus 指标
 
-在应用中添加指标收集（第 5 阶段优化）：
+应用内置 Prometheus 指标（自动暴露在 `/metrics` 端点），主要包括：
 
-```typescript
-// 示例指标
-const httpRequestDuration = new Histogram({
-  name: 'http_request_duration_seconds',
-  help: 'HTTP request duration in seconds',
-  labelNames: ['method', 'route', 'status'],
-});
+| 指标名 | 类型 | 说明 |
+|--------|------|------|
+| `skill_mcp_tool_calls_total` | Counter | MCP 工具调用次数（按 tool/status 分） |
+| `skill_mcp_tool_duration_seconds` | Histogram | MCP 工具调用延迟 |
+| `skill_mcp_http_requests_total` | Counter | HTTP API 请求次数（按 route/method/status_code 分） |
+| `skill_mcp_http_duration_seconds` | Histogram | HTTP 请求延迟 |
+| `skill_mcp_cache_operations_total` | Counter | 缓存操作次数（L1/L2 hit/miss） |
+| `skill_mcp_provider_latency_seconds` | Histogram | Skill Provider 操作延迟 |
+| `skill_mcp_db_query_duration_seconds` | Histogram | 数据库查询延迟 |
+| `skill_mcp_skills_total` | Gauge | 数据库中的技能总数 |
+| `skill_mcp_imports_total` | Counter | 技能导入次数 |
+| `skill_mcp_injection_alert_total` | Counter | Prompt injection 检测次数 |
+| `skill_mcp_rate_limit_denied_total` | Counter | Rate limiter 拒绝次数 |
+| `skill_mcp_webhook_delivery_final_total` | Counter | Webhook 投递终态次数 |
 
-const cacheHitRate = new Gauge({
-  name: 'cache_hit_rate',
-  help: 'Cache hit rate percentage',
-});
-
-const remoteProviderErrors = new Counter({
-  name: 'remote_provider_errors_total',
-  help: 'Total remote provider errors',
-  labelNames: ['type'],
-});
-```
 
 ### ELK Stack 日志收集
 
@@ -325,48 +321,44 @@ output.elasticsearch:
   index: "skill-mcp-%{+yyyy.MM.dd}"
 ```
 
-### 关键告警规则
-
 ```yaml
 groups:
   - name: skill-mcp
     rules:
       - alert: HighErrorRate
-        expr: rate(errors_total[5m]) > 0.05
+        expr: rate(skill_mcp_http_requests_total{status_code=~"5.."}[5m]) / rate(skill_mcp_http_requests_total[5m]) > 0.05
         for: 5m
 
       - alert: StorageUnavailable
         expr: up{job="storage"} == 0
         for: 1m
 
-      - alert: CacheMissRate
-        expr: cache_miss_rate > 0.5
+      - alert: HighCacheMissRate
+        expr: rate(skill_mcp_cache_operations_total{result="miss"}[5m]) / rate(skill_mcp_cache_operations_total[5m]) > 0.5
         for: 10m
 
-      - alert: RemoteProviderTimeout
-        expr: rate(remote_provider_timeouts[5m]) > 1
+      - alert: HighRateLimitDenials
+        expr: rate(skill_mcp_rate_limit_denied_total[5m]) > 1
         for: 5m
 ```
 
 ## 安全最佳实践
 
-### API Key 管理
+### 认证令牌管理
 
 ```bash
-# 使用强加密的 API Key
-API_KEY=$(openssl rand -hex 32)
+# 创建服务账号并获取 token
+skill-mcp user create --name svc-gateway --role-ids <role-id>
+# 输出的 token 用作 AUTH_TOKEN
 
-# 定期轮换 API Key（每 3 个月）
-# 1. 生成新 key
-NEW_KEY=$(openssl rand -hex 32)
+# 定期轮换 token（每 3 个月）
+# 1. 创建新用户
+skill-mcp user create --name svc-gateway-new --role-ids <role-id>
 
-# 2. 添加到 API_KEYS 列表
-API_KEYS=old-key,new-key
-
-# 3. 更新应用配置
-# 4. 等待客户端更新
-# 5. 移除旧 key
-API_KEYS=new-key
+# 2. 更新应用配置，使用新 token
+# 3. 等待客户端切换到新 token
+# 4. 删除旧用户
+skill-mcp user remove svc-gateway
 ```
 
 ### 网络隔离
@@ -414,15 +406,13 @@ CACHE_FILE_ENABLED=true
 CACHE_FILE_DIR=/var/cache/skill-mcp
 ```
 
-### OSS 优化
+### 存储优化
 
 ```bash
-# 使用 CDN 加速
-STORAGE_USE_CDN=true
-STORAGE_CDN_DOMAIN=cdn.example.com
-
-# 启用对象压缩
-STORAGE_ENABLE_COMPRESSION=true
+# 使用阿里云 OSS
+STORAGE_TYPE=aliyun-oss
+STORAGE_BUCKET=your-bucket
+STORAGE_REGION=oss-cn-beijing
 ```
 
 ## 备份和恢复
@@ -480,9 +470,9 @@ docker-compose -f docker-compose.production.yml exec storage \
 # 1. 检查日志
 docker-compose logs storage
 
-# 2. 检查健康状态
-curl -H "Authorization: Bearer $API_KEY" \
-  http://localhost:3000/api/gateway/health
+# 2. 检查健康状态（health 端点不需要认证）
+curl http://localhost:3000/api/gateway/health
+
 
 # 3. 验证数据库
 docker-compose exec storage \
@@ -594,7 +584,7 @@ spec:
 - [ ] 数据库备份已设置
 - [ ] 监控和告警已启用
 - [ ] 日志收集已配置
-- [ ] API Key 已安全存储
+- [ ] 认证令牌已安全配置（RBAC + JWT）
 - [ ] 负载均衡器已配置
 - [ ] 健康检查已验证
 - [ ] 性能测试已完成
