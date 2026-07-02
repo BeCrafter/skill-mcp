@@ -10,31 +10,86 @@
 
 ## 前置准备
 
+### 1. 编译项目
+
 ```bash
-# 编译
 npm run build
+```
 
-# CLI 入口（文档中所有命令均通过此方式执行）
+### 2. 初始化系统
+
+```bash
+# 创建超级管理员（首次使用必须执行）
+node dist/index.js init --username admin --password admin888
+```
+
+### 3. 认证登录
+
+```bash
+# 本地模式登录
+node dist/index.js auth login
+# 输入用户名: admin
+# 输入密码: admin888
+
+# 验证登录状态
+node dist/index.js auth whoami
+```
+
+### 4. 环境变量（可选）
+
+```bash
+# CLI 入口别名（文档中所有命令均通过此方式执行）
+export NODE="node $(pwd)/dist/index.js"
+
+# 或直接使用完整路径
 NODE="node /path/to/dist/index.js"
+```
 
-# 测试素材
+### 5. 默认测试账号
+
+| 角色 | 用户名 | 密码 | 说明 |
+|------|--------|------|------|
+| 超级管理员 | admin | admin888 | 系统初始化时创建 |
+| 超级管理员 | superadmin | admin888 | 首次登录后自动创建 |
+
+### 6. 测试素材
+
+```
 tests/fixtures/test-skill/SKILL.md       # 合法技能包
 tests/fixtures/bad-skill/SKILL.md        # 有缺陷技能包（name 为空）
 tests/fixtures/test-pipeline.yaml        # 合法 4 阶段 DAG pipeline
 tests/fixtures/bad-pipeline.yaml         # 无效 pipeline（循环依赖）
+```
 
-# 远程技能
+### 7. 远程技能（Git import 测试）
+
+```
 https://github.com/alchaincyf/nuwa-skill                  # Git import 正向测试
 https://github.com/JimLiu/baoyu-skills (sub-dir skills/baoyu-cover-image)  # --sub-dir 测试
 https://github.com/getpaseo/paseo (branch v0.1.103, sub-dir skills/paseo-loop)  # --branch + --sub-dir 组合测试
+```
 
-# LLM 模型配置（用于 eval 真实验证，LLMEvalProvider 通过环境变量驱动）
-# 当前 eval 命令默认使用 EchoEvalProvider（回显），配置以下环境变量后可在 serve 模式下启用 LLM 评估
-export OPENAI_API_KEY="sk-EzABmTPzRl9tzMnvCp7NQ8UYbxG9LQGQvWNDCyLba26QkZiU"
+### 8. LLM 模型配置（可选，用于 eval 真实验证）
+
+```bash
+# LLMEvalProvider 通过环境变量驱动
+export OPENAI_API_KEY="sk-xxx"
 export OPENAI_BASE_URL="https://apihub.agnes-ai.com/v1"
 export OPENAI_MODEL="agnes-2.0-flash"
+
 # 使用方式：启动 serve 时设置 eval.provider=llm，或直接调用 LLMEvalProvider
 ```
+
+---
+
+## 认证方式速查
+
+| 模式 | 认证方式 | 环境变量 |
+|------|----------|----------|
+| 本地 CLI | `~/.skill-mcp/credentials.json` | - |
+| stdio MCP | `--auth-token` 或 `SKILL_MCP_AUTH_TOKEN` | `SKILL_MCP_AUTH_TOKEN` |
+| HTTP/SSE MCP | `Authorization: Bearer <JWT>` | - |
+| Gateway | `--server-url` + JWT | `AUTH_TOKEN` |
 
 ---
 
@@ -1184,9 +1239,495 @@ HTTP 状态码: 200
 
 ---
 
+## 14. 验收后手动操作指南
+
+验收完成后，可继续以下手动操作验证系统功能。
+
+### 14.1 完整工作流演示
+
+```bash
+# 1. 确保已登录
+node dist/index.js auth whoami
+
+# 2. 创建新技能目录
+mkdir -p my-new-skill/templates
+
+# 3. 创建 SKILL.md
+cat > my-new-skill/SKILL.md << 'EOF'
+---
+name: my-new-skill
+version: 1.0.0
+description: A new skill for testing
+category: testing
+tags: test, demo
+triggers:
+  - test skill
+  - demo skill
+whenToUse: When user wants to test the skill system
+evalCases:
+  - input: "test the skill"
+    expected: "Skill executed successfully"
+---
+
+# My New Skill
+
+This is a test skill for demonstration.
+EOF
+
+# 4. 创建其他文件
+echo "# Template" > my-new-skill/templates/basic.md
+
+# 5. 检查技能质量
+node dist/index.js lint ./my-new-skill
+
+# 6. 导入技能
+node dist/index.js import ./my-new-skill
+
+# 7. 验证导入
+node dist/index.js list
+node dist/index.js info my-new-skill
+
+# 8. 更新技能并创建新版本
+echo "## Updated Content" >> my-new-skill/SKILL.md
+sed -i '' 's/version: 1.0.0/version: 1.1.0/' my-new-skill/SKILL.md
+node dist/index.js import ./my-new-skill --overwrite
+
+# 9. 查看版本历史
+node dist/index.js versions my-new-skill
+
+# 10. 对比版本差异
+node dist/index.js versions my-new-skill --diff 1.0.0..1.1.0
+
+# 11. 回滚到旧版本
+node dist/index.js rollback my-new-skill --to 1.0.0
+
+# 12. 删除技能
+node dist/index.js remove my-new-skill --force
+```
+
+### 14.2 用户管理操作
+
+```bash
+# 创建新用户
+node dist/index.js user create --name "Test User" --username testuser --password testpass123 --user-type user
+
+# 查看用户列表
+node dist/index.js user list
+
+# 查看用户详情（获取 token）
+node dist/index.js user get <userId>
+
+# 分配角色
+node dist/index.js user assign-roles <userId> --role-ids <roleId>
+
+# 轮换 token
+node dist/index.js user rotate-token <userId> --ttl 30d
+
+# 删除用户
+node dist/index.js user delete <userId>
+```
+
+### 14.3 角色管理操作
+
+```bash
+# 创建角色
+node dist/index.js role create --name "Viewer" --tags read-only --description "Read-only access"
+
+# 查看角色列表
+node dist/index.js role list
+
+# 更新角色
+node dist/index.js role update <roleId> --name "Updated Viewer" --tags read,view
+
+# 删除角色
+node dist/index.js role delete <roleId>
+```
+
+### 14.4 远程服务器模式
+
+```bash
+# 启动 HTTP 服务器
+node dist/index.js serve --transport http --port 3000 --host 0.0.0.0 --mode standalone --auth-token my-secret
+
+# 新终端：登录远程服务器
+node dist/index.js auth login --server-url http://localhost:3000
+
+# 远程导入技能
+node dist/index.js import ./my-skill --server-url http://localhost:3000
+
+# 远程查看列表
+node dist/index.js list --server-url http://localhost:3000
+```
+
+### 14.5 MCP Inspector 连接
+
+```bash
+# 启动 Inspector
+npx @modelcontextprotocol/inspector
+
+# 在 Inspector UI 中配置：
+# 1. Transport: Streamable HTTP
+# 2. URL: http://localhost:3000/mcp
+# 3. 添加 Header: Authorization: Bearer <your-jwt-token>
+
+# 获取 JWT Token
+node dist/index.js auth login --server-url http://localhost:3000
+# 登录后 token 保存在 ~/.skill-mcp/credentials.json
+```
+
+### 14.6 MCP 端到端验证（Token → 连接 → 工具列表）
+
+本节提供完整的端到端验证，覆盖 **用户Token操作 → MCP服务连接 → 获取工具列表** 全链路，确保验证通过后可直接手动操作。
+
+#### 快速验证（推荐）
+
+```bash
+# 一键运行全部协议验证（HTTP + SSE + stdio）
+./tests/e2e/mcp-e2e-verify.sh
+
+# 仅验证 HTTP 协议
+./tests/e2e/mcp-e2e-verify.sh http
+
+# 仅验证 SSE 协议
+./tests/e2e/mcp-e2e-verify.sh sse
+
+# 仅验证 stdio 协议
+./tests/e2e/mcp-e2e-verify.sh stdio
+```
+
+#### 预期 MCP 工具列表
+
+MCP 服务注册了以下 **6 个工具**，端到端验证会逐一校验：
+
+| 工具名 | 说明 | 调用示例 |
+|--------|------|----------|
+| `skill_list` | 列出所有技能 | `{"name":"skill_list","arguments":{}}` |
+| `skill_search` | 搜索技能 | `{"name":"skill_search","arguments":{"query":"test"}}` |
+| `skill_view` | 查看技能详情 | `{"name":"skill_view","arguments":{"slug":"test-skill"}}` |
+| `skill_file` | 获取技能文件 | `{"name":"skill_file","arguments":{"slug":"test-skill"}}` |
+| `skill_feedback` | 技能反馈 | `{"name":"skill_feedback","arguments":{"slug":"test-skill","rating":5}}` |
+| `skill_pipeline` | 运行技能流水线 | `{"name":"skill_pipeline","arguments":{...}}` |
+
+#### 端到端验证链路图
+
+```mermaid
+flowchart TD
+    A[1. init 初始化系统] --> B[2. auth login 登录]
+    B --> C[3. user create 创建测试用户]
+    C --> D[4. user rotate-token 获取 Token]
+    D --> E{选择协议}
+    E -->|HTTP| F1[serve --transport http]
+    E -->|SSE| F2[serve --transport sse]
+    E -->|stdio| F3[serve --transport stdio]
+    F1 --> G1[curl /mcp 健康检查]
+    F2 --> G2[curl /mcp/sse 健康检查]
+    F3 --> G3[stdin/stdout JSON-RPC]
+    G1 --> H[POST initialize 握手]
+    G2 --> H
+    G3 --> H
+    H --> I[POST tools/list 获取工具列表]
+    I --> J{工具数 == 6?}
+    J -->|是| K[✓ 验证通过]
+    J -->|否| L[✗ 报告缺失工具]
+```
+
+#### 手动验证步骤（HTTP 协议）
+
+**Step 1: 准备 Token**
+
+```bash
+# 登录
+node dist/index.js auth login
+# 用户名: admin  密码: admin888
+
+# 创建测试用户
+node dist/index.js user create \
+  --name "E2E Test" \
+  --username e2e-test \
+  --password test123456 \
+  --user-type user
+
+# 获取用户ID
+USER_ID=$(node dist/index.js user list | grep e2e-test | awk '{print $1}')
+
+# 轮换获取 Token
+node dist/index.js user rotate-token $USER_ID --ttl 30d
+# 记录输出的 sk-live-xxx token
+```
+
+**Step 2: 启动 HTTP MCP 服务**
+
+```bash
+node dist/index.js serve \
+  --transport http \
+  --port 3460 \
+  --host 127.0.0.1 \
+  --mode standalone \
+  --auth-token <YOUR_TOKEN>
+```
+
+**Step 3: 健康检查**
+
+```bash
+curl -s http://127.0.0.1:3460/api/health
+# 预期: {"status":"ok","timestamp":"..."}
+```
+
+**Step 4: 未认证访问（预期 401）**
+
+```bash
+curl -s -w "\nHTTP %{http_code}" http://127.0.0.1:3460/mcp
+# 预期: {"success":false,"error":"Authentication required"} / HTTP 401
+```
+
+**Step 5: MCP Initialize 握手**
+
+```bash
+curl -s -D /tmp/mcp-headers -X POST http://127.0.0.1:3460/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <YOUR_TOKEN>" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {"name": "manual-e2e", "version": "1.0.0"}
+    }
+  }'
+
+# 从响应头提取 Session ID
+SESSION_ID=$(grep -i "mcp-session-id" /tmp/mcp-headers | awk '{print $2}' | tr -d '\r\n')
+echo "Session ID: $SESSION_ID"
+```
+
+**Step 6: 发送 initialized 通知**
+
+```bash
+curl -s -X POST http://127.0.0.1:3460/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <YOUR_TOKEN>" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+```
+
+**Step 7: 获取工具列表**
+
+```bash
+curl -s -X POST http://127.0.0.1:3460/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <YOUR_TOKEN>" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+**预期输出**：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {"name": "skill_list", "description": "...", "inputSchema": {...}},
+      {"name": "skill_search", "description": "...", "inputSchema": {...}},
+      {"name": "skill_view", "description": "...", "inputSchema": {...}},
+      {"name": "skill_file", "description": "...", "inputSchema": {...}},
+      {"name": "skill_feedback", "description": "...", "inputSchema": {...}},
+      {"name": "skill_pipeline", "description": "...", "inputSchema": {...}}
+    ]
+  }
+}
+```
+
+**Step 8: 调用工具验证**
+
+```bash
+curl -s -X POST http://127.0.0.1:3460/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <YOUR_TOKEN>" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "skill_list",
+      "arguments": {}
+    }
+  }'
+# 预期: 返回技能列表 JSON
+```
+
+#### 端到端验证结论模板
+
+完成验证后，按以下模板记录结论：
+
+```markdown
+## MCP 端到端验证结论
+
+**验证日期**: YYYY-MM-DD
+**验证版本**: x.x.x
+**验证协议**: HTTP / SSE / stdio
+
+### 链路验证
+
+| # | 步骤 | 描述 | 结果 | 备注 |
+|---|------|------|------|------|
+| 1 | 系统初始化 | init + login | ✅/❌ | |
+| 2 | 用户创建 | user create | ✅/❌ | userId: usr_xxx |
+| 3 | Token 获取 | user rotate-token | ✅/❌ | sk-live-xxx |
+| 4 | 服务启动 | serve --transport | ✅/❌ | port: 3460 |
+| 5 | 健康检查 | /api/health | ✅/❌ | |
+| 6 | 未认证拒绝 | 无 Bearer → 401 | ✅/❌ | |
+| 7 | MCP 握手 | initialize | ✅/❌ | sessionId: xxx |
+| 8 | 工具列表 | tools/list | ✅/❌ | 6/6 工具 |
+| 9 | 工具调用 | skill_list | ✅/❌ | |
+
+### 工具校验
+
+| 工具名 | 预期 | 实际 | 错误信息 |
+|--------|------|------|----------|
+| skill_list | ✅ | ✅/❌ | |
+| skill_search | ✅ | ✅/❌ | |
+| skill_view | ✅ | ✅/❌ | |
+| skill_file | ✅ | ✅/❌ | |
+| skill_feedback | ✅ | ✅/❌ | |
+| skill_pipeline | ✅ | ✅/❌ | |
+
+### 错误记录
+
+> 如有错误，记录以下信息以便分析修复：
+
+**错误描述**: [具体错误]
+**发生步骤**: [步骤编号]
+**执行命令**: [完整命令]
+**完整输出**: [输出内容]
+**运行环境**: macOS/Linux, Node v22.x
+**可能原因**: [分析]
+**修复建议**: [方案]
+```
+
+#### 常见错误排查
+
+| 错误现象 | 可能原因 | 排查命令 | 解决方案 |
+|----------|----------|----------|----------|
+| `ECONNREFUSED` | 服务未启动 | `curl http://localhost:3460/api/health` | 启动 serve |
+| `401 Authentication required` | 未携带 Token | 检查请求头 | 添加 `Authorization: Bearer <token>` |
+| `401 Invalid or expired token` | Token 无效/过期 | `node dist/index.js auth whoami` | 重新 `user rotate-token` |
+| 工具列表为空 | 权限不足或未注册 | 检查用户角色 | `user assign-roles` 分配角色 |
+| initialize 超时 | 端口被占用 | `lsof -i :3460` | 换端口或停止旧进程 |
+| Session ID 缺失 | 未返回 header | 检查 SDK 版本 | 更新 `@modelcontextprotocol/sdk` |
+| `tools/list` 返回 error | 会话未 initialized | 确认已发 initialize + initialized | 补发通知 |
+---
+
+## 15. 故障排查
+
+### 15.1 数据库未初始化
+
+```
+Error: no such table: skills
+```
+
+**解决方案**：
+```bash
+node dist/index.js init --username admin --password admin888
+```
+
+### 15.2 未登录
+
+```
+Error: Not logged in. Run `skill-mcp auth login` first.
+```
+
+**解决方案**：
+```bash
+node dist/index.js auth login
+# 输入用户名: admin
+# 输入密码: admin888
+```
+
+### 15.3 技能已存在
+
+```
+Error: Skill "my-skill" already exists
+```
+
+**解决方案**：
+```bash
+# 使用 --overwrite 覆盖
+node dist/index.js import ./my-skill --overwrite
+
+# 或使用 --allow-duplicate 允许重复
+node dist/index.js import ./my-skill --allow-duplicate
+```
+
+### 15.4 版本不存在
+
+```
+Error: Version v2.0.0 not found
+```
+
+**解决方案**：
+```bash
+# 先查看可用版本
+node dist/index.js versions my-skill
+
+# 使用正确的版本号
+node dist/index.js rollback my-skill --to 1.0.0
+```
+
+### 15.5 认证过期
+
+```
+Error: Invalid or expired token
+```
+
+**解决方案**：
+```bash
+# 重新登录
+node dist/index.js auth logout
+node dist/index.js auth login
+```
+
+### 15.6 远程连接失败
+
+```
+Error: connect ECONNREFUSED
+```
+
+**解决方案**：
+```bash
+# 检查服务器是否启动
+curl -s http://localhost:3000/api/health
+
+# 重新启动服务器
+node dist/index.js serve --transport http --port 3000 --host 0.0.0.0
+```
+
+---
+
+## 16. 环境变量参考
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `DATABASE_PATH` | 数据库文件路径 | `~/.skill-mcp/skill-mcp.db` |
+| `STORAGE_BASE_PATH` | 技能存储路径 | `~/.skill-mcp/data/skills` |
+| `AUTH_TOKEN` | 认证令牌 | - |
+| `SKILL_MCP_SERVER_URL` | 远程服务器 URL | - |
+| `SKILL_MCP_AUTH_TOKEN` | stdio 模式认证令牌 | - |
+| `DEPLOYMENT_MODE` | 部署模式 | `standalone` |
+| `TRANSPORT_TYPE` | 传输类型 | `stdio` |
+| `LOG_LEVEL` | 日志级别 | `info` |
+
+---
+
 ## 变更日志
 
 | 日期 | Commit | 变更摘要 |
 |------|--------|---------|
 | 2026-07-02 | (initial) | 新建文档，完成 75 条 CLI 验收用例 |
 | 2026-07-02 | (re-verify) | 二次验收：5 处退出码问题已修复（E-02/E-07/E-09/V-22/E-08），75 条用例全部通过， 瑕疵 |
+| 2026-07-02 | (enhance) | 增强文档：添加完整前置准备、默认账号、手动操作指南、故障排查 |
+| 2026-07-02 | (e2e-verify) | 新增 14.6 MCP 端到端验证：Token→连接→工具列表全链路闭环，含自动脚本 + 手动步骤 + 结论模板 |

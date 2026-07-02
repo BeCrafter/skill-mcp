@@ -76,6 +76,10 @@ export async function createCli(): Promise<Command> {
             { label: "Tools",        icon: "◆", names: ["migrate:check", "manifest:migrate"] },
           ];
 
+          const SUB_ORDER: Record<string, string[]> = {
+            user: ["list", "create", "get", "delete", "assign-roles", "rotate-token"],
+          };
+
           const allCmds = subs;
           const used = new Set<string>();
 
@@ -115,6 +119,8 @@ export async function createCli(): Promise<Command> {
             for (const sub of cmds) {
               used.add(sub.name());
               const subCmds = helper.visibleCommands(sub).filter(s => s.name() !== "help");
+              const order = SUB_ORDER[sub.name()];
+              if (order) subCmds.sort((a, b) => order.indexOf(a.name()) - order.indexOf(b.name()));
               if (subCmds.length > 0) {
                 // parent group — bold green to stand out from leaf commands
                 const styled = styleUsage(sub.name());
