@@ -38,7 +38,7 @@ describe("T-303 metrics", () => {
   });
 
   it("permissionDenials increments per denied skill, labeled by visibility", async () => {
-    const ctx: RequestContext = { tenantId: "default", userId: "u1", sessionId: "s1", tags: new Set(), isAuthenticated: false };
+    const ctx: RequestContext = { userId: "u1", sessionId: "s1", tags: new Set(), isAuthenticated: false };
     const filter = new TagPermissionFilter(ctx);
     const skills: SkillMeta[] = [
       { id: "1", slug: "a", name: "a", version: "1.0.0", description: "", tags: [], visibility: "private", status: "published", category: "", attributes: {}, contentHash: "", storagePath: "", storageBackend: "local-fs", createdAt: 0, updatedAt: 0 } as never,

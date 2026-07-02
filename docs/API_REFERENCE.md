@@ -751,55 +751,7 @@ Update a custom role. Cannot modify built-in roles.
 
 Delete a custom role. Cannot delete built-in roles. Users assigned to this role will have their skill list cache invalidated.
 
-### 5.4 Quotas & Tier Limits
-
-#### GET /api/admin/tenants/{tenantId}/quota
-
-Get the current quota row for a tenant. Auto-seeds a `free` tier on first read.
-
-#### PUT /api/admin/tenants/{tenantId}/quota
-
-Change the tier or individual quota limits.
-
-**Request Body**:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `tier` | `"free" \| "team" \| "enterprise"` | Set tier (resets limits to tier defaults) |
-| `max_users` | number? | Max number of users |
-| `max_skills` | number? | Max number of skills |
-| `max_storage_bytes` | number? | Max storage in bytes |
-| `max_api_calls_per_day` | number? | Max API calls per day |
-| `max_pipeline_runs_per_day` | number? | Max pipeline runs per day |
-| `notes` | string? | Admin notes (max 1024 chars) |
-
-#### GET /api/admin/tenants/{tenantId}/quota/history
-
-Get chronological quota change history (newest first).
-
-#### GET /api/admin/tenants/{tenantId}/overrides
-
-Get active quota overrides (or all with `?all=true`).
-
-#### POST /api/admin/tenants/{tenantId}/overrides
-
-Create a quota override. Requires an audit-grade reason.
-
-**Request Body**:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `field_name` | string | **Required.** Quota field to override |
-| `override_value` | number | **Required.** Override value |
-| `reason` | string | **Required.** Audit reason |
-| `granted_by` | string | **Required.** Who granted this override |
-| `expires_at` | number? | Expiry timestamp (ms) |
-
-#### DELETE /api/admin/quota-overrides/{overrideId}
-
-Remove a single quota override.
-
-### 5.5 Webhooks
+### 5.4 Webhooks
 
 #### GET /api/admin/webhooks
 
@@ -812,7 +764,6 @@ List all webhook subscriptions (secrets are hidden).
   "data": [
     {
       "id": "wh_xxx",
-      "tenant_id": "default",
       "url": "https://example.com/webhook",
       "event_types": ["skill.view", "skill.download"],
       "enabled": true,
@@ -835,7 +786,6 @@ Create a new webhook subscription. The secret is returned **once** in this respo
 | Field | Type | Description |
 |-------|------|-------------|
 | `url` | string | **Required.** Webhook delivery URL |
-| `tenant_id` | string | Tenant ID (optional, default: `"default"`) |
 | `event_types` | string[] | Event types to subscribe to (optional, defaults to all events) |
 | `description` | string? | Human-readable description |
 
@@ -876,7 +826,6 @@ Get the last N deliveries for audit.
     {
       "id": "del_xxx",
       "webhook_id": "wh_xxx",
-      "tenant_id": "default",
       "event_type": "skill.view",
       "delivery_id": "evt_xxx",
       "payload": { "skill_slug": "my-skill" },
@@ -906,7 +855,7 @@ Get the last N deliveries for audit.
 
 Re-queue a dead-lettered delivery.
 
-### 5.6 Usage Metering
+### 5.5 Usage Metering
 
 #### GET /api/admin/usage/aggregate
 
@@ -916,7 +865,6 @@ Get aggregated usage data.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `tenantId` | string | Filter by tenant (default: `"default"`) |
 | `fromBucket` | string | Start bucket (`YYYY-MM-DDTHH` format) |
 | `toBucket` | string | End bucket (`YYYY-MM-DDTHH` format) |
 | `eventType` | string | Filter by event type (e.g. `skill.view`, `pipeline.run`, `api.call`, `storage.write`) |
@@ -930,13 +878,12 @@ List raw usage events.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `tenantId` | string | Filter by tenant |
 | `fromBucket` | string | Start bucket (`YYYY-MM-DDTHH` format) |
 | `toBucket` | string | End bucket (`YYYY-MM-DDTHH` format) |
 | `eventType` | string | Filter by event type |
 | `limit` | number | Max events (default: 1000, max: 10000) |
 
-### 5.7 Import Jobs
+### 5.6 Import Jobs
 
 #### POST /api/admin/skills/import/async
 

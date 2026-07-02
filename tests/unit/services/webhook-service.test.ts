@@ -13,13 +13,18 @@ function setup(allowPlaintext = true) {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE webhooks (
-    id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, url TEXT NOT NULL, secret TEXT NOT NULL,
-    event_types TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, description TEXT,
-    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, secret_rotated_at INTEGER
+    id TEXT PRIMARY KEY,
+    url TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    event_types TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    description TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    secret_rotated_at INTEGER
   )`);
-  db.run(`CREATE INDEX idx_webhooks_tenant ON webhooks(tenant_id)`);
   db.run(`CREATE TABLE webhook_deliveries (
-    id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
+    id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL,
     event_type TEXT NOT NULL, delivery_id TEXT NOT NULL, payload TEXT NOT NULL,
     attempt INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending',
     response_status INTEGER, response_body TEXT, error_message TEXT,
@@ -107,7 +112,6 @@ describe("WebhookService (P1-16)", () => {
   describe("create", () => {
     it("persists a row and returns the secret", async () => {
       const w = await s.service.create({
-        tenantId: "default",
         url: "https://example.com/hook",
         eventTypes: ["skill.published"],
       });
@@ -116,14 +120,14 @@ describe("WebhookService (P1-16)", () => {
 
     it("rejects an invalid URL with BadRequestError", async () => {
       await expect(async () => await s.service.create({
-        tenantId: "default", url: "not a url", eventTypes: ["skill.published"],
+        url: "not a url", eventTypes: ["skill.published"],
       })).rejects.toThrow(BadRequestError);
     });
   });
 
   describe("update", () => {
     it("validates new URL on update", async () => {
-      const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
+      const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
       expect(() => s.service.update(w.id, { url: "ftp://bad" })).toThrow(BadRequestError);
     });
 
@@ -134,7 +138,7 @@ describe("WebhookService (P1-16)", () => {
 
   describe("rotateSecret / delete", () => {
     it("rotateSecret returns a new secret", async () => {
-      const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
+      const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
       const r = s.service.rotateSecret(w.id);
       expect(r.secret).not.toBe(w.secret);
     });
@@ -190,41 +194,33 @@ describe("WebhookService (P1-16)", () => {
 
   describe("publishEvent", () => {
     it("enqueues one delivery per matching subscription", async () => {
-      await s.service.create({ tenantId: "default", url: "https://e.x/1", eventTypes: ["skill.published"] });
-      await s.service.create({ tenantId: "default", url: "https://e.x/2", eventTypes: ["skill.published", "pipeline.completed"] });
-      await s.service.create({ tenantId: "default", url: "https://e.x/3", eventTypes: ["pipeline.completed"] });
+      await s.service.create({ url: "https://e.x/1", eventTypes: ["skill.published"] });
+      await s.service.create({ url: "https://e.x/2", eventTypes: ["skill.published", "pipeline.completed"] });
+      await s.service.create({ url: "https://e.x/3", eventTypes: ["pipeline.completed"] });
 
-      const ids = await s.service.publishEvent("skill.published", "default", { skill: { slug: "foo" } });
+      const ids = await s.service.publishEvent("skill.published", { skill: { slug: "foo" } });
       expect(ids).toHaveLength(2);
     });
 
     it("filters out disabled webhooks", async () => {
-      const w = await s.service.create({ tenantId: "default", url: "https://e.x/1", eventTypes: ["skill.published"] });
+      const w = await s.service.create({ url: "https://e.x/1", eventTypes: ["skill.published"] });
       s.service.update(w.id, { enabled: false });
-      const ids = await s.service.publishEvent("skill.published", "default", {});
+      const ids = await s.service.publishEvent("skill.published", {});
       expect(ids).toHaveLength(0);
     });
 
-    it("scopes by tenant", async () => {
-      await s.service.create({ tenantId: "a", url: "https://e.x/1", eventTypes: ["skill.published"] });
-      await s.service.create({ tenantId: "b", url: "https://e.x/2", eventTypes: ["skill.published"] });
-      const ids = await s.service.publishEvent("skill.published", "a", {});
-      expect(ids).toHaveLength(1);
-    });
-
     it("returns empty without throwing when no subscriptions exist", async () => {
-      const ids = await s.service.publishEvent("skill.published", "default", {});
+      const ids = await s.service.publishEvent("skill.published", {});
       expect(ids).toEqual([]);
     });
 
     it("payload contains canonical envelope fields", async () => {
-      const w = await s.service.create({ tenantId: "default", url: "https://e.x/1", eventTypes: ["skill.published"] });
-      const [deliveryId] = await s.service.publishEvent("skill.published", "default", { skill: { slug: "foo" } });
+      const w = await s.service.create({ url: "https://e.x/1", eventTypes: ["skill.published"] });
+      const [deliveryId] = await s.service.publishEvent("skill.published", { skill: { slug: "foo" } });
       const row = s.deliveryRepo.findById(deliveryId);
       const parsed = JSON.parse(row!.payload);
       expect(parsed).toMatchObject({
         type: "skill.published",
-        tenant_id: "default",
         data: { skill: { slug: "foo" } },
       });
       expect(parsed.id).toMatch(/^evt_/);
@@ -233,10 +229,10 @@ describe("WebhookService (P1-16)", () => {
     });
 
     it("swallows enqueue errors without throwing", async () => {
-      const w = await s.service.create({ tenantId: "default", url: "https://e.x/1", eventTypes: ["skill.published"] });
+      const w = await s.service.create({ url: "https://e.x/1", eventTypes: ["skill.published"] });
       // Force enqueue to fail by stubbing the repo
       const broken = vi.spyOn(s.deliveryRepo, "enqueue").mockImplementation(() => { throw new Error("disk full"); });
-      const ids = await s.service.publishEvent("skill.published", "default", {});
+      const ids = await s.service.publishEvent("skill.published", {});
       expect(ids).toEqual([]);
       expect(s.logger.warn).toHaveBeenCalled();
       broken.mockRestore();

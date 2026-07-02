@@ -28,7 +28,6 @@ function createTestTables(db: DrizzleDB): void {
   const statements = [
     `CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      tenant_id TEXT NOT NULL DEFAULT 'default',
       display_name TEXT, description TEXT NOT NULL DEFAULT '',
       version TEXT NOT NULL DEFAULT '0.0.1', category TEXT DEFAULT NULL,
       attributes TEXT, retrieval_meta TEXT,

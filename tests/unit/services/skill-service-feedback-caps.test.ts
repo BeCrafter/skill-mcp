@@ -49,7 +49,7 @@ function mockLogger(): Logger {
 }
 
 function authedCtx(): RequestContext {
-  return { tenantId: "default", userId: "u1", sessionId: "s", tags: new Set(), isAuthenticated: true };
+  return { userId: "u1", sessionId: "s", tags: new Set(), isAuthenticated: true };
 }
 
 describe("submitFeedback length caps (T-727 service-layer backstop)", () => {

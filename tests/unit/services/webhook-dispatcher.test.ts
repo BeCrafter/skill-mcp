@@ -13,13 +13,12 @@ function setup() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE webhooks (
-    id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, url TEXT NOT NULL, secret TEXT NOT NULL,
+    id TEXT PRIMARY KEY, url TEXT NOT NULL, secret TEXT NOT NULL,
     event_types TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, description TEXT,
     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, secret_rotated_at INTEGER
   )`);
-  db.run(`CREATE INDEX idx_webhooks_tenant ON webhooks(tenant_id)`);
   db.run(`CREATE TABLE webhook_deliveries (
-    id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
+    id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL,
     event_type TEXT NOT NULL, delivery_id TEXT NOT NULL, payload TEXT NOT NULL,
     attempt INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending',
     response_status INTEGER, response_body TEXT, error_message TEXT,
@@ -75,8 +74,8 @@ describe("WebhookDispatcher (P1-16)", () => {
   beforeEach(() => { s = setup(); });
 
   it("dispatch success: 2xx → status=success, response captured", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: '{"x":1}' });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: '{"x":1}' });
     const fetchImpl = makeFetchOk();
     const dispatcher = new WebhookDispatcher(s.webhookRepo, s.deliveryRepo, s.service, s.logger, { fetchImpl });
     const r = await dispatcher.dispatch(d);
@@ -88,9 +87,9 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("dispatch sends signature + delivery-id headers", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
     const d = await s.deliveryRepo.enqueue({
-      webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: '{"x":1}',
+      webhookId: w.id, eventType: "skill.published", payload: '{"x":1}',
       deliveryId: "fixed-uuid",
     });
     const captured: Record<string, string> = {};
@@ -105,8 +104,8 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("4xx (non-408/429) → dead_letter, no retry", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}" });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}" });
     const fetchImpl = vi.fn(async () => ({ status: 404, text: async () => "not found" })) as never;
     const dispatcher = new WebhookDispatcher(s.webhookRepo, s.deliveryRepo, s.service, s.logger, { fetchImpl });
     const r = await dispatcher.dispatch(d);
@@ -116,8 +115,8 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("5xx → schedules retry with backoff", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}" });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}" });
     const fetchImpl = vi.fn(async () => ({ status: 503, text: async () => "" })) as never;
     let nowMs = 1_000_000;
     const dispatcher = new WebhookDispatcher(s.webhookRepo, s.deliveryRepo, s.service, s.logger, {
@@ -134,8 +133,8 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("network error (fetch throws) → schedule retry", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}" });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}" });
     const fetchImpl = vi.fn(async () => { throw new Error("ECONNREFUSED"); }) as never;
     const dispatcher = new WebhookDispatcher(s.webhookRepo, s.deliveryRepo, s.service, s.logger, {
       fetchImpl, jitterRand: () => 0,
@@ -146,8 +145,8 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("8th failed attempt → dead_letter (max attempts)", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}" });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}" });
     // Pre-set the row to attempt=7 — the next dispatch is the 8th.
     s.db.run(`UPDATE webhook_deliveries SET attempt = 7, first_attempted_at = 1, last_attempted_at = 1`);
     const fresh = s.deliveryRepo.findById(d.id)!;
@@ -159,8 +158,8 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("24h budget exhausted → dead_letter even before 8 attempts", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}" });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}" });
     // first_attempted_at = 1 ms epoch; "now" is 25 hours later
     s.db.run(`UPDATE webhook_deliveries SET attempt = 3, first_attempted_at = 1`);
     const fresh = s.deliveryRepo.findById(d.id)!;
@@ -175,8 +174,8 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("missing webhook → dead_letter (subscription deleted)", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}" });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}" });
     s.webhookRepo.delete(w.id);
     const dispatcher = new WebhookDispatcher(s.webhookRepo, s.deliveryRepo, s.service, s.logger, { fetchImpl: makeFetchOk() });
     const r = await dispatcher.dispatch(d);
@@ -185,9 +184,9 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("disabled webhook → skipped without recording attempt", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
     s.service.update(w.id, { enabled: false });
-    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}" });
+    const d = await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}" });
     const dispatcher = new WebhookDispatcher(s.webhookRepo, s.deliveryRepo, s.service, s.logger, { fetchImpl: makeFetchOk() });
     const r = await dispatcher.dispatch(d);
     expect(r.outcome).toBe("skipped");
@@ -197,9 +196,9 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("dispatchDue iterates over all due rows", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}", now: 100 });
-    await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}", now: 200 });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}", now: 100 });
+    await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}", now: 200 });
     const fetchImpl = makeFetchOk();
     const dispatcher = new WebhookDispatcher(s.webhookRepo, s.deliveryRepo, s.service, s.logger, {
       fetchImpl, now: () => 500,
@@ -210,9 +209,9 @@ describe("WebhookDispatcher (P1-16)", () => {
   });
 
   it("dispatchDue isolates row failures (one row throws → batch continues)", async () => {
-    const w = await s.service.create({ tenantId: "default", url: "https://e.x/h", eventTypes: ["skill.published"] });
-    await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}", now: 100 });
-    await s.deliveryRepo.enqueue({ webhookId: w.id, tenantId: "default", eventType: "skill.published", payload: "{}", now: 200 });
+    const w = await s.service.create({ url: "https://e.x/h", eventTypes: ["skill.published"] });
+    await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}", now: 100 });
+    await s.deliveryRepo.enqueue({ webhookId: w.id, eventType: "skill.published", payload: "{}", now: 200 });
 
     let calls = 0;
     const fetchImpl = vi.fn(async () => {

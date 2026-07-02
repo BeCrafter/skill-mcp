@@ -11,7 +11,6 @@ function setup(): { db: DrizzleDB; repo: ImportJobRepository } {
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE import_jobs (
     id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     status TEXT NOT NULL DEFAULT 'queued',
     source TEXT NOT NULL,
     options_json TEXT NOT NULL DEFAULT '{}',

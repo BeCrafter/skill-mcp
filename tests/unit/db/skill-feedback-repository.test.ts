@@ -12,7 +12,6 @@ function setup(): { db: DrizzleDB; sqlite: Database.Database; repo: SkillFeedbac
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE skills (
     id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     display_name TEXT, description TEXT NOT NULL DEFAULT '',
     version TEXT NOT NULL DEFAULT '0.0.1', category TEXT,
     attributes TEXT, retrieval_meta TEXT, status TEXT NOT NULL DEFAULT 'draft',
@@ -23,7 +22,6 @@ function setup(): { db: DrizzleDB; sqlite: Database.Database; repo: SkillFeedbac
   )`);
   db.run(`CREATE TABLE skill_feedbacks (
     id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
     skill_slug TEXT NOT NULL,
     user_id TEXT, session_id TEXT,

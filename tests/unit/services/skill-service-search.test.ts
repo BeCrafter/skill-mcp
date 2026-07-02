@@ -81,7 +81,6 @@ function makeService(opts: {
 }
 
 const ANON_CTX = {
-  tenantId: "default",
   userId: "anonymous",
   sessionId: "anonymous",
   tags: new Set<string>(),

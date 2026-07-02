@@ -91,13 +91,9 @@ docs/
 │   └── SCENARIO_C.md               # 分布式 HTTP 部署
 │
 ├── ADVANCED/                        # 高级主题
-│   ├── architecture-and-sequence.md # 详细架构图和序列图
-│   ├── tech-dev-program.md         # 技术开发计划文档
-│   └── internal-design.md          # 内部实现设计细节
+│   ├── LICENSING.md                # OSS/商业许可策略
+│   └── tech-dev-program.md         # 原始技术方案 PRD（2026-04）
 │
-└── REVIEWS/                         # 审查报告档案
-    ├── INDEX.md                    # 审查文档索引
-    └── 2026-04-28-code-review.md   # 时间戳的代码审查报告
 ```
 
 ### 文档命名规范
@@ -129,17 +125,7 @@ docs/
 1. **快速开始和基础**：`docs/` 根目录
 2. **部署相关**：`docs/SCENARIOS/` 或 `docs/PRODUCTION_DEPLOYMENT.md`
 3. **高级主题**：`docs/ADVANCED/`
-4. **审查和报告**：`docs/REVIEWS/`（带日期前缀）
-5. **永远不要**：在根目录创建 `*.md` 文件（除了 `README.md`）
-
-### 创建临时报告时
-
-如需创建代码审查、分析报告等临时文档：
-
-1. 添加日期前缀：`YYYY-MM-DD-topic.md`
-2. 放在 `docs/REVIEWS/` 目录
-3. 更新 `docs/REVIEWS/INDEX.md`
-4. 通过 Git 提交时注明这是档案文档
+4. **永远不要**：在根目录创建 `*.md` 文件（除了 `README.md`）
 
 ### Pull Request 时的文档处理
 
@@ -260,12 +246,10 @@ find . -type f -size +1M ! -path "./node_modules/*" ! -path "./.git/*" ! -path "
 **A**: 不能。`.env` 包含敏感信息（API 密钥等）。使用 `.env.example` 作为模板。
 
 ### Q: 为什么同时有多个架构文档？
-**A**: 
-- `ARCHITECTURE.md` - 概览（新开发者从这里开始）
-- `ADVANCED/architecture-and-sequence.md` - 详细设计（贡献者参考）
+**A**: `ARCHITECTURE.md` 是唯一的架构文档（Single Source of Truth）。`ADVANCED/tech-dev-program.md` 是 2026-04 的原始 PRD，保留作为历史参考。
 
 ### Q: 能否删除旧的审查报告？
-**A**: 可以在 `docs/REVIEWS/` 中保留，但使用日期前缀避免混淆。定期归档非活跃文档。
+**A**: 历史审查报告已从项目中移除（2026-07 清理）。如有需要，请参考 CHANGELOG.md 中的变更记录。
 
 ---
 

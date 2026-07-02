@@ -225,8 +225,6 @@ export interface RequestContext {
   isAuthenticated: boolean;
   /** User type for permission checks (admin route access, superadmin guards). */
   userType?: "superadmin" | "admin" | "user";
-  /** Tenant identifier for quota/webhook isolation. Defaults to "default". */
-  tenantId?: string;
 }
 
 /** Skill feedback entry */

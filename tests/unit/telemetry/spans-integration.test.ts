@@ -1,7 +1,7 @@
 /**
  * P0-6 — verify the §17.6 span list is actually emitted by the wired
  * components (not just the helper). Each test exercises a real call site and
- * asserts the expected span name and tenant/user attributes appear.
+ * asserts the expected span name and user attributes appear.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { trace, context } from "@opentelemetry/api";

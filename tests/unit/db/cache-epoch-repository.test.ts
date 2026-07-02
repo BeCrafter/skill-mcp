@@ -11,13 +11,11 @@ function setup(): { db: DrizzleDB; repo: CacheEpochRepository } {
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE cache_global_epoch (
     id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     epoch INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
   )`);
   db.run(`CREATE TABLE cache_user_epochs (
     user_id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     epoch INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
   )`);

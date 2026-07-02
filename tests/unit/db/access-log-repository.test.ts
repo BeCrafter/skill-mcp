@@ -14,7 +14,6 @@ function setup(): { db: DrizzleDB; sqlite: Database.Database; repo: AccessLogRep
   db.run(`CREATE TABLE access_logs (
     id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, skill_slug TEXT NOT NULL, action TEXT NOT NULL,
     file_paths TEXT, latency_ms INTEGER, user_id TEXT, session_id TEXT,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     created_at INTEGER NOT NULL
   )`);
   return { db, sqlite, repo: new AccessLogRepository(db) };

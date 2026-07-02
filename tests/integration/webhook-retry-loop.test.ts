@@ -27,7 +27,6 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
   let webhookRepo: WebhookRepository;
   let deliveryRepo: WebhookDeliveryRepository;
   let webhookService: WebhookService;
-  const TENANT = "tenant-i09";
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
 
   beforeEach(() => {
@@ -56,11 +55,10 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
 
   it("transitions a flapping endpoint through pending(7) → dead_letter after 8 attempts", async () => {
     const wh = await webhookService.create({
-      tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["skill.published"],
     });
-    const ids = await webhookService.publishEvent("skill.published", TENANT, { skill: "test" });
+    const ids = await webhookService.publishEvent("skill.published", { skill: "test" });
     expect(ids).toHaveLength(1);
     const deliveryId = ids[0];
 
@@ -107,11 +105,10 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
 
   it("dead-letters immediately on a 4xx (permanent failure, no retry)", async () => {
     await webhookService.create({
-      tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["skill.published"],
     });
-    const [deliveryId] = await webhookService.publishEvent("skill.published", TENANT, { skill: "test" });
+    const [deliveryId] = await webhookService.publishEvent("skill.published", { skill: "test" });
 
     const now = Date.now() + 10;
     const { fetchImpl, calls } = makeFetch(404);
@@ -134,12 +131,10 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
 
   it("succeeds on first 2xx and stamps completed_at", async () => {
     await webhookService.create({
-      tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["pipeline.completed"],
     });
-    const [deliveryId] = await webhookService.publishEvent("pipeline.completed", TENANT, { runId: "r1" });
-
+    const [deliveryId] = await webhookService.publishEvent("pipeline.completed", { runId: "r1" });
     const now = Date.now() + 10;
     const { fetchImpl } = makeFetch(200, "ok");
     const dispatcher = new WebhookDispatcher(webhookRepo, deliveryRepo, webhookService, logger, {
@@ -164,16 +159,15 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
   it("dispatchDue fans out across multiple webhook subscriptions and isolates per-row failures", async () => {
     // Two subscriptions, both subscribed to the same event.
     await webhookService.create({
-      tenantId: TENANT,
       url: "http://localhost:9991/ok",
       eventTypes: ["skill.published"],
     });
     await webhookService.create({
-      tenantId: TENANT,
       url: "http://localhost:9992/fail",
       eventTypes: ["skill.published"],
     });
-    const ids = await webhookService.publishEvent("skill.published", TENANT, { x: 1 });
+
+    const ids = await webhookService.publishEvent("skill.published", { x: 1 });
     expect(ids).toHaveLength(2);
 
     const now = Date.now() + 10;
@@ -196,11 +190,10 @@ describe("Integration: Webhook 8-attempt retry loop (I-09, review §16.4)", () =
 
   it("emits HMAC signature and X-Skill-MCP-Delivery-Id headers verifiable with the stored secret", async () => {
     const wh = await webhookService.create({
-      tenantId: TENANT,
       url: "http://localhost:9999/hook",
       eventTypes: ["skill.published"],
     });
-    await webhookService.publishEvent("skill.published", TENANT, { hello: "world" });
+    await webhookService.publishEvent("skill.published", { hello: "world" });
 
     const now = Date.now() + 10;
     let captured: { headers: Record<string, string>; body: string } | null = null;

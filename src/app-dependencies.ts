@@ -19,8 +19,6 @@ import type { ImportJobRepository } from "./db/repositories/import-job.repositor
 import type { BackgroundImportWorker } from "./services/import-worker.js";
 import type { UsageEventRepository } from "./db/repositories/usage-event.repository.js";
 import type { UsageMeterService } from "./services/usage-meter.service.js";
-import type { TenantQuotaRepository } from "./db/repositories/tenant-quota.repository.js";
-import type { QuotaService } from "./services/quota.service.js";
 import type { WebhookRepository } from "./db/repositories/webhook.repository.js";
 import type { WebhookDeliveryRepository } from "./db/repositories/webhook-delivery.repository.js";
 import type { WebhookService } from "./services/webhook.service.js";
@@ -50,8 +48,6 @@ export interface AppDependencies {
   importWorker?: BackgroundImportWorker;
   usageEventRepo?: UsageEventRepository;
   usageMeter?: UsageMeterService;
-  tenantQuotaRepo?: TenantQuotaRepository;
-  quotaService?: QuotaService;
   webhookRepo?: WebhookRepository;
   webhookDeliveryRepo?: WebhookDeliveryRepository;
   webhookService?: WebhookService;

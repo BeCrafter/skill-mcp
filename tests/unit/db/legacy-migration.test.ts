@@ -6,13 +6,11 @@ import { tmpdir } from "node:os";
 import { runMigrations } from "@/db/migrate.js";
 
 /**
- * T-304 — locks in the observable behavior of `legacyUpgradeIfNeeded` for
- * databases created before the drizzle-managed schema. The legacy shape
- * stored skill tags as a JSON array column (`skills.tags`) plus two removed
- * columns (`conditions`, `assigned_groups`). The upgrade must:
- *   - detect legacy tables without __drizzle_migrations
+ * T-304 — locks in the observable behavior of `resetAndRecreate` for
+ * databases created before the single-baseline migration. The upgrade must:
+ *   - detect legacy tables without __drizzle_migrations (or with stale entries)
  *   - drop all application tables cleanly (no FK cascade errors)
- *   - let drizzle recreate the full schema from scratch (0000–0016)
+ *   - let drizzle recreate the full schema from the single baseline
  *   - leave the DB in a working state with all expected tables
  *
  * Legacy data is intentionally NOT preserved — the drop-all approach avoids
@@ -146,7 +144,6 @@ describe("legacy migration backfill (T-304)", () => {
       expect(colNames).not.toContain("assigned_groups");
       expect(colNames).toContain("slug");
       expect(colNames).toContain("content_hash");
-      expect(colNames).not.toContain("tenant_id");
 
       // Legacy data is intentionally dropped — the clean-slate approach avoids
       // FK cascade errors that plagued the old in-place rebuild.
@@ -163,10 +160,6 @@ describe("legacy migration backfill (T-304)", () => {
       ).get();
       expect(pipelineRunsExists).toBeDefined();
 
-      const tenantsExists = sqlite.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='tenants'",
-      ).get();
-      expect(tenantsExists).toBeDefined();
     } finally {
       sqlite.close();
     }

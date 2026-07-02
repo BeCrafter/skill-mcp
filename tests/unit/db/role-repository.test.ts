@@ -14,7 +14,6 @@ function setup(): { db: DrizzleDB; sqlite: Database.Database; repo: RoleReposito
   db.run(`CREATE TABLE roles (
     id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT,
     tags TEXT NOT NULL,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     created_at INTEGER, updated_at INTEGER
   )`);
   return { db, sqlite, repo: new RoleRepository(db) };

@@ -133,7 +133,7 @@ describe("skill_search MCP tool", () => {
 
     it("invokes contextBuilder with extra when provided", async () => {
       const svc = fakeService([]);
-      const ctx = { tenantId: "t", userId: "u", sessionId: "s", tags: new Set<string>(), isAuthenticated: true };
+      const ctx = { userId: "u", sessionId: "s", tags: new Set<string>(), isAuthenticated: true };
       const contextBuilder = vi.fn().mockResolvedValue(ctx);
       const tool = createSkillSearchTool(svc, contextBuilder);
       const fakeExtra = { requestInfo: { headers: {} } } as never;

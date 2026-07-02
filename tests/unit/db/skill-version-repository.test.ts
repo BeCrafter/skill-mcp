@@ -12,14 +12,12 @@ function setup(): { db: DrizzleDB; repo: SkillVersionRepository } {
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE skills (
     id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     description TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '0.0.1',
     status TEXT NOT NULL DEFAULT 'draft', visibility TEXT NOT NULL DEFAULT 'private',
     storage_path TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
   )`);
   db.run(`CREATE TABLE skill_versions (
     id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
     version TEXT NOT NULL,
     content_hash TEXT NOT NULL,

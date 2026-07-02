@@ -14,9 +14,8 @@ import { AppError, BadRequestError } from "../utils/errors.js";
 // P1-16 — WebhookService (review §5.5.1).
 //
 // Surface:
-//   • CRUD wrappers around `WebhookRepository` with URL/event validation.
-//   • `publishEvent(eventType, tenantId, data)` — fire-and-forget; finds all
-//     enabled subscriptions for the tenant matching the event type and
+//   • `publishEvent(eventType, data)` — fire-and-forget; finds all
+//     enabled subscriptions matching the event type and
 //     enqueues a `webhook_deliveries` row each. Caller doesn't wait for HTTP.
 //   • `signRequest(secret, body, ts)` — produces the HMAC header value
 //     `t=<unix>,v1=<hex>` per §5.5.1 (clients verify against `<ts>.<body>`).
@@ -121,11 +120,10 @@ export class WebhookService {
 
   // --- CRUD ---------------------------------------------------------------
 
-  async create(input: { tenantId: string; url: string; eventTypes: unknown; description?: string | null }): Promise<WebhookEntity> {
+  async create(input: { url: string; eventTypes: unknown; description?: string | null }): Promise<WebhookEntity> {
     this.validateUrl(input.url);
     const eventTypes = this.validateEventTypes(input.eventTypes);
     const payload: CreateWebhookInput = {
-      tenantId: input.tenantId,
       url: input.url,
       eventTypes,
       description: input.description ?? null,
@@ -179,11 +177,10 @@ export class WebhookService {
    */
   async publishEvent(
     eventType: WebhookEventType,
-    tenantId: string,
     data: Record<string, unknown>,
   ): Promise<string[]> {
     try {
-      const subscriptions = this.webhookRepo.listEnabledForEvent(tenantId, eventType);
+      const subscriptions = this.webhookRepo.listEnabledForEvent(eventType);
       if (subscriptions.length === 0) return [];
       const eventId = `evt_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
       const createdAt = new Date().toISOString();
@@ -192,14 +189,12 @@ export class WebhookService {
         const payload = {
           id: eventId,
           type: eventType,
-          tenant_id: tenantId,
           created_at: createdAt,
           data,
         };
         try {
           const delivery = await this.deliveryRepo.enqueue({
             webhookId: sub.id,
-            tenantId: sub.tenantId,
             eventType,
             payload: JSON.stringify(payload),
           });
@@ -214,7 +209,6 @@ export class WebhookService {
       return [];
     }
   }
-
   // --- HMAC signing -------------------------------------------------------
 
   /**

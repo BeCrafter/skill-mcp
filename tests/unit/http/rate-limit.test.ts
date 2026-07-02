@@ -34,7 +34,7 @@ function makeCtx(userId?: string): HttpContext & { _written: { status?: number; 
     }) as never,
   };
   const requestContext: RequestContext | undefined = userId
-    ? { tenantId: "default", userId, sessionId: "sess", tags: new Set(), isAuthenticated: true }
+    ? { userId, sessionId: "sess", tags: new Set(), isAuthenticated: true }
     : undefined;
   return {
     req: {} as never,

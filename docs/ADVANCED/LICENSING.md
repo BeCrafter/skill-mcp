@@ -1,6 +1,5 @@
 # Licensing Policy
 
-> 落地 [`docs/REVIEWS/2026-05-27-commercialization-review-claude.md`](../REVIEWS/2026-05-27-commercialization-review-claude.md) §18 OSS 治理与 License 模型 / §11 P0-11。
 
 ## 当前状态（2026-05-28）
 
@@ -73,7 +72,7 @@
 **Commercial Only（闭源 + 仅付费版可用）**：
 
 - 🔒 Pipeline 写权限 UI（创建 / 编辑 pipeline）
-- 🔒 多租户 / Workspace / Tenant isolation
+- 🔒 Workspace / 组织隔离
 - 🔒 高级 RBAC（attribute-based / row-level）
 - 🔒 Audit Export（合规客户必备）
 - 🔒 商业 Connector（Salesforce / Slack / Jira / SSO Enterprise）

@@ -19,7 +19,6 @@ function setup(): { db: DrizzleDB; repo: UserRepository } {
     token_expires_at INTEGER,
     previous_token TEXT,
     previous_token_expires_at INTEGER,
-    tenant_id TEXT NOT NULL DEFAULT 'default',
     created_at INTEGER, updated_at INTEGER
   )`);
   return { db, repo: new UserRepository(db) };

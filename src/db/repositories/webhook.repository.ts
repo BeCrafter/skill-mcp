@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { generateId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
@@ -8,9 +8,9 @@ import { webhooks } from "../schema.js";
 //
 // One row per subscription endpoint. The `secret` column is HMAC material;
 // it is shown to the caller exactly once (on POST), and `findById` /
-// `listByTenant` / `listEnabledForEvent` callers DO get the secret in the
-// entity (the dispatcher needs it to sign), but the admin handler strips
-// it before serializing the response. Treat this as "do-not-log".
+// `listEnabledForEvent` callers DO get the secret in the entity (the
+// dispatcher needs it to sign), but the admin handler strips it before
+// serializing the response. Treat this as "do-not-log".
 //
 // `event_types` is JSON-serialised in the column. We expose it as
 // `string[]` to callers and validate canonical names at the service layer.
@@ -34,7 +34,6 @@ export const VALID_WEBHOOK_EVENT_TYPES: ReadonlySet<WebhookEventType> = new Set(
 
 export interface WebhookEntity {
   id: string;
-  tenantId: string;
   url: string;
   secret: string;
   eventTypes: WebhookEventType[];
@@ -46,7 +45,6 @@ export interface WebhookEntity {
 }
 
 export interface CreateWebhookInput {
-  tenantId: string;
   url: string;
   eventTypes: WebhookEventType[];
   description?: string | null;
@@ -71,7 +69,6 @@ export class WebhookRepository {
     const eventTypesJson = JSON.stringify(input.eventTypes);
     this.db.insert(webhooks).values({
       id,
-      tenantId: input.tenantId,
       url: input.url,
       secret,
       eventTypes: eventTypesJson,
@@ -83,7 +80,6 @@ export class WebhookRepository {
     }).run();
     return {
       id,
-      tenantId: input.tenantId,
       url: input.url,
       secret,
       eventTypes: input.eventTypes,
@@ -105,21 +101,14 @@ export class WebhookRepository {
     return rows.map(r => this.toEntity(r));
   }
 
-  listByTenant(tenantId: string): WebhookEntity[] {
-    const rows = this.db.select().from(webhooks)
-      .where(eq(webhooks.tenantId, tenantId))
-      .all();
-    return rows.map(r => this.toEntity(r));
-  }
-
   /**
-   * All enabled webhooks for a tenant whose `event_types` JSON array contains
-   * the given event. Returned in insertion order (id asc — sufficient since
-   * dispatch order is not customer-visible).
+   * All enabled webhooks whose `event_types` JSON array contains the given
+   * event. Returned in insertion order (id asc — sufficient since dispatch
+   * order is not customer-visible).
    */
-  listEnabledForEvent(tenantId: string, eventType: WebhookEventType): WebhookEntity[] {
+  listEnabledForEvent(eventType: WebhookEventType): WebhookEntity[] {
     const rows = this.db.select().from(webhooks)
-      .where(and(eq(webhooks.enabled, 1), eq(webhooks.tenantId, tenantId)))
+      .where(eq(webhooks.enabled, 1))
       .all();
     return rows
       .map(r => this.toEntity(r))
@@ -160,6 +149,7 @@ export class WebhookRepository {
     const result = this.db.delete(webhooks).where(eq(webhooks.id, id)).run();
     return (result.changes ?? 0) > 0;
   }
+
   private toEntity(row: typeof webhooks.$inferSelect): WebhookEntity {
     let eventTypes: WebhookEventType[] = [];
     try {
@@ -168,7 +158,6 @@ export class WebhookRepository {
     } catch { /* ignore corrupt JSON; treated as empty subscriptions */ }
     return {
       id: row.id,
-      tenantId: row.tenantId,
       url: row.url,
       secret: row.secret,
       eventTypes,

@@ -39,8 +39,6 @@ import { OllamaEmbeddingProvider } from "../../retrieval/ollama-embedding-provid
 import { BackgroundImportWorker } from "../../services/import-worker.js";
 import { UsageEventRepository } from "../../db/repositories/usage-event.repository.js";
 import { UsageMeterService } from "../../services/usage-meter.service.js";
-import { TenantQuotaRepository } from "../../db/repositories/tenant-quota.repository.js";
-import { QuotaService } from "../../services/quota.service.js";
 import { WebhookRepository } from "../../db/repositories/webhook.repository.js";
 import { WebhookDeliveryRepository } from "../../db/repositories/webhook-delivery.repository.js";
 import { WebhookService } from "../../services/webhook.service.js";
@@ -99,10 +97,6 @@ export async function serveAction(options: ServeOptions): Promise<void> {
   // hangs off this single ledger; admin REST endpoint reuses the same repo.
   const usageEventRepo = new UsageEventRepository(db);
   const usageMeter = new UsageMeterService(usageEventRepo, logger);
-  // P1-13.5 — tier limits + per-field overrides (review §11 #13.5). The
-  // QuotaService reads usage_events for daily counters
-  const tenantQuotaRepo = new TenantQuotaRepository(db);
-  const quotaService = new QuotaService(tenantQuotaRepo, usageMeter, logger);
 
   // P1-16 — outbound webhooks (review §5.5.1). The dispatcher polls the
   // delivery queue; producers fan out via DomainEventBus → setupWebhookSubscribers
@@ -273,8 +267,6 @@ export async function serveAction(options: ServeOptions): Promise<void> {
         importWorker,
         usageEventRepo,
         usageMeter,
-        tenantQuotaRepo,
-        quotaService,
         webhookRepo,
         webhookDeliveryRepo,
         webhookService,

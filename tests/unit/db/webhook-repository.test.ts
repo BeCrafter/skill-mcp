@@ -11,7 +11,6 @@ function setup(): { db: DrizzleDB; repo: WebhookRepository } {
   const db = drizzle(sqlite, { schema });
   db.run(`CREATE TABLE webhooks (
     id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
     url TEXT NOT NULL,
     secret TEXT NOT NULL,
     event_types TEXT NOT NULL,
@@ -21,7 +20,6 @@ function setup(): { db: DrizzleDB; repo: WebhookRepository } {
     updated_at INTEGER NOT NULL,
     secret_rotated_at INTEGER
   )`);
-  db.run(`CREATE INDEX idx_webhooks_tenant ON webhooks(tenant_id)`);
   return { db, repo: new WebhookRepository(db) };
 }
 
@@ -31,7 +29,6 @@ describe("WebhookRepository (P1-16)", () => {
 
   it("create generates a 64-char hex secret when none supplied", async () => {
     const w = await s.repo.create({
-      tenantId: "default",
       url: "https://example.com/hook",
       eventTypes: ["skill.published"],
     });
@@ -42,7 +39,6 @@ describe("WebhookRepository (P1-16)", () => {
 
   it("create accepts an explicit secret (test fixtures)", async () => {
     const w = await s.repo.create({
-      tenantId: "default",
       url: "https://example.com/hook",
       eventTypes: ["pipeline.completed"],
       secret: "deadbeef",
@@ -52,7 +48,6 @@ describe("WebhookRepository (P1-16)", () => {
 
   it("findById round-trips event_types JSON", async () => {
     const created = await s.repo.create({
-      tenantId: "default",
       url: "https://example.com/hook",
       eventTypes: ["skill.published", "skill.deprecated"],
     });
@@ -64,27 +59,19 @@ describe("WebhookRepository (P1-16)", () => {
     expect(s.repo.findById("nope")).toBeNull();
   });
 
-  it("listByTenant scopes by tenant_id", async () => {
-    await s.repo.create({ tenantId: "a", url: "https://example.com/1", eventTypes: ["skill.published"] });
-    await s.repo.create({ tenantId: "a", url: "https://example.com/2", eventTypes: ["skill.published"] });
-    await s.repo.create({ tenantId: "b", url: "https://example.com/3", eventTypes: ["skill.published"] });
-    expect(s.repo.listByTenant("a")).toHaveLength(2);
-    expect(s.repo.listByTenant("b")).toHaveLength(1);
-    expect(s.repo.listByTenant("c")).toHaveLength(0);
-  });
 
   it("listEnabledForEvent filters by enabled flag and subscribed event", async () => {
-    const w1 = await s.repo.create({ tenantId: "default", url: "https://example.com/1", eventTypes: ["skill.published"] });
-    await s.repo.create({ tenantId: "default", url: "https://example.com/2", eventTypes: ["pipeline.completed"] });
-    const w3 = await s.repo.create({ tenantId: "default", url: "https://example.com/3", eventTypes: ["skill.published", "skill.deprecated"] });
+    const w1 = await s.repo.create({ url: "https://example.com/1", eventTypes: ["skill.published"] });
+    await s.repo.create({ url: "https://example.com/2", eventTypes: ["pipeline.completed"] });
+    const w3 = await s.repo.create({ url: "https://example.com/3", eventTypes: ["skill.published", "skill.deprecated"] });
     s.repo.update(w3.id, { enabled: false });
 
-    const matched = s.repo.listEnabledForEvent("default", "skill.published");
+    const matched = s.repo.listEnabledForEvent("skill.published");
     expect(matched.map(e => e.id).sort()).toEqual([w1.id].sort());
   });
 
   it("update is partial — unspecified fields stay", async () => {
-    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"], description: "orig" });
+    const w = await s.repo.create({ url: "https://example.com", eventTypes: ["skill.published"], description: "orig" });
     // Wait 2ms so updated_at differs
     await new Promise(r => setTimeout(r, 2));
     const updated = s.repo.update(w.id, { url: "https://new.example.com" });
@@ -94,7 +81,7 @@ describe("WebhookRepository (P1-16)", () => {
   });
 
   it("update can disable a webhook", async () => {
-    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
+    const w = await s.repo.create({ url: "https://example.com", eventTypes: ["skill.published"] });
     const updated = s.repo.update(w.id, { enabled: false });
     expect(updated?.enabled).toBe(false);
   });
@@ -104,7 +91,7 @@ describe("WebhookRepository (P1-16)", () => {
   });
 
   it("rotateSecret produces a fresh 64-char hex secret and stamps secretRotatedAt", async () => {
-    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
+    const w = await s.repo.create({ url: "https://example.com", eventTypes: ["skill.published"] });
     const rotated = s.repo.rotateSecret(w.id);
     expect(rotated?.secret).toMatch(/^[0-9a-f]{64}$/);
     expect(rotated?.secret).not.toBe(w.secret);
@@ -116,7 +103,7 @@ describe("WebhookRepository (P1-16)", () => {
   });
 
   it("delete removes the row and returns true", async () => {
-    const w = await s.repo.create({ tenantId: "default", url: "https://example.com", eventTypes: ["skill.published"] });
+    const w = await s.repo.create({ url: "https://example.com", eventTypes: ["skill.published"] });
     expect(s.repo.delete(w.id)).toBe(true);
     expect(s.repo.findById(w.id)).toBeNull();
   });
@@ -126,8 +113,8 @@ describe("WebhookRepository (P1-16)", () => {
   });
 
   it("toEntity tolerates corrupt event_types JSON", () => {
-    s.db.run(`INSERT INTO webhooks (id, tenant_id, url, secret, event_types, enabled, created_at, updated_at)
-              VALUES ('corrupt', 'default', 'https://e.x', 's', 'not-json{', 1, 0, 0)`);
+    s.db.run(`INSERT INTO webhooks (id, url, secret, event_types, enabled, created_at, updated_at)
+              VALUES ('corrupt', 'https://e.x', 's', 'not-json{', 1, 0, 0)`);
     const found = s.repo.findById("corrupt");
     expect(found?.eventTypes).toEqual([]);
   });

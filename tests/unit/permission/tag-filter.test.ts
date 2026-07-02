@@ -14,7 +14,7 @@ function skill(overrides: Partial<SkillMeta>): SkillMeta {
 
 function ctx(overrides: Partial<RequestContext>): RequestContext {
   return {
-    tenantId: "default", userId: "anonymous", sessionId: "x", tags: new Set<string>(),
+    userId: "anonymous", sessionId: "x", tags: new Set<string>(),
     isAuthenticated: false, ...overrides,
   };
 }

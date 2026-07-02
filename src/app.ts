@@ -8,14 +8,12 @@ import { registerAdminUserRoutes } from "./http/handlers/admin/users.handler.js"
 import { registerAdminRoleRoutes } from "./http/handlers/admin/roles.handler.js";
 import { registerAdminImportJobRoutes } from "./http/handlers/admin/import-jobs.handler.js";
 import { registerAdminUsageRoutes } from "./http/handlers/admin/usage.handler.js";
-import { registerAdminQuotaRoutes } from "./http/handlers/admin/quotas.handler.js";
 import { registerAdminWebhookRoutes } from "./http/handlers/admin/webhooks.handler.js";
 import { registerAuthRoutes } from "./http/handlers/auth.handler.js";
 import { setupWebhookSubscribers } from "./events/webhook-subscriber.js";
 import { registerGatewaySkillRoutes } from "./http/handlers/gateway/skills.handler.js";
 import { errorMap } from "./http/middleware/error-map.js";
 import { createRateLimit } from "./http/middleware/rate-limit.js";
-import { createQuotaCheck } from "./http/middleware/quota-check.js";
 import { createRequestHandler } from "./http/server.js";
 import { createHttpMcpHandler } from "./mcp/transport/http-transport.js";
 import { createSseMcpHandler } from "./mcp/transport/sse-transport.js";
@@ -74,7 +72,6 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
   registerAdminRoleRoutes(adminRouter, deps);
   registerAdminImportJobRoutes(adminRouter, deps);
   registerAdminUsageRoutes(adminRouter, deps);
-  registerAdminQuotaRoutes(adminRouter, deps);
   registerAdminWebhookRoutes(adminRouter, deps);
 
   const gatewayRouter = new Router();
@@ -83,13 +80,6 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
     gatewayRouter.use(createRateLimit({
       capacity: appConfig.rateLimit.gatewayCapacity,
       refillPerSec: appConfig.rateLimit.gatewayRefillPerSec,
-      scope: "gateway",
-    }));
-  }
-  if (deps.quotaService) {
-    gatewayRouter.use(createQuotaCheck({
-      quotaService: deps.quotaService,
-      dimension: "api_calls",
       scope: "gateway",
     }));
   }

@@ -6,6 +6,7 @@ import type { HttpContext } from "@/http/context.js";
 import type { AppDependencies } from "@/app-dependencies.js";
 import type { WebhookEntity } from "@/db/repositories/webhook.repository.js";
 import type { WebhookDeliveryEntity } from "@/db/repositories/webhook-delivery.repository.js";
+import type { Mock } from "vitest";
 
 function makeRes() {
   let body = "";
@@ -60,7 +61,6 @@ function jsonOf(ctx: HttpContext) {
 
 const sampleWebhook: WebhookEntity = {
   id: "wh1",
-  tenantId: "default",
   url: "https://example.com/hook",
   secret: "deadbeef".repeat(8),
   eventTypes: ["skill.published"],
@@ -74,7 +74,6 @@ const sampleWebhook: WebhookEntity = {
 const sampleDelivery: WebhookDeliveryEntity = {
   id: "d1",
   webhookId: "wh1",
-  tenantId: "default",
   eventType: "skill.published",
   deliveryId: "uuid-1",
   payload: '{"x":1}',
@@ -90,19 +89,32 @@ const sampleDelivery: WebhookDeliveryEntity = {
   createdAt: 1000,
 };
 
-function setup(opts: { withDeps?: boolean } = {}) {
+interface WebhookTestCtx {
+  router: Router;
+  create: Mock;
+  update: Mock;
+  findById: Mock;
+  rotateSecret: Mock;
+  deleteFn: Mock;
+  listAll: Mock;
+  listByWebhook: Mock;
+  findDeliveryById: Mock;
+  reschedule: Mock;
+}
+
+function setup(opts: { withDeps?: boolean } = {}): WebhookTestCtx {
   const create = vi.fn().mockReturnValue(sampleWebhook);
   const update = vi.fn().mockReturnValue({ ...sampleWebhook, enabled: false });
   const findById = vi.fn().mockReturnValue(sampleWebhook);
   const rotateSecret = vi.fn().mockReturnValue({ ...sampleWebhook, secret: "rotated".repeat(10) });
   const deleteFn = vi.fn();
-  const listByTenant = vi.fn().mockReturnValue([sampleWebhook]);
+  const listAll = vi.fn().mockReturnValue([sampleWebhook]);
   const listByWebhook = vi.fn().mockReturnValue([sampleDelivery]);
   const findDeliveryById = vi.fn().mockReturnValue({ ...sampleDelivery, status: "dead_letter" });
   const reschedule = vi.fn().mockReturnValue({ ...sampleDelivery, status: "pending" });
 
   const webhookService = { create, update, findById, rotateSecret, delete: deleteFn };
-  const webhookRepo = { listByTenant };
+  const webhookRepo = { listAll };
   const webhookDeliveryRepo = { listByWebhook, findById: findDeliveryById, reschedule };
 
   const router = new Router();
@@ -113,11 +125,11 @@ function setup(opts: { withDeps?: boolean } = {}) {
     webhookDeliveryRepo: opts.withDeps === false ? undefined : webhookDeliveryRepo,
   } as unknown as AppDependencies);
 
-  return { router, create, update, findById, rotateSecret, deleteFn, listByTenant, listByWebhook, findDeliveryById, reschedule };
+  return { router, create, update, findById, rotateSecret, deleteFn, listAll, listByWebhook, findDeliveryById, reschedule };
 }
 
 describe("registerAdminWebhookRoutes (P1-16)", () => {
-  let s: ReturnType<typeof setup>;
+  let s: WebhookTestCtx;
   beforeEach(() => { s = setup(); });
 
   it("GET list returns webhooks without secret", async () => {
@@ -127,7 +139,7 @@ describe("registerAdminWebhookRoutes (P1-16)", () => {
     expect(out.statusCode).toBe(200);
     expect(out.body.data[0]).toMatchObject({ id: "wh1", url: "https://example.com/hook", enabled: true });
     expect(out.body.data[0].secret).toBeUndefined();
-    expect(s.listByTenant).toHaveBeenCalledWith("default");
+    expect(s.listAll).toHaveBeenCalled();
   });
 
   it("POST create returns secret ONCE", async () => {
@@ -138,7 +150,6 @@ describe("registerAdminWebhookRoutes (P1-16)", () => {
     expect(out.statusCode).toBe(201);
     expect(out.body.data.secret).toBe(sampleWebhook.secret);
     expect(s.create).toHaveBeenCalledWith(expect.objectContaining({
-      tenantId: "default",
       url: "https://example.com/hook",
       eventTypes: ["skill.published"],
     }));

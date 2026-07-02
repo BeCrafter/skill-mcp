@@ -11,17 +11,14 @@ function createTestTables(db: DrizzleDB): void {
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
       token_hash TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'active',
-      tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at INTEGER, updated_at INTEGER
     )`,
     `CREATE TABLE IF NOT EXISTS roles (
       id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, tags TEXT NOT NULL DEFAULT '[]',
-      tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at INTEGER, updated_at INTEGER
     )`,
     `CREATE TABLE IF NOT EXISTS user_roles (
       id TEXT PRIMARY KEY,
-      tenant_id TEXT NOT NULL DEFAULT 'default',
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
       created_at INTEGER

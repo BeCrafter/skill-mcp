@@ -9,6 +9,7 @@ import type {
   UsageEventEntity,
 } from "@/db/repositories/usage-event.repository.js";
 import type { UsageMeterService } from "@/services/usage-meter.service.js";
+import type { Mock } from "vitest";
 
 function makeRes() {
   let body = "";
@@ -47,7 +48,13 @@ function jsonOf(ctx: HttpContext) {
   return { statusCode: out.statusCode, body: JSON.parse(out.body) };
 }
 
-function setup(opts: { withRepo?: boolean } = {}) {
+interface UsageTestCtx {
+  aggregate: Mock<(args: unknown) => AggregateRow[]>;
+  list: Mock<(args: unknown) => UsageEventEntity[]>;
+  router: Router;
+}
+
+function setup(opts: { withRepo?: boolean } = {}): UsageTestCtx {
   const aggregate = vi.fn<(args: unknown) => AggregateRow[]>();
   const list = vi.fn<(args: unknown) => UsageEventEntity[]>();
   const usageMeter = { aggregate, list } as unknown as UsageMeterService;
@@ -61,13 +68,13 @@ function setup(opts: { withRepo?: boolean } = {}) {
 }
 
 describe("registerAdminUsageRoutes (P1-13)", () => {
-  let ctx: ReturnType<typeof setup>;
+  let ctx: UsageTestCtx;
   beforeEach(() => { ctx = setup(); });
 
   describe("GET /api/admin/usage/aggregate", () => {
     it("returns rows as JSON with snake_case fields", async () => {
       const rows: AggregateRow[] = [
-        { tenantId: "default", eventType: "skill.view", hourBucket: "2026-05-28T13", totalQuantity: 5, eventCount: 5 },
+        { eventType: "skill.view", hourBucket: "2026-05-28T13", totalQuantity: 5, eventCount: 5 },
       ];
       ctx.aggregate.mockReturnValue(rows);
       const httpCtx = makeCtx("GET", "/api/admin/usage/aggregate");
@@ -75,26 +82,23 @@ describe("registerAdminUsageRoutes (P1-13)", () => {
       const out = jsonOf(httpCtx);
       expect(out.statusCode).toBe(200);
       expect(out.body.data).toEqual([{
-        tenant_id: "default",
         event_type: "skill.view",
         hour_bucket: "2026-05-28T13",
         total_quantity: 5,
         event_count: 5,
       }]);
       expect(out.body.total).toBe(1);
-      expect(ctx.aggregate).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "default" }));
+      expect(ctx.aggregate).toHaveBeenCalledWith(expect.objectContaining({}));
     });
 
-    it("passes through tenantId / eventType / fromBucket / toBucket query params", async () => {
+    it("passes through eventType / fromBucket / toBucket query params", async () => {
       ctx.aggregate.mockReturnValue([]);
       const httpCtx = makeCtx("GET", "/api/admin/usage/aggregate");
-      httpCtx.query.set("tenantId", "tenant-x");
       httpCtx.query.set("eventType", "pipeline.run");
       httpCtx.query.set("fromBucket", "2026-05-28T00");
       httpCtx.query.set("toBucket", "2026-05-28T23");
       await ctx.router.dispatch(httpCtx);
       expect(ctx.aggregate).toHaveBeenCalledWith({
-        tenantId: "tenant-x",
         eventType: "pipeline.run",
         fromBucket: "2026-05-28T00",
         toBucket: "2026-05-28T23",
@@ -126,8 +130,8 @@ describe("registerAdminUsageRoutes (P1-13)", () => {
 
     it("emits CSV when format=csv with correct content type and headers", async () => {
       const rows: AggregateRow[] = [
-        { tenantId: "default", eventType: "skill.view", hourBucket: "2026-05-28T13", totalQuantity: 5, eventCount: 5 },
-        { tenantId: "default", eventType: "pipeline.run", hourBucket: "2026-05-28T13", totalQuantity: 12, eventCount: 3 },
+        { eventType: "skill.view", hourBucket: "2026-05-28T13", totalQuantity: 5, eventCount: 5 },
+        { eventType: "pipeline.run", hourBucket: "2026-05-28T13", totalQuantity: 12, eventCount: 3 },
       ];
       ctx.aggregate.mockReturnValue(rows);
       const httpCtx = makeCtx("GET", "/api/admin/usage/aggregate");
@@ -136,11 +140,11 @@ describe("registerAdminUsageRoutes (P1-13)", () => {
       const out = bodyOf(httpCtx);
       expect(out.statusCode).toBe(200);
       expect(out.headers["Content-Type"]).toMatch(/text\/csv/);
-      expect(out.headers["Content-Disposition"]).toMatch(/attachment; filename="usage-default\.csv"/);
+      expect(out.headers["Content-Disposition"]).toMatch(/attachment; filename="usage\.csv"/);
       expect(out.body).toBe(
-        "tenant_id,event_type,hour_bucket,total_quantity,event_count\n" +
-        "default,skill.view,2026-05-28T13,5,5\n" +
-        "default,pipeline.run,2026-05-28T13,12,3\n",
+        "event_type,hour_bucket,total_quantity,event_count\n" +
+        "skill.view,2026-05-28T13,5,5\n" +
+        "pipeline.run,2026-05-28T13,12,3\n",
       );
     });
 
@@ -150,7 +154,7 @@ describe("registerAdminUsageRoutes (P1-13)", () => {
       httpCtx.query.set("format", "csv");
       await ctx.router.dispatch(httpCtx);
       const out = bodyOf(httpCtx);
-      expect(out.body).toBe("tenant_id,event_type,hour_bucket,total_quantity,event_count\n");
+      expect(out.body).toBe("event_type,hour_bucket,total_quantity,event_count\n");
     });
 
     it("rejects unknown format with 400", async () => {
@@ -165,7 +169,7 @@ describe("registerAdminUsageRoutes (P1-13)", () => {
     it("returns events with snake_case fields and respects limit", async () => {
       const events: UsageEventEntity[] = [
         {
-          id: "e1", tenantId: "default", userId: "u1",
+          id: "e1", userId: "u1",
           eventType: "skill.view", resourceId: "demo",
           quantity: 1, metadata: { foo: "bar" },
           hourBucket: "2026-05-28T13", createdAt: 1000,
@@ -179,7 +183,6 @@ describe("registerAdminUsageRoutes (P1-13)", () => {
       expect(out.statusCode).toBe(200);
       expect(out.body.data).toEqual([{
         id: "e1",
-        tenant_id: "default",
         user_id: "u1",
         event_type: "skill.view",
         resource_id: "demo",

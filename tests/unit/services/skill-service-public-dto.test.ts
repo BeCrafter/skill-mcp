@@ -52,7 +52,7 @@ function makeLogger(): Logger {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn(), trace: vi.fn(), child: vi.fn().mockReturnThis() } as unknown as Logger;
 }
 
-const ctx: RequestContext = { tenantId: "default", userId: "alice", sessionId: "s", tags: new Set(), isAuthenticated: true };
+const ctx: RequestContext = { userId: "alice", sessionId: "s", tags: new Set(), isAuthenticated: true };
 
 describe("SkillService public DTO (T-302)", () => {
   it("listAccessibleSkills returns objects without storagePath / contentHash", async () => {

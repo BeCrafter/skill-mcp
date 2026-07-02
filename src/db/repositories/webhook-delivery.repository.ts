@@ -20,7 +20,6 @@ export type WebhookDeliveryStatus = "pending" | "success" | "failed" | "dead_let
 export interface WebhookDeliveryEntity {
   id: string;
   webhookId: string;
-  tenantId: string;
   eventType: string;
   deliveryId: string;
   payload: string;
@@ -38,7 +37,6 @@ export interface WebhookDeliveryEntity {
 
 export interface EnqueueDeliveryInput {
   webhookId: string;
-  tenantId: string;
   eventType: string;
   payload: string;
   /** Override the auto-generated delivery_id (test-only). */
@@ -72,7 +70,6 @@ export class WebhookDeliveryRepository {
     this.db.insert(webhookDeliveries).values({
       id,
       webhookId: input.webhookId,
-      tenantId: input.tenantId,
       eventType: input.eventType,
       deliveryId,
       payload: input.payload,
@@ -90,7 +87,6 @@ export class WebhookDeliveryRepository {
     return {
       id,
       webhookId: input.webhookId,
-      tenantId: input.tenantId,
       eventType: input.eventType,
       deliveryId,
       payload: input.payload,
@@ -175,16 +171,6 @@ export class WebhookDeliveryRepository {
     return rows.map(r => this.toEntity(r));
   }
 
-  listByTenant(tenantId: string, limit: number = 100): WebhookDeliveryEntity[] {
-    const rows = this.db.select().from(webhookDeliveries)
-      .where(eq(webhookDeliveries.tenantId, tenantId))
-      .orderBy(desc(webhookDeliveries.createdAt))
-      .limit(limit)
-      .all();
-    return rows.map(r => this.toEntity(r));
-  }
-
-
   /** Hard delete (admin / retention job). */
   delete(id: string): boolean {
     const result = this.db.delete(webhookDeliveries).where(eq(webhookDeliveries.id, id)).run();
@@ -195,7 +181,6 @@ export class WebhookDeliveryRepository {
     return {
       id: row.id,
       webhookId: row.webhookId,
-      tenantId: row.tenantId,
       eventType: row.eventType,
       deliveryId: row.deliveryId,
       payload: row.payload,

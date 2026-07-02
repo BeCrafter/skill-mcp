@@ -25,7 +25,6 @@ function createTestTables(db: DrizzleDB): void {
   const statements = [
     `CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      tenant_id TEXT NOT NULL DEFAULT 'default',
       display_name TEXT, description TEXT NOT NULL DEFAULT '',
       version TEXT NOT NULL DEFAULT '0.0.1', category TEXT DEFAULT NULL,
       attributes TEXT, retrieval_meta TEXT,
@@ -42,7 +41,6 @@ function createTestTables(db: DrizzleDB): void {
     )`,
     `CREATE TABLE IF NOT EXISTS skill_eval_cases (
       id TEXT PRIMARY KEY NOT NULL,
-      tenant_id TEXT NOT NULL DEFAULT 'default',
       skill_id TEXT NOT NULL,
       case_name TEXT NOT NULL,
       input TEXT NOT NULL,
@@ -54,7 +52,6 @@ function createTestTables(db: DrizzleDB): void {
     `CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_eval_cases_skill_case ON skill_eval_cases(skill_id, case_name)`,
     `CREATE TABLE IF NOT EXISTS skill_eval_runs (
       id TEXT PRIMARY KEY NOT NULL,
-      tenant_id TEXT NOT NULL DEFAULT 'default',
       skill_id TEXT NOT NULL,
       skill_version TEXT NOT NULL,
       case_name TEXT NOT NULL,

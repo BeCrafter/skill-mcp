@@ -212,7 +212,7 @@ export const metrics = {
 
   // P1-13.5 — Quota check denials. Distinct from `rateLimitDenied` (a sliding-
   // window burst protection); a `quota_check_denied_total` increment means
-  // the tenant hit a per-tier limit (daily counter or storage cap).
+  // the user hit a per-tier limit (daily counter or storage cap).
   quotaCheckDenied: new Counter({
     name: "skill_mcp_quota_check_denied_total",
     help: "Total HTTP requests rejected by the per-user quota check",

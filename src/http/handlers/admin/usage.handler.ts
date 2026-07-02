@@ -1,6 +1,5 @@
 import type { Router } from "../../router.js";
 import type { AppDependencies } from "../../../app.js";
-import type { HttpContext } from "../../context.js";
 import { json } from "../../helpers.js";
 import { BadRequestError, ConfigurationError } from "../../../utils/errors.js";
 import type { AggregateRow } from "../../../db/repositories/usage-event.repository.js";
@@ -8,8 +7,8 @@ import type { AggregateRow } from "../../../db/repositories/usage-event.reposito
 // P1-13 — Admin usage metering endpoints (review §9.1).
 //
 // Surface:
-//   GET /api/admin/usage/aggregate?tenantId=&fromBucket=&toBucket=&eventType=&format=json|csv
-//   GET /api/admin/usage/events?tenantId=&fromBucket=&toBucket=&eventType=&limit=
+//   GET /api/admin/usage/aggregate?fromBucket=&toBucket=&eventType=&format=json|csv
+//   GET /api/admin/usage/events?fromBucket=&toBucket=&eventType=&limit=
 //
 // CSV export is opt-in via `?format=csv`; default JSON keeps the response
 // shape consistent with the rest of the admin surface.
@@ -38,35 +37,31 @@ function validateEventType(value: string | null): string | undefined {
 }
 
 function rowsToCsv(rows: AggregateRow[]): string {
-  const header = "tenant_id,event_type,hour_bucket,total_quantity,event_count\n";
+  const header = "event_type,hour_bucket,total_quantity,event_count\n";
   const body = rows
-    .map(r => `${r.tenantId},${r.eventType},${r.hourBucket},${r.totalQuantity},${r.eventCount}`)
+    .map(r => `${r.eventType},${r.hourBucket},${r.totalQuantity},${r.eventCount}`)
     .join("\n");
   return header + (body ? body + "\n" : "");
 }
 
-function getTenantId(ctx: HttpContext): string {
-  return ctx.query.get("tenantId") ?? "default";
-}
 
 export function registerAdminUsageRoutes(router: Router, deps: AppDependencies): void {
   if (!deps.usageMeter) return;
   const { usageMeter } = deps;
   router.get("/api/admin/usage/aggregate", async (ctx) => {
-    const tenantId = getTenantId(ctx);
     const fromBucket = validateBucket("fromBucket", ctx.query.get("fromBucket"));
     const toBucket = validateBucket("toBucket", ctx.query.get("toBucket"));
     const eventType = validateEventType(ctx.query.get("eventType"));
     const format = ctx.query.get("format") ?? "json";
 
-    const rows = usageMeter.aggregate({ tenantId, fromBucket, toBucket, eventType });
+    const rows = usageMeter.aggregate({ fromBucket, toBucket, eventType });
 
     if (format === "csv") {
       const csv = rowsToCsv(rows);
       ctx.res.writeHead(200, {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Length": Buffer.byteLength(csv),
-        "Content-Disposition": `attachment; filename="usage-${tenantId}.csv"`,
+        "Content-Disposition": `attachment; filename="usage.csv"`,
       });
       ctx.res.end(csv);
       return;
@@ -78,7 +73,6 @@ export function registerAdminUsageRoutes(router: Router, deps: AppDependencies):
     json(ctx.res, 200, {
       success: true,
       data: rows.map(r => ({
-        tenant_id: r.tenantId,
         event_type: r.eventType,
         hour_bucket: r.hourBucket,
         total_quantity: r.totalQuantity,
@@ -91,7 +85,6 @@ export function registerAdminUsageRoutes(router: Router, deps: AppDependencies):
     if (!deps.usageEventRepo) {
       throw new ConfigurationError("usageEventRepo not configured");
     }
-    const tenantId = getTenantId(ctx);
     const fromBucket = validateBucket("fromBucket", ctx.query.get("fromBucket"));
     const toBucket = validateBucket("toBucket", ctx.query.get("toBucket"));
     const eventType = validateEventType(ctx.query.get("eventType"));
@@ -105,12 +98,11 @@ export function registerAdminUsageRoutes(router: Router, deps: AppDependencies):
       limit = n;
     }
 
-    const events = usageMeter.list({ tenantId, fromBucket, toBucket, eventType, limit });
+    const events = usageMeter.list({ fromBucket, toBucket, eventType, limit });
     json(ctx.res, 200, {
       success: true,
       data: events.map(e => ({
         id: e.id,
-        tenant_id: e.tenantId,
         user_id: e.userId,
         event_type: e.eventType,
         resource_id: e.resourceId,

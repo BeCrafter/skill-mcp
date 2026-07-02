@@ -35,7 +35,7 @@ function makeCtx(method: string, url: string, body?: unknown): HttpContext {
     req, res: makeRes(),
     url, method, params: {}, query: new URLSearchParams(),
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
-    requestContext: { userId: "super-1", userType: "superadmin", isAuthenticated: true, tenantId: "default", sessionId: "s1", tags: new Set<string>() },
+    requestContext: { userId: "super-1", userType: "superadmin", isAuthenticated: true, sessionId: "s1", tags: new Set<string>() },
   };
 }
 

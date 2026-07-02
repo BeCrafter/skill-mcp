@@ -218,7 +218,6 @@ export const cacheUserEpochs = sqliteTable("cache_user_epochs", {
 // WAL mode); for higher volumes, batch via Redis counters and archive hourly.
 export const usageEvents = sqliteTable("usage_events", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().default("default"),
   userId: text("user_id"),
   eventType: text("event_type").notNull(),
   resourceId: text("resource_id"),
@@ -227,8 +226,8 @@ export const usageEvents = sqliteTable("usage_events", {
   hourBucket: text("hour_bucket").notNull(),
   createdAt: integer("created_at").notNull(),
 }, (table) => [
-  index("idx_usage_events_tenant_bucket").on(table.tenantId, table.hourBucket),
-  index("idx_usage_events_tenant_event").on(table.tenantId, table.eventType, table.hourBucket),
+  index("idx_usage_events_bucket").on(table.hourBucket),
+  index("idx_usage_events_event").on(table.eventType, table.hourBucket),
   index("idx_usage_events_created_at").on(table.createdAt),
 ]);
 
@@ -253,50 +252,9 @@ export const pipelineRuns = sqliteTable("pipeline_runs", {
   index("idx_pipeline_runs_started_at").on(table.startedAt),
 ]);
 
-// P1-13.5 — Tier limits table (review §9.1). Stores the *current* tier window
-// rows preserved as historical record after a tier change (the previous row
-// gets stamped with `now`, then a new row is inserted). Only one row per
-// tenant should have `effective_until IS NULL` at any time — application
-// code enforces this; SQLite cannot express partial uniqueness portably.
-export const tenantQuotas = sqliteTable("tenant_quotas", {
-  id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull(),
-  tier: text("tier", { enum: ["free", "team", "enterprise"] }).notNull(),
-  maxUsers: integer("max_users").notNull(),
-  maxSkills: integer("max_skills").notNull(),
-  maxStorageBytes: integer("max_storage_bytes").notNull(),
-  maxApiCallsPerDay: integer("max_api_calls_per_day").notNull(),
-  maxPipelineRunsPerDay: integer("max_pipeline_runs_per_day").notNull(),
-  effectiveFrom: integer("effective_from").notNull(),
-  effectiveUntil: integer("effective_until"),
-  notes: text("notes"),
-}, (table) => [
-  index("idx_tenant_quotas_tenant").on(table.tenantId, table.effectiveUntil),
-]);
-
-// P1-13.5 — Per-field overrides (sales/support escalation). Layered over
-// `tenant_quotas`: when looking up a field, an active (un-expired)
-// override for that (tenant_id, field_name) wins over the tier default.
-// `reason` is mandatory text — the audit trail is the product, not the
-// override itself.
-export const tenantQuotaOverrides = sqliteTable("tenant_quota_overrides", {
-  id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull(),
-  fieldName: text("field_name", { enum: [
-    "max_users", "max_skills", "max_storage_bytes",
-    "max_api_calls_per_day", "max_pipeline_runs_per_day",
-  ] }).notNull(),
-  overrideValue: integer("override_value").notNull(),
-  reason: text("reason").notNull(),
-  grantedBy: text("granted_by").notNull(),
-  grantedAt: integer("granted_at").notNull(),
-  expiresAt: integer("expires_at"),
-}, (table) => [
-  index("idx_tenant_quota_overrides_lookup").on(table.tenantId, table.fieldName, table.expiresAt),
-]);
 
 // P1-16 — Webhook outbound subscriptions (review §5.5.1). One row per
-// `(tenant, url)` triplet customers register; matching domain events fan
+// webhook subscription customers register; matching domain events fan
 // out into `webhook_deliveries`. `secret` is shown once via the admin POST
 // response (returned alongside the row), then never reflected back on
 // list/get — the create handler hides it from `webhookToJson`. `event_types`
@@ -304,7 +262,6 @@ export const tenantQuotaOverrides = sqliteTable("tenant_quota_overrides", {
 // `skill.deprecated`, `user.token_rotated`).
 export const webhooks = sqliteTable("webhooks", {
   id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull(),
   url: text("url").notNull(),
   secret: text("secret").notNull(),
   eventTypes: text("event_types").notNull(),
@@ -314,7 +271,6 @@ export const webhooks = sqliteTable("webhooks", {
   updatedAt: integer("updated_at").notNull(),
   secretRotatedAt: integer("secret_rotated_at"),
 }, (table) => [
-  index("idx_webhooks_tenant").on(table.tenantId),
   index("idx_webhooks_enabled").on(table.enabled),
 ]);
 
@@ -326,7 +282,6 @@ export const webhooks = sqliteTable("webhooks", {
 export const webhookDeliveries = sqliteTable("webhook_deliveries", {
   id: text("id").primaryKey(),
   webhookId: text("webhook_id").notNull(),
-  tenantId: text("tenant_id").notNull(),
   eventType: text("event_type").notNull(),
   deliveryId: text("delivery_id").notNull(),
   payload: text("payload").notNull(),
@@ -343,7 +298,6 @@ export const webhookDeliveries = sqliteTable("webhook_deliveries", {
 }, (table) => [
   uniqueIndex("idx_webhook_deliveries_delivery_id").on(table.deliveryId),
   index("idx_webhook_deliveries_due").on(table.status, table.nextRetryAt),
-  index("idx_webhook_deliveries_tenant").on(table.tenantId, table.createdAt),
   index("idx_webhook_deliveries_webhook").on(table.webhookId, table.createdAt),
 ]);
 

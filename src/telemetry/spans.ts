@@ -49,7 +49,7 @@ function attachContextAttrs(attrs: Attributes, ctx: SpanOpts["ctx"]): Attributes
 
 /**
  * Wrap an async operation with a span. The span:
- *  - inherits attributes from `opts.attributes` plus tenant/user from `opts.ctx`
+ *  - inherits attributes from `opts.attributes` plus user info from `opts.ctx`
  *  - records exceptions and sets status=ERROR on throw
  *  - is always ended (finally), so leaks are impossible
  *

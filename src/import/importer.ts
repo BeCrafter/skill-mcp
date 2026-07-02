@@ -495,8 +495,7 @@ export class SkillImporter {
 
     // P1-13 — record `storage.write` with `quantity = bytes written`. Counts
     // raw payload size of the imported files (post-validation, pre-staging),
-    // matching review §9.1 example. The importer is currently tenant-agnostic
-    // should flow in via ImportOptions.
+    // matching review §9.1 example.
     if (this.usageMeter) {
       const bytes = skillFiles.reduce((acc, f) => acc + f.buffer.byteLength, 0);
       void this.usageMeter.record({
