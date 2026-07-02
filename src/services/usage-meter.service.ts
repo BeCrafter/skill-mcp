@@ -17,10 +17,9 @@ import { metrics } from "../telemetry/metrics.js";
 // api.call, storage.write) MUST NOT block on metering DB writes nor
 // crash if the row insert fails.
 //
-// Aggregation is read-through to the repository so callers (admin REST,
-// future quota-check middleware) get a fresh view; an in-memory cache
-// would only mask billing-grade misses for negligible savings — the
-// covering index keeps queries cheap.
+// Aggregation is read-through to the repository so callers (admin REST)
+// get a fresh view; an in-memory cache would only mask billing-grade
+// misses for negligible savings — the covering index keeps queries cheap.
 export class UsageMeterService {
   constructor(
     private readonly repo: UsageEventRepository,
@@ -70,7 +69,7 @@ export class UsageMeterService {
     return this.repo.aggregate(opts);
   }
 
-  /** Pass-through quota-check helper — returns 0 on any error. */
+  /** Pass-through to the repository sumQuantity query — returns 0 on any error. */
   sumQuantity(opts: AggregateOptions): number {
     try {
       return this.repo.sumQuantity(opts);

@@ -210,16 +210,6 @@ export const metrics = {
     registers: [registry],
   }),
 
-  // P1-13.5 — Quota check denials. Distinct from `rateLimitDenied` (a sliding-
-  // window burst protection); a `quota_check_denied_total` increment means
-  // the user hit a per-tier limit (daily counter or storage cap).
-  quotaCheckDenied: new Counter({
-    name: "skill_mcp_quota_check_denied_total",
-    help: "Total HTTP requests rejected by the per-user quota check",
-    labelNames: ["scope", "dimension"], // scope=admin|gateway, dimension=api_calls|...
-    registers: [registry],
-  }),
-
   // P1-16 — Webhook outbound metrics (review §5.5.1).
   // `webhookDeliveryFinal` captures terminal outcomes for dashboards (success
   // vs dead_letter ratio); `webhookDeliveryRetry` increments when a row is

@@ -24,7 +24,7 @@ export class PipelineExecutor {
 
   // P1-13 — emit one `pipeline.run` usage event per terminal pipeline outcome
   // (single-shot success/partial, two-phase final completion). `quantity` is
-  // the count of stages actually executed so quota / billing aggregations
+  // the count of stages actually executed so billing aggregations
   // bill on real work rather than pipeline-definition size.
   private recordPipelineRun(
     pipelineName: string,

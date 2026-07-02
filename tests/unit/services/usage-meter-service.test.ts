@@ -71,7 +71,7 @@ describe("UsageMeterService (P1-13)", () => {
     expect(aggregate).toHaveBeenCalledWith({ eventType: "skill.view" });
   });
 
-  it("sumQuantity() returns 0 when the repo throws (quota path stays open)", () => {
+  it("sumQuantity() returns 0 when the repo throws", () => {
     const sumQuantity = vi.fn().mockImplementation(() => { throw new Error("db locked"); });
     const repo = { sumQuantity } as unknown as UsageEventRepository;
     const logger = fakeLogger();

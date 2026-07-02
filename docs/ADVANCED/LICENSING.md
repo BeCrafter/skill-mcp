@@ -17,7 +17,7 @@
 | **SDK**（TS / Python，未来 `packages/sdk-*/`） | **Apache 2.0** | 行业事实标准（HashiCorp / Datadog / Stripe SDK 全 OSS）；闭源 SDK 在 2026 开发者生态等于 DOA |
 | **CLI / 部署模板**（`docker-compose.*.yml` / 未来 `deploy/charts/`） | **Apache 2.0** | 客户运维场景必须 OSS 才能改 |
 | **Pipeline YAML editor + 只读运行视图 UI**（未来 `admin-ui/`） | **Apache 2.0** | 开发者实操区是 OSS 体验底线 |
-| **Pipeline 写权限 UI / 多租户 / Audit Export / 商业 Connector** | **Commercial Only**（闭源） | 企业付费意愿点 |
+| **Pipeline 写权限 UI / Audit Export / 商业 Connector** | **Commercial Only**（闭源） | 企业付费意愿点 |
 | **示例 skills**（`skills/` / `docs/examples/`） | **CC0 / Public Domain** | 鼓励复用 |
 
 ## 切换路线图
