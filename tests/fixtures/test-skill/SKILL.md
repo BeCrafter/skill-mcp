@@ -1,4 +1,5 @@
 ---
+manifest_schema: "1.0"
 name: test-skill
 description: 用于 CLI 验收的测试技能包，包含检索信号和 eval cases
 version: 1.0.0

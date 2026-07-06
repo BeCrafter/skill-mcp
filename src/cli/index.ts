@@ -27,11 +27,23 @@ const ANSI_RE = /\x1B\[[0-9;]*m/g;
 function visLen(s: string): number { return s.replace(ANSI_RE, "").length; }
 function padTo(s: string, width: number): string { return s + " ".repeat(Math.max(0, width - visLen(s))); }
 
-/** Colorize a usage string: command=cyan, [options]=dim, <arg>=yellow. */
-function styleUsage(raw: string): string {
+/** Colorize a usage string with level-specific colors. */
+function styleUsage(raw: string, level: 1 | 2 | 3 = 1): string {
+  const argColor   = level === 1 ? c.yellow    : c.dimYellow;
+  const bracketColor = c.dim; // same for all levels
   return raw
-    .replace(/\[options\]/g, c.dim("[options]"))
-    .replace(/<[^>]+>/g, m => c.yellow(m));
+    .replace(/\[options\]/g, bracketColor("[options]"))
+    .replace(/<[^>]+>/g, m => argColor(m))
+    .replace(/\[command\]/g, bracketColor("[command]"));
+}
+
+/** Command name color by level. */
+function cmdColor(name: string, level: 1 | 2 | 3): string {
+  switch (level) {
+    case 1: return c.boldGreen(name);
+    case 2: return c.green(name);
+    case 3: return c.dimGreen(name);
+  }
 }
 
 /** Build usage string for a command, stripping [options] if none exist. */
@@ -44,7 +56,7 @@ function usageOf(cmd: Command): string {
 
 /** Format a single command row with aligned description. */
 function cmdRow(name: string, desc: string, indent: number, colWidth: number): string {
-  const styled = styleUsage(name);
+  const styled = styleUsage(name, 1);
   return " ".repeat(indent) + padTo(styled, colWidth) + c.dim(desc);
 }
 
@@ -76,9 +88,7 @@ export async function createCli(): Promise<Command> {
             { label: "Tools",        icon: "◆", names: ["migrate:check", "manifest:migrate"] },
           ];
 
-          const SUB_ORDER: Record<string, string[]> = {
-            user: ["list", "create", "get", "delete", "assign-roles", "rotate-token"],
-          };
+          const SUB_ORDER: Record<string, string[]> = {};
 
           const allCmds = subs;
           const used = new Set<string>();
@@ -101,10 +111,13 @@ export async function createCli(): Promise<Command> {
           if (flatCmds.length > 0) {
             for (const sub of flatCmds) {
               used.add(sub.name());
-              const styled = styleUsage(sub.name());
-              const args = sub.usage().replace(/\[options\]\s*/g, "").trim();
-              const fullUsage = args ? `${styled} ${args}` : styled;
-              lines.push(`  ${c.boldGreen(fullUsage)}${" ".repeat(Math.max(1, 24 - fullUsage.length))}${c.dim(sub.description())}`);
+              const cn = sub.name();
+              const rawArgs = sub.usage().replace(/\[options\]\s*/g, "").trim();
+              const fullDisplay = rawArgs
+                ? `${cmdColor(cn, 1)} ${styleUsage(rawArgs, 1)}`
+                : cmdColor(cn, 1);
+              const plainLen = cn.length + (rawArgs ? 1 + rawArgs.length : 0);
+              lines.push(`  ${fullDisplay}${" ".repeat(Math.max(1, 24 - plainLen))}${c.dim(sub.description())}`);
             }
             lines.push("");
           }
@@ -118,24 +131,13 @@ export async function createCli(): Promise<Command> {
             lines.push(`  ${cat.label === "Experimental" ? c.boldYellow(cat.label.toUpperCase()) : c.bold(cat.label.toUpperCase())}`);
             for (const sub of cmds) {
               used.add(sub.name());
-              const subCmds = helper.visibleCommands(sub).filter(s => s.name() !== "help");
-              const order = SUB_ORDER[sub.name()];
-              if (order) subCmds.sort((a, b) => order.indexOf(a.name()) - order.indexOf(b.name()));
-              if (subCmds.length > 0) {
-                // parent group — bold green to stand out from leaf commands
-                const styled = styleUsage(sub.name());
-                lines.push(`    ${c.boldGreen(styled)}${" ".repeat(Math.max(1, 18 - sub.name().length))}${c.dim(sub.description())}`);
-                for (const child of subCmds) {
-                  const usage = usageOf(child);
-                  lines.push(cmdRow("  " + usage, child.description() ?? "", 6, 36));
-                }
-              } else {
-                // leaf command — same indent as parent group
-                const styled = styleUsage(sub.name());
-                const args = sub.usage().replace(/\[options\]\s*/g, "").trim();
-                const fullUsage = args ? `${styled} ${args}` : styled;
-                lines.push(`    ${c.boldGreen(fullUsage)}${" ".repeat(Math.max(1, 24 - fullUsage.length))}${c.dim(sub.description())}`);
-              }
+              const cn = sub.name();
+              const rawArgs = sub.usage().replace(/\[options\]\s*/g, "").trim();
+              const fullDisplay = rawArgs
+                ? `${cmdColor(cn, 1)} ${styleUsage(rawArgs, 1)}`
+                : cmdColor(cn, 1);
+              const plainLen = cn.length + (rawArgs ? 1 + rawArgs.length : 0);
+              lines.push(`    ${fullDisplay}${" ".repeat(Math.max(1, 24 - plainLen))}${c.dim(sub.description())}`);
             }
             lines.push("");
           }
@@ -180,8 +182,13 @@ export async function createCli(): Promise<Command> {
           // Subcommands
           lines.push(`  ${c.bold("COMMANDS")}`);
           for (const s of subs) {
-            const usage = usageOf(s);
-            lines.push(cmdRow("  " + usage, s.description() ?? "", 4, 36));
+            const cn = s.name();
+            const rawArgs = usageOf(s).replace(cn, "").replace(/\[options\]\s*/g, "").trim();
+            const fullDisplay = rawArgs
+              ? `${cmdColor(cn, 2)} ${styleUsage(rawArgs, 2)}`
+              : cmdColor(cn, 2);
+            const plainLen = cn.length + (rawArgs ? 1 + rawArgs.length : 0);
+            lines.push("    " + fullDisplay + " ".repeat(Math.max(1, 36 - plainLen)) + c.dim(s.description() ?? ""));
           }
           lines.push("");
 
@@ -203,7 +210,7 @@ export async function createCli(): Promise<Command> {
           const rawArgs = cmd.usage() || "";
           const hasOpts = opts.length > 0;
           const args = hasOpts ? rawArgs : rawArgs.replace(/\[options\]\s*/g, "").trim();
-          lines.push(`  ${c.dim("Usage:")}  ${c.cyan(parentName + " " + cmd.name())} ${styleUsage(args)}`.trimEnd());
+          lines.push(`  ${c.dim("Usage:")}  ${c.dimCyan(parentName + " " + cmd.name())} ${styleUsage(args, 3)}`.trimEnd());
           lines.push("");
 
           // Options
