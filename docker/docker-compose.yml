@@ -1,0 +1,159 @@
+version: '3.8'
+
+# Skill MCP Server - Docker Compose配置
+# 支持多种部署场景：standalone (C1) / distributed (C2)
+#
+# 使用方法：
+#   C1 单体部署:  docker compose --profile c1 up -d
+#   C2 分布式:    docker compose --profile c2 up -d
+#   带网关HTTPS: docker compose --profile c2 --profile gateway up -d
+
+x-common-env: &common-env
+  NODE_ENV: ${NODE_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_PATH: ${DATABASE_PATH:-/data/skill-mcp.db}
+  CACHE_FILE_DIR: ${CACHE_FILE_DIR:-/data/cache}
+  SECURITY_INJECTION_SCAN: ${SECURITY_INJECTION_SCAN:-true}
+
+x-healthcheck: &healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+
+services:
+  # ============================================================
+  # 场景 C1：单体部署（开发/测试）
+  # ============================================================
+  app:
+    image: ${IMAGE:-skill-mcp:latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    profiles: ["c1"]
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      <<: *common-env
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 3000
+      DEPLOYMENT_MODE: standalone
+      MCP_ONLY_MODE: "false"
+      STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
+      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+
+  # ============================================================
+  # 场景 C2：分布式部署（生产推荐）
+  # ============================================================
+  storage:
+    image: ${IMAGE:-skill-mcp:latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    profiles: ["c2"]
+    restart: always
+    environment:
+      <<: *common-env
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 3000
+      DEPLOYMENT_MODE: standalone
+      MCP_ONLY_MODE: "true"
+      STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
+      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
+    volumes:
+      - storage-data:/data
+    networks:
+      - internal
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${STORAGE_SVC_TOKEN:?设置 STORAGE_SVC_TOKEN}", "http://localhost:3000/api/gateway/health"]
+    deploy:
+      resources:
+        limits:
+          cpus: '${STORAGE_CPU:-2}'
+          memory: ${STORAGE_MEM:-4G}
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  mcp:
+    image: ${IMAGE:-skill-mcp:latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    profiles: ["c2"]
+    restart: always
+    environment:
+      <<: *common-env
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 4000
+      DEPLOYMENT_MODE: gateway
+      CLOUD_SERVICE_URL: http://storage:3000
+      AUTH_TOKEN: ${STORAGE_SVC_TOKEN:?设置 STORAGE_SVC_TOKEN}
+      MCP_ONLY_MODE: "true"
+    volumes:
+      - mcp-cache:/data
+    networks:
+      - internal
+      - external
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/health"]
+    deploy:
+      replicas: ${MCP_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '${MCP_CPU:-1}'
+          memory: ${MCP_MEM:-2G}
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # ============================================================
+  # Caddy 网关（自动 HTTPS）
+  # ============================================================
+  gateway:
+    image: caddy:2-alpine
+    profiles: ["gateway"]
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - external
+    depends_on:
+      - mcp
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/health"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  app-data:
+  storage-data:
+  mcp-cache:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:
+    internal: true
+  external:

@@ -57,229 +57,90 @@ EXPOSE 3000 4000
 CMD ["npm", "start"]
 ```
 
-### Docker Compose for Production
+### Docker Compose 配置
 
-```yaml
-# docker-compose.production.yml
-version: '3.8'
+使用统一的 `docker-compose.yml` 配置文件，支持多种部署场景：
 
-services:
-  # Storage Service
-  storage:
-    image: skill-mcp:latest
-    restart: always
-    environment:
-      NODE_ENV: production
-      TRANSPORT_TYPE: http
-      TRANSPORT_PORT: 3000
-      DEPLOYMENT_MODE: standalone
-      MCP_ONLY_MODE: "true"
-      STORAGE_TYPE: aliyun-oss
-      STORAGE_BUCKET: ${OSS_BUCKET}
-      STORAGE_REGION: ${OSS_REGION}
-      STORAGE_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
-      STORAGE_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
-      DATABASE_PATH: /data/skill-mcp.db
-      CACHE_FILE_DIR: /data/cache
-    volumes:
-      - storage-data:/data
-    networks:
-      - internal
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/gateway/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+```bash
+# 场景 C1：单体部署（开发/测试）
+docker compose --profile c1 up -d
 
-  # MCP Service 1
-  mcp-1:
-    image: skill-mcp:latest
-    restart: always
-    environment:
-      NODE_ENV: production
-      TRANSPORT_TYPE: http
-      TRANSPORT_PORT: 4000
-      DEPLOYMENT_MODE: gateway
-      CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: ${GATEWAY_TOKEN}
-      MCP_ONLY_MODE: "true"
-      DATABASE_PATH: /data/skill-mcp.db
-      CACHE_FILE_DIR: /data/cache
-    volumes:
-      - mcp-1-cache:/data
-    networks:
-      - internal
-      - external
-    depends_on:
-      storage:
-        condition: service_healthy
+# 场景 C2：分布式部署（生产推荐）
+docker compose --profile c2 up -d
 
-  # MCP Service 2
-  mcp-2:
-    image: skill-mcp:latest
-    restart: always
-    environment:
-      NODE_ENV: production
-      TRANSPORT_TYPE: http
-      TRANSPORT_PORT: 4000
-      DEPLOYMENT_MODE: gateway
-      CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: ${GATEWAY_TOKEN}
-      MCP_ONLY_MODE: "true"
-      DATABASE_PATH: /data/skill-mcp.db
-      CACHE_FILE_DIR: /data/cache
-    volumes:
-      - mcp-2-cache:/data
-    networks:
-      - internal
-      - external
-    depends_on:
-      storage:
-        condition: service_healthy
-
-  # Nginx Load Balancer
-  nginx:
-    image: nginx:alpine
-    restart: always
-    ports:
-      - "443:443"
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    networks:
-      - external
-    depends_on:
-      - mcp-1
-      - mcp-2
-
-volumes:
-  storage-data:
-  mcp-1-cache:
-  mcp-2-cache:
-
-networks:
-  internal:
-    internal: true
-  external:
+# 带 HTTPS 网关（生产部署）
+docker compose --profile c2 --profile gateway up -d
 ```
 
-### Nginx 配置
+详细配置见 `docker/README.md`。
 
-```nginx
-# nginx.conf
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log warn;
-pid /var/run/nginx.pid;
+### Caddy 网关配置
 
-events {
-    worker_connections 2048;
-    use epoll;
-}
+项目使用 Caddy 作为反向代理，自动处理 HTTPS：
 
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" "$http_x_forwarded_for"';
-
-    access_log /var/log/nginx/access.log main;
-
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    types_hash_max_size 2048;
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=mcp_limit:10m rate=100r/s;
-
-    # MCP Backend
-    upstream mcp_backend {
-        least_conn;
-        server mcp-1:4000 max_fails=3 fail_timeout=30s;
-        server mcp-2:4000 max_fails=3 fail_timeout=30s;
+```Caddyfile
+# docker/Caddyfile
+{$DOMAIN:localhost} {
+    # MCP 端点
+    handle /mcp* {
+        reverse_proxy mcp:4000
     }
 
-    server {
-        listen 80;
-        server_name _;
-        return 301 https://$host$request_uri;
+    # Gateway API
+    handle /api/gateway/* {
+        reverse_proxy storage:3000
     }
 
-    server {
-        listen 443 ssl http2;
-        server_name api.example.com;
-
-        ssl_certificate /etc/nginx/ssl/cert.pem;
-        ssl_certificate_key /etc/nginx/ssl/key.pem;
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_ciphers HIGH:!aNULL:!MD5;
-        ssl_prefer_server_ciphers on;
-        ssl_session_cache shared:SSL:10m;
-        ssl_session_timeout 10m;
-
-        # Security headers
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-Frame-Options "SAMEORIGIN" always;
-
-        # MCP endpoint
-        location /mcp {
-            limit_req zone=mcp_limit burst=50 nodelay;
-
-            proxy_pass http://mcp_backend;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-
-            # Timeouts
-            proxy_connect_timeout 10s;
-            proxy_send_timeout 30s;
-            proxy_read_timeout 30s;
-        }
-
-        # Health check for monitoring
-        location /health {
-            access_log off;
-            return 200 "ok\n";
-        }
+    # 安全头
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
     }
 }
 ```
+
+Caddy 自动 HTTPS 特性：
+- 自动获取 Let's Encrypt 证书
+- 自动续期证书
+- 支持 HTTP/2 和 HTTP/3
+- 本地开发自动生成本地证书
 
 ### 启动生产环境
 
 ```bash
 # 1. 创建 .env 文件
-cat > .env.production << 'EOF'
-# Gateway auth token (create via: skill-mcp user create --name svc-gateway --role-ids <id>)
-GATEWAY_TOKEN=your-strong-token-here
-OSS_BUCKET=your-oss-bucket
-OSS_REGION=oss-cn-beijing
-OSS_ACCESS_KEY_ID=your-access-key-id
-OSS_ACCESS_KEY_SECRET=your-access-key-secret
+cat > .env << 'EOF'
+# 基础配置
+NODE_ENV=production
+LOG_LEVEL=info
+
+# 服务账号 token（必须）
+STORAGE_SVC_TOKEN=your-strong-token-here
+
+# 存储配置（可选，默认使用 local-fs）
+# STORAGE_TYPE=aliyun-oss
+# STORAGE_BUCKET=your-oss-bucket
+# STORAGE_REGION=oss-cn-beijing
+# OSS_ACCESS_KEY_ID=your-access-key-id
+# OSS_ACCESS_KEY_SECRET=your-access-key-secret
+
+# HTTPS 配置
+DOMAIN=your-domain.com
+ACME_EMAIL=admin@example.com
+
+# 资源配置
+MCP_REPLICAS=2
 EOF
 
-
 # 2. 构建镜像
-docker build -t skill-mcp:latest .
+docker compose --profile c2 build
 
-# 3. 启动服务
-docker-compose -f docker-compose.production.yml up -d
+# 3. 启动服务（带 HTTPS 网关）
+docker compose --profile c2 --profile gateway up -d
 
 # 4. 验证部署
-docker-compose -f docker-compose.production.yml ps
+docker compose --profile c2 ps
 ```
 
 ## 监控和日志
@@ -381,7 +242,7 @@ certbot certonly --standalone -d api.example.com
 
 # 设置自动续期
 certbot renew --quiet --no-self-upgrade --post-hook \
-  "docker-compose -f docker-compose.production.yml restart nginx"
+  "docker-compose -f docker/docker-compose.production.yml restart nginx"
 ```
 
 ## 性能优化
@@ -427,7 +288,7 @@ BACKUP_DIR=/backups/skill-mcp
 DATE=$(date +%Y%m%d_%H%M%S)
 
 # 备份数据库
-docker-compose exec storage sqlite3 /data/skill-mcp.db \
+docker compose --profile c2 exec storage sqlite3 /data/skill-mcp.db \
   .dump > $BACKUP_DIR/db_$DATE.sql
 
 # 备份到 S3
@@ -449,16 +310,16 @@ find $BACKUP_DIR -name "*.sql" -mtime +30 -delete
 
 ```bash
 # 1. 停止服务
-docker-compose -f docker-compose.production.yml down
+docker compose --profile c2 down
 
 # 2. 恢复数据库
 sqlite3 /data/skill-mcp.db < backup_file.sql
 
 # 3. 启动服务
-docker-compose -f docker-compose.production.yml up -d
+docker compose --profile c2 up -d
 
 # 4. 验证
-docker-compose -f docker-compose.production.yml exec storage \
+docker compose --profile c2 exec storage \
   sqlite3 /data/skill-mcp.db "SELECT COUNT(*) FROM skills;"
 ```
 
@@ -468,14 +329,13 @@ docker-compose -f docker-compose.production.yml exec storage \
 
 ```bash
 # 1. 检查日志
-docker-compose logs storage
+docker compose --profile c2 logs storage
 
-# 2. 检查健康状态（health 端点不需要认证）
+# 2. 检查健康状态
 curl http://localhost:3000/api/gateway/health
 
-
 # 3. 验证数据库
-docker-compose exec storage \
+docker compose --profile c2 exec storage \
   sqlite3 /data/skill-mcp.db ".tables"
 
 # 4. 如需恢复，使用备份重启
@@ -485,16 +345,16 @@ docker-compose exec storage \
 
 ```bash
 # 1. 检查 cache 命中率
-docker logs $(docker-compose ps -q mcp-1) | grep "Cache"
+docker compose --profile c2 logs mcp | grep "Cache"
 
 # 2. 清除缓存
-docker-compose exec mcp-1 rm -rf /data/cache/*
+docker compose --profile c2 exec mcp rm -rf /data/cache/*
 
 # 3. 检查存储延迟
-docker logs $(docker-compose ps -q storage) | grep latency
+docker compose --profile c2 logs storage | grep latency
 
 # 4. 考虑扩展 MCP 实例
-docker-compose up -d --scale mcp=3
+docker compose --profile c2 up -d --scale mcp=3
 ```
 
 ## 维护窗口
@@ -503,22 +363,19 @@ docker-compose up -d --scale mcp=3
 
 ```bash
 # 1. 构建新镜像
-docker build -t skill-mcp:v2.0 .
+docker compose --profile c2 build
 
-# 2. 更新一个 MCP 实例
-docker-compose -f docker-compose.production.yml up -d \
-  --no-deps --build mcp-1
+# 2. 滚动更新存储服务
+docker compose --profile c2 up -d --no-deps storage
 
-# 3. 健康检查
-curl http://localhost/health
+# 3. 等待健康检查通过
+sleep 30
 
-# 4. 更新其他实例
-docker-compose -f docker-compose.production.yml up -d \
-  --no-deps --build mcp-2
+# 4. 滚动更新 MCP 服务
+docker compose --profile c2 up -d --no-deps mcp
 
-# 5. 更新存储（可能需要短暂停机）
-docker-compose -f docker-compose.production.yml up -d \
-  --no-deps --build storage
+# 5. 验证
+curl http://localhost:3000/api/health
 ```
 
 ## 成本优化
@@ -552,28 +409,18 @@ services:
 ### 自动扩展
 
 ```bash
-# 使用 Docker Swarm 或 Kubernetes 实现自动扩展
+# 使用 Docker Compose 实现自动扩展
 # 基于 CPU 和内存使用率自动调整实例数
 
-# Kubernetes HPA 示例
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: mcp-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: mcp
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
+# Docker Compose 扩展示例
+# 使用 docker compose up --scale skill-mcp=3 来扩展实例
+# 配合负载均衡器（如 Nginx）分发请求
+
+# 监控资源使用
+docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+
+# 根据负载手动扩展
+docker compose up -d --scale skill-mcp=3
 ```
 
 ## 检查清单

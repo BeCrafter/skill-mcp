@@ -1,52 +1,48 @@
-# Deployment Scripts
+# Scripts
 
-This directory contains deployment and demo scripts for different Skill MCP scenarios.
+本目录包含项目工具脚本。
 
-## Available Scripts
+## 可用脚本
 
-### scenario-b-demo.sh
-Demonstrates hybrid deployment: local MCP client + remote storage service.
+### sync-docs.js
 
-**Prerequisites**:
-- Node.js >= 22
-- Two terminal windows
+文档同步检查工具，用于验证 README.md 与代码库的一致性。
 
-**Purpose**: Shows how to run a gateway that proxies requests to a remote storage service.
+**用途**:
+- 检查 CLI 命令是否在 README 中有文档
+- 检查 MCP 工具是否在 README 中有说明
+- 检查环境变量是否在 README 中有记录
+- 验证中文 README 是否存在
 
-**Usage**:
+**使用方法**:
 ```bash
-chmod +x scripts/scenario-b-demo.sh
-./scripts/scenario-b-demo.sh
+# 完整检查
+npm run docs:sync
+
+# 仅检查新增文件影响
+npm run docs:sync -- --check-new-only
+
+# 静默模式（仅输出错误）
+npm run docs:sync -- --quiet
 ```
 
-### scenario-c-demo.sh
-Demonstrates distributed HTTP deployment with separate MCP and storage services.
+**检查项**:
+- CLI 命令同步（`src/cli/commands/`）
+- MCP 工具同步（`src/mcp/tools/`）
+- 环境变量同步（`src/config/schema.ts`）
 
-**Prerequisites**:
-- Node.js >= 22
-- Two terminal windows
+## 添加新脚本
 
-**Purpose**: Shows production-grade deployment with separated services behind load balancer.
+添加新脚本时：
 
-**Usage**:
-```bash
-chmod +x scripts/scenario-c-demo.sh
-./scripts/scenario-c-demo.sh
-```
+1. 在此目录创建脚本文件
+2. 添加 shebang 和错误处理
+3. 设置可执行权限：`chmod +x script-name.sh`
+4. 在此 README 中添加说明
+5. 测试脚本：`node scripts/script-name.js` 或 `bash scripts/script-name.sh`
 
-## Adding New Scripts
+## 相关文档
 
-When adding new deployment or demo scripts:
-
-1. Create script in this directory with `.sh` extension
-2. Add shebang and proper error handling
-3. Make it executable: `chmod +x script-name.sh`
-4. Add documentation in this README
-5. Reference in main README.md deployment section
-6. Test with: `bash scripts/script-name.sh`
-
-## Related Documentation
-
-- See [Deployment Scenarios](../docs/SCENARIOS/) for detailed scenario explanations
-- See [Production Deployment](../docs/PRODUCTION_DEPLOYMENT.md) for production guidelines
-- See [Architecture](../docs/ARCHITECTURE.md) for system design details
+- [部署场景](../docs/SCENARIOS/) - 详细的部署场景说明
+- [Docker 部署](../docker/README.md) - Docker 部署配置
+- [生产部署](../docs/PRODUCTION_DEPLOYMENT.md) - 生产环境部署指南

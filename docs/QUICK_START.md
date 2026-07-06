@@ -80,7 +80,7 @@ TRANSPORT_TYPE=http npm start
 
 ```bash
 # 使用 Docker Compose
-docker-compose -f docker-compose.c2.yml up -d
+docker compose --profile c2 up -d
 ```
 
 👉 详见 [Scenario C 完整指南](./SCENARIOS/SCENARIO_C.md)

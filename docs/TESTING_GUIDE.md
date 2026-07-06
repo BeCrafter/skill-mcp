@@ -14,33 +14,20 @@ npm install
 
 ## 快速演示
 
-### 场景 B Demo（推荐首先尝试）
+### Docker 部署演示
 
-最简单的方式：
-
-```bash
-./scripts/scenario-b-demo.sh
-```
-
-这个脚本会：
-1. 启动远程存储服务器（port 3000）
-2. 启动本地 MCP 客户端（stdio）
-3. 展示两个服务的交互
-
-**预期输出**：
-```
-✓ Storage server ready
-✓ Local MCP client started
-Both services are running!
-```
-
-### 场景 C Demo
+使用 Docker Compose 快速启动服务：
 
 ```bash
-./scripts/scenario-c-demo.sh
+# 场景 C1：单体部署
+docker compose --profile c1 up -d --build
+
+# 场景 C2：分离部署
+docker compose --profile c2 up -d --build
 ```
 
-交互式选择 C1 或 C2 部署方式。
+详见 [Docker 部署指南](../docker/README.md)。
+
 
 ## 完整的集成测试
 

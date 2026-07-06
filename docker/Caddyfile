@@ -1,0 +1,111 @@
+# Skill MCP Server - Caddy 反向代理配置
+# 文档: https://caddyserver.com/docs/caddyfile
+#
+# 自动 HTTPS 特性:
+#   - Caddy 自动获取和续期 Let's Encrypt 证书
+#   - 支持 HTTP/2 和 HTTP/3 (QUIC)
+#   - 自动 HTTP → HTTPS 重定向
+#
+# 配置方式:
+#   1. 域名部署: 修改下方 {$DOMAIN} 为你的域名
+#   2. 本地开发: 使用 localhost 自动获取本地证书
+
+# 全局配置
+{
+	# 邮箱用于 Let's Encrypt 证书通知
+	email {$ACME_EMAIL:admin@example.com}
+
+	# 开发环境可使用 staging CA（避免速率限制）
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# 主配置 - 支持域名或IP访问
+{$DOMAIN:localhost} {
+	# ---------- 健康检查 ----------
+	health /health {
+		interval 30s
+	}
+
+	# ---------- MCP 端点 ----------
+	# 路由到 MCP 服务（支持 SSE/WebSocket）
+	handle /mcp* {
+		reverse_proxy mcp:4000 {
+			# 健康检查
+			health_uri /api/health
+			health_interval 30s
+
+			# 负载均衡（如果有多个 MCP 实例）
+			lb_policy least_conn
+
+			# 传输配置
+			transport http {
+				read_buffer  4096
+				write_buffer 4096
+			}
+		}
+
+		# SSE/WebSocket 支持
+		header Connection {>Connection}
+		header Upgrade {>Upgrade}
+	}
+
+	# ---------- Gateway API ----------
+	# 存储服务的 Gateway 端点
+	handle /api/gateway/* {
+		reverse_proxy storage:3000 {
+			health_uri /api/gateway/health
+			health_interval 30s
+
+			# 传递 Authorization 头
+			header_up Authorization {>Authorization}
+		}
+	}
+
+	# ---------- Admin API ----------
+	# 管理员 API（可选，按需启用）
+	# handle /api/admin/* {
+	# 	reverse_proxy mcp:4000
+	# }
+
+	# ---------- 指标端点 ----------
+	# Prometheus 指标（可选，按需启用）
+	# handle /metrics {
+	# 	reverse_proxy mcp:4000
+	# }
+
+	# ---------- 默认处理 ----------
+	handle {
+		# 未匹配的路径返回 404
+		respond "Not Found" 404
+	}
+
+	# ---------- 安全头 ----------
+	header {
+		# HSTS
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+		# 安全头
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+
+		# 移除服务器信息
+		-Server
+	}
+
+	# ---------- 日志 ----------
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# HTTP 重定向（Caddy 自动处理，但可自定义）
+http:// {
+	redir https://{host}{uri} permanent
+}

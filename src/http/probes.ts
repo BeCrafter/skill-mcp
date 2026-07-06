@@ -1,19 +1,19 @@
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 
 /**
- * P0-7 — Liveness vs readiness split for k8s deployments.
+ * P0-7 — Liveness vs readiness split for containerized deployments.
  *
  * - **Liveness** (`/api/v1/livez`): "is this process alive?" — answer 200 as
- *   long as the event loop is responsive. No I/O, no DB calls. The kubelet
- *   uses this to decide whether to *restart* the pod.
- * - **Readiness** (`/api/v1/readyz`): "should this pod receive traffic?" —
- *   answer 200 only after dependencies (DB, cache) are reachable. The kubelet
- *   uses this to gate Service endpoint inclusion. A failing readiness probe
- *   removes the pod from the load balancer rotation but does NOT restart it.
+ *   long as the event loop is responsive. No I/O, no DB calls. Container
+ *   orchestrators use this to decide whether to *restart* the container.
+ * - **Readiness** (`/api/v1/readyz`): "should this endpoint receive traffic?" —
+ *   answer 200 only after dependencies (DB, cache) are reachable. Load
+ *   balancers use this to gate endpoint inclusion. A failing readiness probe
+ *   removes the endpoint from rotation but does NOT restart it.
  *
  * Why split? The previous `/api/health` returned 200 from process start, so
- * traffic could land on a pod whose DB connection had not finished opening
- * (T-302 race). With readyz, k8s sees 503 until `skillRepo.count()` succeeds.
+ * traffic could land on an instance whose DB connection had not finished opening
+ * (T-302 race). With readyz, the orchestrator sees 503 until `skillRepo.count()` succeeds.
  *
  * Why a single cheap query for readiness? A `SELECT count(*) FROM skills`
  * round-trip exercises the SQLite better-sqlite3 connection without touching
@@ -40,7 +40,7 @@ export async function checkReadiness(deps: ReadinessDeps): Promise<ProbeResult> 
     if (!deps.skillRepo) {
       // Cloud-only nodes may not have a SkillRepository wired (rare). If we
       // didn't get one, treat the readiness check as "process is up but the
-      // probe has no DB to verify" — fail closed so k8s won't route traffic
+      // probe has no DB to verify" — fail closed so the orchestrator won't route traffic
       // before the operator has reviewed the deployment.
       dbErr = "skillRepo not configured";
     } else {

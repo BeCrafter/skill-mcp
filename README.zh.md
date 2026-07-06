@@ -274,7 +274,7 @@ stdio 传输没有 HTTP header，权限隔离通过启动时注入 bearer token 
 
 ### Gateway HTTP 鉴权
 
-`/api/gateway/*` 由鉴权中间件强制保护：每个请求必须携带 `Authorization: Bearer <token>`，缺失或无效 token 在 handler 之前直接返回 `401`。唯一的匿名端点是 `GET /api/gateway/health`（为 LB / k8s 探针保留）。
+`/api/gateway/*` 由鉴权中间件强制保护：每个请求必须携带 `Authorization: Bearer <token>`，缺失或无效 token 在 handler 之前直接返回 `401`。唯一的匿名端点是 `GET /api/gateway/health`（为负载均衡器 / 容器探针保留）。
 
 ```http
 401 Unauthorized

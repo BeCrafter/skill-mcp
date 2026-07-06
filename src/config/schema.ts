@@ -73,8 +73,8 @@ export const configSchema = z.object({
      * browser to HTTPS for `max-age` seconds, breaking access for any caller
      * that reaches the server over plain HTTP (the common dev / intra-cluster
      * setup). Default `false` — opt in only when there is a TLS terminator
-     * in front (nginx / ALB / CDN). The reverse proxy can still inject HSTS
-     * itself even with this off (see nginx.conf).
+     * in front (Caddy / nginx / ALB / CDN). The reverse proxy can still inject HSTS
+     * itself even with this off (see docker/Caddyfile).
      */
     hstsEnabled: z.boolean().default(false),
   }).default({

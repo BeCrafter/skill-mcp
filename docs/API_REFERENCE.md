@@ -1272,18 +1272,18 @@ Get the file tree structure of a skill.
 
 ---
 
-## 10. Kubernetes Probe Endpoints
+## 10. Health Check Endpoints
 
 
 ### GET /api/health
 
 **Deprecated.** Legacy health check endpoint, use `/api/livez` instead. Returns same response as `/api/livez` with `Sunset` and `Deprecation` headers.
 
-These endpoints are used by kubelet for health checking in k8s deployments.
+These endpoints are used for health checking in containerized deployments (Docker, load balancers, etc.).
 
 ### GET /api/livez
 
-**Liveness probe.** Returns 200 as long as the process event loop is responsive. No I/O or DB calls. Used by kubelet to decide whether to restart the pod.
+**Liveness probe.** Returns 200 as long as the process event loop is responsive. No I/O or DB calls. Used by container orchestrators to decide whether to restart the container.
 
 **Response**:
 ```json
@@ -1295,7 +1295,7 @@ These endpoints are used by kubelet for health checking in k8s deployments.
 
 ### GET /api/readyz
 
-**Readiness probe.** Returns 200 only when dependencies (DB) are reachable. A `SELECT count(*) FROM skills` round-trip verifies the SQLite connection is healthy. Used by kubelet to gate Service endpoint inclusion.
+**Readiness probe.** Returns 200 only when dependencies (DB) are reachable. A `SELECT count(*) FROM skills` round-trip verifies the SQLite connection is healthy. Used by load balancers to gate endpoint inclusion.
 
 **Response** (ready):
 ```json

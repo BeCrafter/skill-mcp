@@ -15,7 +15,7 @@
 |---|---|---|
 | **Core 服务**（`src/`：MCP server / SkillService / provider / cache / storage / pipeline / RBAC） | **BUSL-1.1 with 4-year change date → Apache 2.0**（v0.2.x 起切换） | 商用 SaaS 友好，4 年后自动转 OSS — 兼顾企业付费意愿与社区信任 |
 | **SDK**（TS / Python，未来 `packages/sdk-*/`） | **Apache 2.0** | 行业事实标准（HashiCorp / Datadog / Stripe SDK 全 OSS）；闭源 SDK 在 2026 开发者生态等于 DOA |
-| **CLI / 部署模板**（`docker-compose.*.yml` / 未来 `deploy/charts/`） | **Apache 2.0** | 客户运维场景必须 OSS 才能改 |
+| **CLI / 部署模板**（`docker-compose.*.yml`） | **Apache 2.0** | 客户运维场景必须 OSS 才能改 |
 | **Pipeline YAML editor + 只读运行视图 UI**（未来 `admin-ui/`） | **Apache 2.0** | 开发者实操区是 OSS 体验底线 |
 | **Pipeline 写权限 UI / Audit Export / 商业 Connector** | **Commercial Only**（闭源） | 企业付费意愿点 |
 | **示例 skills**（`skills/` / `docs/examples/`） | **CC0 / Public Domain** | 鼓励复用 |
@@ -66,7 +66,7 @@
 - ✅ 全部 SDK（TS / Python / 未来 Go）
 - ✅ Core 服务（BUSL 限制后 4 年内不可做竞品 SaaS，但可自部署 / 内部使用 / 学术 / fork）
 - ✅ Pipeline YAML 引擎 + 只读运行视图 UI
-- ✅ CLI / Docker Compose / Helm Chart / 部署模板
+- ✅ CLI / Docker Compose / 部署模板
 - ✅ 文档 + 示例 skills
 
 **Commercial Only（闭源 + 仅付费版可用）**：

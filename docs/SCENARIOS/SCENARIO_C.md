@@ -122,132 +122,64 @@ npm start
 
 #### 3. 配置负载均衡（可选）
 
-```nginx
-# nginx.conf
-upstream mcp_backend {
-    server mcp1:4000;
-    server mcp2:4000;
-    server mcp3:4000;
-}
+```Caddyfile
+# docker/Caddyfile
+your-domain.com {
+    # MCP 端点
+    handle /mcp* {
+        reverse_proxy mcp:4000
+    }
 
-server {
-    listen 443 ssl;
-    server_name api.example.com;
-
-    location /mcp {
-        proxy_pass http://mcp_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+    # Gateway API
+    handle /api/gateway/* {
+        reverse_proxy storage:3000
     }
 }
 ```
 
-## Docker Compose 示例
+## Docker Compose 部署
+
+项目使用统一的 `docker-compose.yml`，支持多种部署场景：
 
 ### C1：单体部署
 
-```yaml
-# docker-compose.c1.yml
-version: '3.8'
+```bash
+# 构建并启动
+docker compose --profile c1 up -d --build
 
-services:
-  skill-mcp:
-    image: skill-mcp:latest
-    ports:
-      - "3000:3000"
-    environment:
-      TRANSPORT_TYPE: http
-      DEPLOYMENT_MODE: standalone
-      MCP_ONLY_MODE: "false"
-    volumes:
-      - ./data:/app/data
+# 验证
+curl http://localhost:3000/api/health
 ```
 
 ### C2：分离部署
 
-```yaml
-# docker-compose.c2.yml
-version: '3.8'
-
-services:
-  storage:
-    image: skill-mcp:latest
-    environment:
-      TRANSPORT_TYPE: http
-      TRANSPORT_PORT: 3000
-      DEPLOYMENT_MODE: standalone
-      MCP_ONLY_MODE: "true"
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./data/storage:/app/data
-
-  mcp-1:
-    image: skill-mcp:latest
-    environment:
-      TRANSPORT_TYPE: http
-      TRANSPORT_PORT: 4001
-      DEPLOYMENT_MODE: gateway
-      CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: prod-storage-key-xyz
-      MCP_ONLY_MODE: "true"
-    ports:
-      - "4001:4001"
-    depends_on:
-      - storage
-
-  mcp-2:
-    image: skill-mcp:latest
-    environment:
-      TRANSPORT_TYPE: http
-      TRANSPORT_PORT: 4002
-      DEPLOYMENT_MODE: gateway
-      CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: prod-storage-key-xyz
-      MCP_ONLY_MODE: "true"
-    ports:
-      - "4002:4002"
-    depends_on:
-      - storage
-
-  nginx:
-    image: nginx:latest
-    ports:
-      - "443:443"
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - mcp-1
-      - mcp-2
-```
-
-```nginx
-# nginx.conf
-upstream mcp_backend {
-    server mcp-1:4001;
-    server mcp-2:4002;
-}
-
-server {
-    listen 80;
-    server_name localhost;
-
-    location /mcp {
-        proxy_pass http://mcp_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-    }
-}
-```
-
-启动：
 ```bash
-docker-compose -f docker-compose.c2.yml up -d
+# 1. 创建服务账号
+export STORAGE_SVC_TOKEN=$(skill-mcp user create svc-gateway --role <role-id> | grep -oP 'token: \K.*')
+
+# 2. 启动服务
+docker compose --profile c2 up -d --build
+
+# 3. 验证
+curl http://localhost:3000/api/gateway/health
 ```
+
+### 带 HTTPS 网关
+
+```bash
+# 1. 设置环境变量
+export DOMAIN=your-domain.com
+export ACME_EMAIL=admin@example.com
+export STORAGE_SVC_TOKEN=<your-token>
+
+# 2. 启动服务（自动获取 HTTPS 证书）
+docker compose --profile c2 --profile gateway up -d
+
+# 3. 访问
+https://your-domain.com/mcp
+```
+
+详细配置见 `docker/README.md`。
 
 ## 生产配置建议
 
@@ -352,11 +284,11 @@ Streamable HTTP 自动管理会话，MCP SDK 透明处理。
 恢复：
 ```bash
 # 1. 重启存储服务
-docker-compose -f docker-compose.c2.yml up -d storage
+docker-compose -f docker/docker-compose.c2.yml up -d storage
 
 # 2. MCP 会自动重连
 # 3. 清除过期缓存
-docker-compose -f docker-compose.c2.yml exec mcp-1 \
+docker-compose -f docker/docker-compose.c2.yml exec mcp-1 \
   rm -rf /app/data/cache
 ```
 
@@ -367,7 +299,7 @@ docker-compose -f docker-compose.c2.yml exec mcp-1 \
 **恢复**：
 ```bash
 # 重启宕机的 MCP 实例
-docker-compose -f docker-compose.c2.yml up -d mcp-1
+docker-compose -f docker/docker-compose.c2.yml up -d mcp-1
 ```
 
 ### 认证失败

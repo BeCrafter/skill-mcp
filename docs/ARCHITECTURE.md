@@ -328,7 +328,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 | C1 | standalone | http | 单 HTTP 服务 |
 | C2 | gateway → gateway → cloud | http → http → http | 分布式生产（推荐） |
 
-完整 env 模板见仓库根 `.env.example` 和 `.env.production.example`。
+完整 env 模板见仓库根 `.env.example`，不同场景的配置示例见 `src/config/examples/`。
 
 ### 5.3 设计动机
 

@@ -293,7 +293,7 @@ MCP_ONLY_MODE=true npm start
 **Key Files for Each Scenario**:
 - **Scenario A**: `src/provider/local.provider.ts`, `src/app.ts` (MCP routing only)
 - **Scenario B**: `src/provider/remote.provider.ts`, API endpoints (`/api/gateway/*`)
-- **Scenario C**: `docker-compose.scenarios.yml`, `nginx.conf`, multi-service setup
+- **Scenario C**: `docker/docker-compose.yml` (profiles: c1/c2/gateway), `docker/Caddyfile`, multi-service setup
 
 ### When to Choose Each Mode
 
@@ -364,7 +364,7 @@ MCP_ONLY_MODE=true npm start
 
 **Access Control (RBAC)**:
 - API Key authentication has been removed. All HTTP/SSE callers authenticate with per-user bearer tokens issued by `skill-mcp user create`.
-- `/api/gateway/*` is gated by `enforceGatewayAuth` middleware (`src/http/middleware/gateway-auth.ts`). Missing or invalid `Authorization: Bearer <token>` returns `401` *before* the handler runs. Only `GET /api/gateway/health` is exempt for LB / k8s liveness probes.
+- `/api/gateway/*` is gated by `enforceGatewayAuth` middleware (`src/http/middleware/gateway-auth.ts`). Missing or invalid `Authorization: Bearer <token>` returns `401` *before* the handler runs. Only `GET /api/gateway/health` is exempt for LB / container liveness probes.
 - Roles carry tag lists (`skill-mcp role create --tags ...`); user→role joins produce the request-context tag set.
 - `TagPermissionFilter` then enforces visibility *after* the caller is authenticated:
   - `visibility="public"` — visible to any authenticated caller (anonymous still 401's at the gateway).

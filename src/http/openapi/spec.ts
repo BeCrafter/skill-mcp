@@ -165,8 +165,8 @@ export function buildOpenApiSpec(): OpenApiDoc {
         get: {
           tags: ["Health"],
           security: [],
-          summary: "Kubernetes liveness probe — process is alive",
-          description: "Always returns 200 if the event loop is responsive. Maps to k8s `livenessProbe`. Failure of this probe causes the kubelet to restart the pod.",
+          summary: "Liveness probe — process is alive",
+          description: "Always returns 200 if the event loop is responsive. Used by container orchestrators for liveness checks. Failure of this probe causes the container to be restarted.",
           responses: { "200": { description: "Alive", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string", example: "ok" }, timestamp: { type: "string" } } } } } } },
         },
       },
@@ -174,8 +174,8 @@ export function buildOpenApiSpec(): OpenApiDoc {
         get: {
           tags: ["Health"],
           security: [],
-          summary: "Kubernetes readiness probe — accepting traffic",
-          description: "Returns 200 only when dependencies (DB) are reachable; 503 otherwise. Maps to k8s `readinessProbe`. Failure of this probe removes the pod from Service endpoints (no restart).",
+          summary: "Readiness probe — accepting traffic",
+          description: "Returns 200 only when dependencies (DB) are reachable; 503 otherwise. Used by load balancers for readiness checks. Failure of this probe removes the endpoint from rotation (no restart).",
           responses: {
             "200": { description: "Ready", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string", example: "ok" }, checks: { type: "object" } } } } } },
             "503": { description: "Not ready (dependency check failed)", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string", example: "not_ready" }, checks: { type: "object" } } } } } },
@@ -186,7 +186,7 @@ export function buildOpenApiSpec(): OpenApiDoc {
         get: {
           tags: ["Health"],
           security: [],
-          summary: "Gateway liveness (anonymous; LB/k8s probe)",
+          summary: "Gateway liveness (anonymous; LB/container probe)",
           responses: { "200": { description: "OK" } },
         },
       },

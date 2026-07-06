@@ -129,20 +129,7 @@ This project supports **three flexible deployment modes**:
 - **Scenario A** - [Local Development](./docs/SCENARIOS/SCENARIO_A.md)
 - **Scenario B** - [Hybrid Deployment](./docs/SCENARIOS/SCENARIO_B.md)
 - **Scenario C** - [Distributed Deployment](./docs/SCENARIOS/SCENARIO_C.md)
-- **Kubernetes** - [Helm Chart](./charts/skill-mcp/README.md)
 - **Full Architecture** - [Complete Reference](./docs/ARCHITECTURE.md)
-
-### Kubernetes (Helm)
-
-A production-grade Helm chart is available at [`charts/skill-mcp/`](./charts/skill-mcp/):
-
-```bash
-helm install skill-mcp ./charts/skill-mcp \
-  --namespace skill-mcp --create-namespace \
-  --set secrets.authToken=$(openssl rand -hex 32)
-```
-
-The chart wires three Kubernetes probes (`/api/v1/livez` for liveness without DB I/O, `/api/v1/readyz` for readiness with a DB ping, plus a startup probe) and defaults to `replicas: 1` + `strategy: Recreate` because the runtime uses SQLite (single-writer). Autoscaling is intentionally disabled by default — re-enable only after migrating to Postgres. See [`charts/skill-mcp/README.md`](./charts/skill-mcp/README.md) for the standalone / gateway / cloud presets, secrets externalization, and the full values reference.
 
 ## Quick Start
 
@@ -347,7 +334,7 @@ If the database has any active user or tag-protected skill but no token is confi
 
 ### Gateway HTTP Authentication
 
-`/api/gateway/*` is gated by an authentication middleware: every request must include `Authorization: Bearer <token>`. Missing or invalid tokens return `401` before the handler runs. The only anonymous endpoint is `GET /api/gateway/health` (kept open for LB and k8s liveness probes).
+`/api/gateway/*` is gated by an authentication middleware: every request must include `Authorization: Bearer <token>`. Missing or invalid tokens return `401` before the handler runs. The only anonymous endpoint is `GET /api/gateway/health` (kept open for LB and container liveness probes).
 
 ```http
 401 Unauthorized

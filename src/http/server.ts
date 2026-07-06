@@ -151,7 +151,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         return;
       }
 
-      // P0-7 — k8s probes: liveness ("am I alive?") vs readiness ("should I
+      // P0-7 — Health probes: liveness ("am I alive?") vs readiness ("should I
       // receive traffic?"). `/api/health` is a back-compat alias for liveness.
       if (url === "/api/health" || url === "/api/livez") {
         json(res, 200, checkLiveness());
@@ -201,7 +201,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       }
 
       // Gateway routes — token enforced by enforceGatewayAuth middleware before dispatch.
-      // /api/gateway/health is the only anonymous-accessible endpoint (LB / k8s probes).
+      // /api/gateway/health is the only anonymous-accessible endpoint (LB / container probes).
       if (url.startsWith("/api/gateway/")) {
         const match = gatewayRouter.match(req.method!, url);
         if (match) {
