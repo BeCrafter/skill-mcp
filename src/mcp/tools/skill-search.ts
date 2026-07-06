@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SKILL_SEARCH_DESC } from "../../prompt/descriptions.js";
+import { SKILL_SEARCH_DESC } from "../prompt/descriptions.js"
 import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder, McpExtra } from "../../permission/context-builder.js";
 

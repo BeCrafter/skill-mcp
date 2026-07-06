@@ -88,7 +88,6 @@ export async function createCli(): Promise<Command> {
             { label: "Tools",        icon: "◆", names: ["migrate:check", "manifest:migrate"] },
           ];
 
-          const SUB_ORDER: Record<string, string[]> = {};
 
           const allCmds = subs;
           const used = new Set<string>();

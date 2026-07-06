@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
-import {
-  SKILL_LIST_DESC,
-  SKILL_VIEW_DESC,
-  SKILL_FILE_DESC,
-  SKILL_FEEDBACK_DESC,
-} from "@/prompt/descriptions.js";
+import { SKILL_LIST_DESC,
+SKILL_VIEW_DESC,
+SKILL_FILE_DESC,
+SKILL_FEEDBACK_DESC, } from "@/mcp/prompt/descriptions.js"
 
 describe("prompt/descriptions", () => {
   it("SKILL_LIST_DESC documents call-conditions and the tag-filter signature", () => {

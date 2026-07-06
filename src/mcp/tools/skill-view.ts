@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SKILL_VIEW_DESC } from "../../prompt/descriptions.js";
+import { SKILL_VIEW_DESC } from "../prompt/descriptions.js"
 import { toMcpError } from "../../utils/errors.js";
 import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder, McpExtra } from "../../permission/context-builder.js";

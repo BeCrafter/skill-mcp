@@ -2,7 +2,7 @@ import type { Router } from "../router.js";
 import type { AppDependencies } from "../../app.js";
 import { json, readJsonBody } from "../helpers.js";
 import { AppError } from "../../utils/errors.js";
-import { signAccessToken, signRefreshToken, verifyJwt, type JwtPayload } from "../../auth/jwt.service.js";
+import { signAccessToken, signRefreshToken, verifyJwt, type JwtPayload } from "../../utils/jwt.js"
 import { extractBearerToken } from "../../permission/context-builder.js";
 import { getLogger } from "../../utils/logger.js";
 

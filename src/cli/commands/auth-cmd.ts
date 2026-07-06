@@ -7,7 +7,7 @@ import { getDatabase, closeDatabase } from "../../db/connection.js";
 import { UserRepository } from "../../db/repositories/user.repository.js";
 import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
 import { c, kv, section, ok, warn, fail, hint } from "../ui.js";
-import { signAccessToken, signRefreshToken, verifyJwt } from "../../auth/jwt.service.js";
+import { signAccessToken, signRefreshToken, verifyJwt } from "../../utils/jwt.js"
 import { getServerUrl, apiCall } from "../remote-client.js";
 
 const CREDENTIALS_PATH = join(homedir(), ".skill-mcp", "credentials.json");

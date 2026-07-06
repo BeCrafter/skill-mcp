@@ -4,7 +4,7 @@ import type { ISkillProvider } from "../provider/interface.js";
 import type { ContextBuilder } from "../permission/context-builder.js";
 import type { PipelineRunStore } from "../pipeline/run-store.js";
 import type { UsageMeterService } from "../services/usage-meter.service.js";
-import { buildSkillSystemPrompt } from "../prompt/system-prompt.js";
+import { buildSkillSystemPrompt } from "./prompt/system-prompt.js"
 import { registerTools } from "./tools/registry.js";
 
 export async function createMcpServer(

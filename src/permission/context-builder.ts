@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type RequestContext } from "../types/index.js";
 import type { UserRepository } from "../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../db/repositories/user-role.repository.js";
-import { looksLikeJwt, verifyJwt } from "../auth/jwt.service.js";
+import { looksLikeJwt, verifyJwt } from "../utils/jwt.js"
 import { sha256 } from "../utils/crypto.js";
 import { withSpan } from "../telemetry/spans.js";
 import { getLogger } from "../utils/logger.js";

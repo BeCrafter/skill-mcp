@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSkillSystemPrompt } from "../../../src/prompt/system-prompt.js";
+import { buildSkillSystemPrompt } from "../../../../src/mcp/prompt/system-prompt.js"
 
 describe("buildSkillSystemPrompt", () => {
   it("returns a static template that guides the caller to skill_list", () => {

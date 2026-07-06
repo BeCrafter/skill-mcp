@@ -7,7 +7,7 @@ import {
   extractBearerToken,
   buildRequestContextFromHttp,
 } from "../../permission/context-builder.js";
-import { looksLikeJwt } from "../../auth/jwt.service.js";
+import { looksLikeJwt } from "../../utils/jwt.js"
 import { AppError } from "../../utils/errors.js";
 import { json } from "../helpers.js";
 
