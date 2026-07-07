@@ -482,10 +482,20 @@ export async function createCli(): Promise<Command> {
       await initAction({ username: opts.username, password: opts.password });
     });
 
+  // =========================================================
+  // Upgrade command
+  // =========================================================
   program
     .command("upgrade")
-    .description("Check for newer version of skill-mcp and show upgrade instructions")
-    .action(async () => { await upgradeAction(); });
+    .description("Check for a newer version and upgrade skill-mcp")
+    .option("--dry-run", "Only check for updates without upgrading")
+    .option("-y, --yes", "Skip confirmation prompt")
+    .action(async (opts) => {
+      await upgradeAction({
+        dryRun: opts.dryRun as boolean | undefined,
+        yes: opts.yes as boolean | undefined,
+      });
+    });
 
   // ── Auth commands ─────────────────────────────────────────────────
   const authCmd = program
