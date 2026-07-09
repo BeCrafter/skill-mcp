@@ -1,6 +1,6 @@
 #!/bin/bash
 # Skill MCP Server - 快速启动脚本
-# 用法: ./docker/start.sh [c1|c2|gateway]
+# 用法: ./docker/start.sh [c1|c1-gateway|backend|c2|gateway]
 
 set -e
 
@@ -22,26 +22,30 @@ show_help() {
     echo "用法: $0 [PROFILE]"
     echo ""
     echo "PROFILE:"
-    echo "  c1        单体部署（开发/测试）"
-    echo "  c2        分布式部署（生产推荐）"
-    echo "  gateway   带 HTTPS 网关的分布式部署"
-    echo "  help      显示此帮助信息"
+    echo "  c1          单体部署（开发/测试）"
+    echo "  c1-gateway  单体 + HTTPS 网关"
+    echo "  backend     远程后端（配合 Scenario B 本地 stdio proxy）"
+    echo "  c2          分布式部署（生产推荐）"
+    echo "  gateway     分布式 + HTTPS 网关"
+    echo "  help        显示此帮助信息"
     echo ""
     echo "示例:"
-    echo "  $0 c1        # 启动单体部署"
-    echo "  $0 c2        # 启动分布式部署"
-    echo "  $0 gateway   # 启动带 HTTPS 网关的部署"
+    echo "  $0 c1          # 启动单体部署"
+    echo "  $0 c2          # 启动分布式部署"
+    echo "  $0 gateway     # 启动分布式 + HTTPS 网关"
+    echo "  $0 backend     # 仅启动远程后端"
+    echo "  $0 c1-gateway  # 单体 + HTTPS 网关"
     echo ""
     echo "环境变量:"
     echo "  STORAGE_SVC_TOKEN  服务间认证 token（C2/gateway 模式必需）"
-    echo "  DOMAIN             域名（gateway 模式必需）"
-    echo "  ACME_EMAIL         Let's Encrypt 邮箱（gateway 模式必需）"
+    echo "  DOMAIN             域名（gateway / c1-gateway 模式必需）"
+    echo "  ACME_EMAIL         Let's Encrypt 邮箱（gateway / c1-gateway 模式必需）"
 }
 
 # 检查环境变量
 check_env() {
     local profile=$1
-    
+
     if [[ "$profile" == "c2" || "$profile" == "gateway" ]]; then
         if [[ -z "$STORAGE_SVC_TOKEN" ]]; then
             echo -e "${YELLOW}警告: STORAGE_SVC_TOKEN 未设置${NC}"
@@ -50,8 +54,8 @@ check_env() {
             echo ""
         fi
     fi
-    
-    if [[ "$profile" == "gateway" ]]; then
+
+    if [[ "$profile" == "gateway" || "$profile" == "c1-gateway" ]]; then
         if [[ -z "$DOMAIN" ]]; then
             echo -e "${YELLOW}警告: DOMAIN 未设置，使用 localhost${NC}"
             echo -e "${BLUE}export DOMAIN=your-domain.com${NC}"
@@ -61,18 +65,23 @@ check_env() {
             echo -e "${YELLOW}警告: ACME_EMAIL 未设置，使用默认值${NC}"
             export ACME_EMAIL="admin@example.com"
         fi
+        # c1-gateway 模式下 MCP_BACKEND / STORAGE_BACKEND 默认指向 app
+        if [[ "$profile" == "c1-gateway" ]]; then
+            export MCP_BACKEND="${MCP_BACKEND:-app:3000}"
+            export STORAGE_BACKEND="${STORAGE_BACKEND:-app:3000}"
+        fi
     fi
 }
 
 # 启动服务
 start_services() {
     local profile=$1
-    
+
     echo -e "${BLUE}启动 Skill MCP Server (${profile} 模式)...${NC}"
     echo ""
-    
+
     cd "$PROJECT_DIR"
-    
+
     case $profile in
         c1)
             docker compose --profile c1 up -d --build
@@ -80,6 +89,22 @@ start_services() {
             echo -e "${GREEN}✓ 服务已启动${NC}"
             echo -e "  访问: http://localhost:3000"
             echo -e "  健康检查: curl http://localhost:3000/api/health"
+            ;;
+        c1-gateway)
+            docker compose --profile c1-gateway up -d --build
+            echo ""
+            echo -e "${GREEN}✓ 服务已启动${NC}"
+            echo -e "  HTTPS: https://${DOMAIN}"
+            echo -e "  MCP端点: https://${DOMAIN}/mcp"
+            echo -e "  健康检查: curl https://${DOMAIN}/api/health"
+            ;;
+        backend)
+            docker compose --profile backend up -d --build
+            echo ""
+            echo -e "${GREEN}✓ 远程后端已启动${NC}"
+            echo -e "  访问: http://localhost:${BACKEND_PORT:-3001}"
+            echo -e "  健康检查: curl http://localhost:${BACKEND_PORT:-3001}/api/health"
+            echo -e "  本地接入: skill-mcp serve --remote-url http://localhost:${BACKEND_PORT:-3001}"
             ;;
         c2)
             docker compose --profile c2 up -d --build
@@ -95,6 +120,7 @@ start_services() {
             echo -e "${GREEN}✓ 服务已启动${NC}"
             echo -e "  HTTPS: https://${DOMAIN}"
             echo -e "  MCP端点: https://${DOMAIN}/mcp"
+            echo -e "  健康检查: curl https://${DOMAIN}/api/health"
             ;;
     esac
 }
@@ -102,9 +128,9 @@ start_services() {
 # 主函数
 main() {
     local profile=${1:-help}
-    
+
     case $profile in
-        c1|c2|gateway)
+        c1|c1-gateway|backend|c2|gateway)
             check_env "$profile"
             start_services "$profile"
             ;;

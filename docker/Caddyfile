@@ -1,20 +1,25 @@
 # Skill MCP Server - Caddy 反向代理配置
+# 通过环境变量 MCP_BACKEND / STORAGE_BACKEND 指定后端地址：
+#   C2+gateway: docker compose --profile c2 --profile gateway up -d
+#   C1+gateway: docker compose --profile c1-gateway up -d
 
 {$DOMAIN:localhost} {
     # MCP 端点
     handle /mcp* {
-        reverse_proxy mcp:4000
+        reverse_proxy {$MCP_BACKEND:localhost:4000}
     }
 
-    # Gateway API - 转发客户端认证 header
+    # Gateway API — 转发客户端认证 header
     handle /api/gateway/* {
-        reverse_proxy storage:3000 {
+        reverse_proxy {$STORAGE_BACKEND:localhost:3000} {
             header_up Authorization {>Authorization}
         }
     }
 
-    # 健康检查
-    respond /health 200
+    # 健康检查 — 透传到后端，不做假响应
+    handle /api/health {
+        reverse_proxy {$MCP_BACKEND:localhost:4000}
+    }
 
     # 安全头
     header {

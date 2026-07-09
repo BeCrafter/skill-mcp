@@ -1,11 +1,13 @@
 
 # Skill MCP Server - Docker Compose配置
-# 支持多种部署场景：standalone (C1) / distributed (C2)
+# 支持全部 5 种部署场景
 #
 # 使用方法：
-#   C1 单体部署:  docker compose --profile c1 up -d
-#   C2 分布式:    docker compose --profile c2 up -d
-#   带网关HTTPS: docker compose --profile c2 --profile gateway up -d
+#   C1 单体:         docker compose --profile c1 up -d
+#   C1 + HTTPS:      MCP_BACKEND=app:3000 STORAGE_BACKEND=app:3000 docker compose --profile c1-gateway up -d
+#   B 远程后端:      docker compose --profile backend up -d
+#   C2 分布式:       docker compose --profile c2 up -d
+#   C2 + HTTPS 网关: docker compose --profile c2 --profile gateway up -d
 
 x-common-env: &common-env
   NODE_ENV: ${NODE_ENV:-production}
@@ -23,6 +25,7 @@ x-healthcheck: &healthcheck
 services:
   # ============================================================
   # 场景 C1：单体部署（开发/测试）
+  # 场景 C1-gateway：单体 + HTTPS 网关
   # ============================================================
   app:
     image: ${IMAGE:-skill-mcp:latest}
@@ -30,7 +33,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     command: ["node", "dist/index.js", "serve"]
-    profiles: ["c1"]
+    profiles: ["c1", "c1-gateway"]
     ports:
       - "${PORT:-3000}:3000"
     environment:
@@ -41,6 +44,35 @@ services:
       STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
     volumes:
       - app-data:/data
+    networks:
+      - default
+      - external
+    restart: unless-stopped
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+
+  # ============================================================
+  # 场景 B：远程后端（API-only，供 stdio proxy 使用）
+  # ============================================================
+  backend:
+    image: ${IMAGE:-skill-mcp:latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["node", "dist/index.js", "serve"]
+    profiles: ["backend"]
+    ports:
+      - "${BACKEND_PORT:-3001}:3000"
+    environment:
+      <<: *common-env
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 3000
+      API_ONLY_MODE: "true"
+      STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
+      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
+    volumes:
+      - backend-data:/data
     restart: unless-stopped
     healthcheck:
       <<: *healthcheck
@@ -120,14 +152,18 @@ services:
 
   # ============================================================
   # Caddy 网关（自动 HTTPS）
+  # 配合 c2 + gateway 或 c1-gateway 使用
   # ============================================================
   gateway:
     image: caddy:2-alpine
-    profiles: ["gateway"]
+    profiles: ["gateway", "c1-gateway"]
     restart: always
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - MCP_BACKEND=${MCP_BACKEND:-mcp:4000}
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-storage:3000}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -137,9 +173,10 @@ services:
     depends_on:
       mcp:
         condition: service_healthy
+        required: false
     healthcheck:
       <<: *healthcheck
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/api/health"]
     deploy:
       resources:
         limits:
@@ -148,12 +185,14 @@ services:
 
 volumes:
   app-data:
+  backend-data:
   storage-data:
   mcp-cache:
   caddy-data:
   caddy-config:
 
 networks:
+  default:
   internal:
     internal: true
   external:

@@ -1,17 +1,29 @@
 # Docker 部署配置
 
-本目录包含 skill-mcp 的 Docker 部署配置，支持多种部署场景。
+本目录包含 skill-mcp 的 Docker 部署配置，覆盖全部 5 种部署场景。
+
+## 场景速查
+
+| 场景 | Profile | 适用 | 命令 |
+|------|---------|------|------|
+| **A** | *(无)* | 本地 stdio 开发 | 无需 Docker |
+| **B** | `backend` | 远程后端 + 本地 stdio proxy | `./docker/start.sh backend` |
+| **C1** | `c1` | 单体 HTTP 开发/测试 | `./docker/start.sh c1` |
+| **C1+HTTPS** | `c1-gateway` | 单体 + HTTPS 网关 | `./docker/start.sh c1-gateway` |
+| **C2** | `c2` | 分布式生产 | `./docker/start.sh c2` |
+| **C2+HTTPS** | `gateway` | 分布式 + HTTPS 网关 | `./docker/start.sh gateway` |
 
 ## 目录结构
 
 ```
 docker/
 ├── Dockerfile              # 多阶段构建镜像
-├── docker-compose.yml      # 统一配置（支持 C1/C2/Gateway）
+├── docker-compose.yml      # 统一配置（5 profiles）
 ├── Caddyfile              # Caddy 网关配置（自动 HTTPS）
 ├── start.sh               # 快速启动脚本
 └── README.md              # 本文档
 ```
+
 ## 快速开始
 
 ### 使用启动脚本（推荐）
@@ -19,6 +31,15 @@ docker/
 ```bash
 # 场景 C1：单体部署（开发/测试）
 ./docker/start.sh c1
+
+# 场景 C1 + HTTPS 网关
+export DOMAIN=your-domain.com
+export ACME_EMAIL=admin@example.com
+./docker/start.sh c1-gateway
+
+# 场景 B：仅启动远程后端（配合本地 stdio proxy）
+./docker/start.sh backend
+# 本地接入：skill-mcp serve --remote-url http://localhost:3001
 
 # 场景 C2：分布式部署（生产推荐）
 export STORAGE_SVC_TOKEN=<your-token>
@@ -38,6 +59,22 @@ export STORAGE_SVC_TOKEN=<your-token>
 ```bash
 docker compose --profile c1 up -d --build
 curl http://localhost:3000/api/health
+```
+
+#### 场景 C1 + HTTPS 网关
+
+```bash
+MCP_BACKEND=app:3000 STORAGE_BACKEND=app:3000 \
+  docker compose --profile c1-gateway up -d --build
+curl -k https://localhost/api/health
+```
+
+#### 场景 B：远程后端
+
+```bash
+docker compose --profile backend up -d --build
+# 本地启动 stdio proxy 指向远程后端
+skill-mcp serve --remote-url http://localhost:3001
 ```
 
 #### 场景 C2：分布式部署
@@ -65,7 +102,7 @@ export STORAGE_SVC_TOKEN=<your-token>
 docker compose --profile c2 --profile gateway up -d
 
 # 3. 访问
-https://your-domain.com/mcp
+curl https://your-domain.com/api/health
 ```
 
 ## 配置说明
@@ -82,11 +119,13 @@ LOG_LEVEL=info
 # 镜像配置
 IMAGE=skill-mcp:latest
 
-# 端口配置（C1 模式）
-PORT=3000
+# 端口配置
+PORT=3000                       # C1 对外端口
+BACKEND_PORT=3001               # B 远程后端端口
+MCP_PORT=4000                   # C2 MCP 对外端口
 
 # 存储配置
-STORAGE_TYPE=local-fs        # local-fs 或 aliyun-oss
+STORAGE_TYPE=local-fs           # local-fs 或 aliyun-oss
 STORAGE_BASE_PATH=/data/skills
 
 # C2 资源配置
@@ -94,8 +133,7 @@ STORAGE_CPU=2
 STORAGE_MEM=4G
 MCP_CPU=1
 MCP_MEM=2G
-MCP_REPLICAS=2               # MCP 实例数
-MCP_PORT=4000                 # MCP 对外端口
+MCP_REPLICAS=2                  # MCP 实例数
 
 # HTTPS 配置
 DOMAIN=your-domain.com
@@ -109,37 +147,26 @@ STORAGE_SVC_TOKEN=<your-token>
 
 | 服务 | CPU 限制 | 内存限制 | 说明 |
 |------|---------|---------|------|
+| app | - | - | 单体服务 |
+| backend | - | - | 远程后端 |
 | storage | 2 核 | 4G | 存储服务 |
 | mcp | 1 核/实例 | 2G/实例 | MCP 服务 |
 | gateway | 0.5 核 | 256M | Caddy 网关 |
 
 ## Caddy 网关特性
 
-### 自动 HTTPS
+### 配置方式
 
-Caddy 自动处理 HTTPS：
+Caddyfile 通过环境变量 `MCP_BACKEND` / `STORAGE_BACKEND` 指定后端：
+- **C2+gateway**: `MCP_BACKEND=mcp:4000`, `STORAGE_BACKEND=storage:3000`（默认）
+- **C1+gateway**: `MCP_BACKEND=app:3000`, `STORAGE_BACKEND=app:3000`
+
+### 自动 HTTPS
 
 1. **Let's Encrypt 集成**：自动申请和续期证书
 2. **HTTP/2 & HTTP/3**：默认启用
 3. **自动重定向**：HTTP → HTTPS
 4. **本地开发**：localhost 自动生成本地证书
-
-### 配置示例
-
-```Caddyfile
-# 生产环境
-{$DOMAIN:localhost} {
-    handle /mcp* {
-        reverse_proxy mcp:4000
-    }
-    handle /api/gateway/* {
-        reverse_proxy storage:3000 {
-            header_up Authorization {>Authorization}
-        }
-    }
-    respond /health 200
-}
-```
 
 ### 自定义域名
 
@@ -241,26 +268,6 @@ docker compose --profile c2 exec mcp rm -rf /data/cache/*
 
 ## 迁移指南
 
-### 从 Nginx 迁移到 Caddy
-
-1. **备份现有配置**：
-   ```bash
-   cp nginx.conf nginx.conf.bak
-   ```
-
-2. **更新 docker-compose**：
-   - 使用新的 `docker-compose.yml`
-   - 使用 `--profile gateway` 启用 Caddy
-
-3. **配置域名**：
-   - Caddy 自动获取 HTTPS 证书
-   - 无需手动配置 SSL
-
-4. **测试部署**：
-   ```bash
-   docker compose --profile c2 --profile gateway up -d
-   ```
-
 ### 从旧配置迁移
 
 旧的配置文件已移除：
@@ -268,6 +275,11 @@ docker compose --profile c2 exec mcp rm -rf /data/cache/*
 - `docker-compose.c2.yml` → `--profile c2`
 - `docker-compose.production.yml` → `--profile c2 --profile gateway`
 - `nginx.conf` → `Caddyfile`
+
+### 新增场景
+
+- **`backend` (Scenario B)**：独立启动 API-only 后端，配合本地 `skill-mcp serve --remote-url` 使用
+- **`c1-gateway`**：C1 单体 + HTTPS 网关，Caddy 直连 `app:3000`
 
 ## 更多信息
 
