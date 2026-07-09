@@ -40,7 +40,7 @@ Skill-MCP 是一个 **Skill 包仓库 + MCP 协议网关**，负责：
 - 支持单进程独立部署，也支持网关 + 云存储的分布式部署。
 
 设计目标优先级：**简洁 > 可观测 > 可扩展 > 性能**。
-"单二进制双模"（standalone / gateway / cloud / mcp-only）是核心架构选择，详见第 5 节。
+"单二进制双模"（`--mcp-only` / `--api-only` / proxy 自动检测）是核心架构选择，详见第 5 节。
 
 ---
 
@@ -179,7 +179,7 @@ graph TB
 | `src/app.ts` | HTTP 服务器装配 + MCP transport 绑定 | `app.ts`（~100 行 orchestrator）、`app-dependencies.ts`（类型） | 散落业务分支 |
 | `src/mcp/` | MCP server / transport / tool 注册 | `server.ts`, `transport/index.ts`, `tools/registry.ts`, `tools/skill-*.ts` | 直接读 DB / 存储 |
 | `src/auth/` | JWT 签发/验证 | `jwt.service.ts` | 包含业务逻辑（仅签发/验证） |
-| `src/http/` | 路由、中间件、HTTP handler | `router.ts`, `compose.ts`, `server.ts`, `helpers.ts`, `probes.ts`, `middleware/gateway-auth.ts`, `middleware/admin-auth.ts`, `middleware/error-map.ts`, `middleware/request-id.ts`, `middleware/rate-limit.ts`, `handlers/admin/`（skills、users、roles、import-jobs、webhooks、usage）、`handlers/gateway/skills.handler.ts`, `handlers/auth.handler.ts`, `openapi/` | 业务逻辑（应转 Service） |
+| `src/http/` | 路由、中间件、HTTP handler | `router.ts`, `compose.ts`, `server.ts`, `helpers.ts`, `middleware/gateway-auth.ts`, `middleware/admin-auth.ts`, `middleware/error-map.ts`, `middleware/request-id.ts`, `middleware/rate-limit.ts`, `handlers/admin/`（skills、users、roles、import-jobs、webhooks、usage）、`handlers/gateway/skills.handler.ts`, `handlers/auth.handler.ts`, `openapi/` | 业务逻辑（应转 Service） |
 | `src/services/` | 业务编排：缓存、权限、日志、版本管理、生命周期、搜索、webhook、用量计量、导入后台 | `skill.service.ts`, `access-log.service.ts`, `skill-lifecycle.ts`, `skill-search.service.ts`, `usage-meter.service.ts`, `webhook.service.ts`, `webhook-dispatcher.ts`, `webhook-worker.ts`, `import-worker.ts` | 暴露 DB 实体类型给上层（当前 SkillMeta 泄漏） |
 | `src/permission/` | 鉴权上下文构建 + 可见性过滤 | `context-builder.ts`, `tag-filter.ts` | 网络 IO 之外的业务逻辑 |
 | `src/provider/` | Skill 数据源抽象 + Local/Remote 实现 + Proxy 指标装饰 | `interface.ts`, `local.provider.ts`, `remote.provider.ts`, `instrument.ts` | 包含权限判断（由 Service 注入） |
@@ -219,10 +219,11 @@ flowchart LR
     L --> M[server.connect transport]
 ```
 
-**模式开关（互斥校验在 `serve-cmd.ts:42-46`）**：
-- `DEPLOYMENT_MODE` ∈ `standalone | gateway | cloud`，cloud 拒绝 stdio。
-- `MCP_ONLY_MODE=true` → 所有非 MCP 路径返 404（`app.ts:246`）。
-- 三层判定 cloud 时禁用 MCP，冗余但保险。
+**模式开关（互斥校验在 `serve-cmd.ts`）**：
+- `--mcp-only` / `MCP_ONLY_MODE=true` → 仅暴露 MCP + health，Admin API 和 Gateway API 不注册。
+- `--api-only` / `API_ONLY_MODE=true` → 仅暴露 REST API + health，MCP 返回 403。
+- `--remote-url` / `CLOUD_SERVICE_URL` → 自动启用 RemoteSkillProvider，额外抑制 Admin API。
+- `--mcp-only` 和 `--api-only` 互斥，同时设置则报错退出。
 
 ### 4.2 一次工具调用（HTTP 模式完整链路）
 
@@ -310,23 +311,26 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 
 ## 5. 部署形态
 
-### 5.1 四种模式
+### 5.1 模式组合
 
-| 模式 | `DEPLOYMENT_MODE` | Transport | API 路由 | MCP 可用 | 用途 |
-|---|---|---|---|---|---|
-| Standalone | `standalone` | stdio / http | Admin + Gateway | ✅ | 本地开发、小规模一体化部署 |
-| Gateway | `gateway` | stdio / http | 仅 Gateway | ✅ | 路由层，转发到远端 cloud service |
-| Cloud | `cloud` | http only | Admin + Gateway | ❌ | 纯数据服务，不暴露 MCP |
-| MCP-only | 任意 + `MCP_ONLY_MODE=true` | stdio / http | 无（仅 /mcp） | ✅ | 客户端面向的最小攻击面端点 |
+| 模式 | CLI flags / env vars | MCP | Admin API | Gateway API | Health | 用途 |
+|---|---|---|---|---|---|---|
+| 全功能 | (none) | ✅ | ✅ | ✅ | ✅ | 本地开发、小规模一体化部署 |
+| MCP-Only | `--mcp-only` / `MCP_ONLY_MODE=true` | ✅ | ❌ | ❌ | ✅ | 客户端面向的最小攻击面端点 |
+| API-Only | `--api-only` / `API_ONLY_MODE=true` | ❌ | ✅ | ✅ | ✅ | 纯数据服务，不暴露 MCP |
+| 代理 (Proxy) | `--remote-url` / `CLOUD_SERVICE_URL` | ✅ | ❌ | ✅ | ✅ | 路由层，转发到远端后端 |
+
+- `--mcp-only` 和 `--api-only` 互斥。
+- 代理模式由 `CLOUD_SERVICE_URL` 或 `--remote-url` 自动检测，额外抑制 Admin API（管理操作在后方完成）。
 
 ### 5.2 三种典型场景
 
-| 场景 | 模式 | Transport | 适用 |
+| 场景 | 组合 | Transport | 适用 |
 |---|---|---|---|
-| A | standalone | stdio | 本地开发 |
-| B | gateway → standalone | stdio → http | 混合（本地路由 + 远端存储） |
-| C1 | standalone | http | 单 HTTP 服务 |
-| C2 | gateway → gateway → cloud | http → http → http | 分布式生产（推荐） |
+| A | 全功能 | stdio | 本地开发 |
+| B | 代理 (proxy) → 全功能/API-only | stdio → http | 混合（本地路由 + 远端存储） |
+| C1 | 全功能 | http | 单 HTTP 服务 |
+| C2 | MCP-only → 代理 → API-only | http → http → http | 分布式生产（推荐） |
 
 完整 env 模板见仓库根 `.env.example`，不同场景的配置示例见 `src/config/examples/`。
 
@@ -388,7 +392,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
 
 - 单例 `getConfig()`：env 变量 → 文件（`SKILL_MCP_CONFIG`）→ schema defaults，逐层 deepMerge。
 - Zod 严格 schema（`schema.ts`），enum / discriminatedUnion / URL 校验。
-- 配置段（`configSchema` 顶层）：`app` / `deployment` / `gateway` / `storage` / `database` / `cache` / `transport` / `security` / `embedding` / `eval` / `rateLimit` / `auth`。
+- 配置段（`configSchema` 顶层）：`app` / `deployment`（含 `mcpOnly` / `apiOnly` 布尔字段）/ `gateway` / `storage` / `database` / `cache` / `transport` / `security` / `embedding` / `eval` / `rateLimit` / `auth`。
 - 启动期 mkdir DB / storage / cache 目录，失败仅 debug log 不阻断（**风险**：磁盘满或权限错时延后失败）。
 
 ### 7.2 鉴权与权限
@@ -429,7 +433,7 @@ Executor 不直接调用 LLM，而是返回"下一批待执行 stages"给上游 
                                           └─ visibility=private  → 空 tags 即认证可见；非空需交集
 ```
 
-- 仅 `/api/gateway/health` 跳过认证（探针）。
+- 仅 `/api/health` 跳过认证（探针）。
 - `/api/admin/*` 必须携带 Bearer Token，且 `userType` 必须为 `admin` 或 `superadmin`：
   - 无 token → `401 Authentication required`
   - token 无效 / user 已 disabled → `401 Invalid or expired token`
@@ -790,4 +794,5 @@ CLI 管理命令支持本地/远程两种操作模式：
 | 2026-05-28 | (pending) | 第 35 批 P1-11 stage 2a 落地（retrieval signals 持久化层，review §1.2）：第 34 批 stage 1 完成了 manifest 字段层，本批 stage 2a 关闭"字段已校验但 importer 不写库 / 库不读 / consumer 看不到"的链路缺口，让 stage 2b BM25 索引器有数据可读。①schema 层 — `drizzle/0013_skill_retrieval_meta.sql` `ALTER TABLE skills ADD COLUMN retrieval_meta text;`，`drizzle/meta/_journal.json` 同步增 idx=13；`src/db/schema.ts` 新增 `retrievalMeta: text("retrieval_meta")` 列。**为何选 JSON envelope 而不是三列**：(a) `triggers` 是 `string[]`，与既有 `attributes: Record<string, string>` 概念冲突；(b) stage 3 还要追加 `embedding_vector_hash` / `embedding_model_version` 等字段，单 JSON envelope 让 stage 2a→stage 3 不再需要 ALTER TABLE 链；(c) 检索调用点不需要列级索引（关键词召回走 stage 2b 的 BM25 索引，向量召回走 stage 3 的向量列）。②类型层 — `src/types/index.ts` 新增 `SkillRetrievalMeta { triggers?: string[]; whenToUse?: string; embeddingText?: string }` 接口，`SkillMeta` 增 `retrievalMeta: SkillRetrievalMeta \| null` 字段（区分"从未写入"与"显式写空"两种状态）。③仓储层 — `src/db/repositories/skill.repository.ts` 新增 `parseRetrievalMeta(value, skillId)` 与 `serializeRetrievalMeta(value)` 双向转换器，**镜像 T-721 的 `parseAttributes` 容错模式**：corrupt JSON / 非对象 / 数组都 coerce 到 `{}`、`logger.warn` 记 skill id + column 名、自增新增的 `skill_mcp_skill_row_json_parse_errors_total{column="retrieval_meta"}` Counter（与 `column="attributes"` 平行，便于 ops 区分两种 corruption）；NULL 列继续 hydrate 为 `null`（区分"legacy 行未写入"和"corruption 降级"）；serialise 时 `triggers` 为空数组、`whenToUse` 为空串、`embeddingText` 为空串三者全空时返 `null` 让列保持 NULL（避免 `"{}"` 字符串污染列值，consumer 不必特判）。`create()` / `update()` 都接 `input.retrievalMeta`：create 时 `serializeRetrievalMeta(input.retrievalMeta)`，update 时 `if (input.retrievalMeta !== undefined)` 写入（`null` 显式清列、`undefined` 不动）。`toEntity()` 出口 hydrate。④导入层 — `src/import/importer.ts` 抽 `buildRetrievalMeta(meta: SkillFrontmatter): SkillRetrievalMeta \| null` helper：filter 掉空字符串和非字符串 trigger（防御 stage 1 caps 已通过但 frontmatter 仍可能含 falsy 值的情况），三字段全空时返 `null`，与 `serializeRetrievalMeta` 的 NULL 契约对齐。`computeContentHash` 之后 `const retrievalMeta = buildRetrievalMeta(meta);` 串入 `skillRepo.create({...})` 与 `skillRepo.update(targetSkill.id, {...})` 两条路径；**rollback 路径同步**：`preUpdateSnapshot` 在 catch 块的反向恢复中也带上 `retrievalMeta: preUpdateSnapshot.retrievalMeta`，避免"导入新版本失败、bytes 在 storage 已回滚但 DB 仍 advertising 新 retrieval signals"的窗口（与 T-733 `contentHash` / `version` / `storagePath` 等 snapshot 字段同护）。⑤测试 — 10 个新单测 + 2 处 fixture schema 同步：`tests/unit/db/skill-repository.test.ts` (+7：round-trip 三字段 / legacy 行 hydrate 为 null / 三字段全空写入仍保持列 NULL / `update()` 可附 retrieval_meta / `update({retrievalMeta: null})` 清列 / corrupt JSON coerce 到 `{}` 且自增 `skill_mcp_skill_row_json_parse_errors_total{column="retrieval_meta"}` 1 / 数组 JSON coerce 到 `{}`) + `tests/unit/import/importer-retrieval-meta.test.ts` (新增 3：SKILL.md frontmatter 三字段 → `arg.retrievalMeta` shape 完整 / 缺字段 → null / 仅 triggers → 单字段对象，无 `undefined` keys)；`tests/unit/db/skill-feedback-repository.test.ts` 与 `tests/unit/db/skill-repository.test.ts` 的手写 `CREATE TABLE skills` 都补 `retrieval_meta TEXT,` 列（与 schema drizzle 列形态对齐）。回归 1197 → 1207 passed (+10)；lint + build 干净。**未触及但属 stage 2b 范围**：(a) BM25 倒排索引（`triggers` + `whenToUse` 召回）；(b) `skill_search` MCP 工具；(c) `skill_list?query=` 参数注入；(d) admin REST `/api/admin/skills/:id/retrieval` PUT 端点（手动调优 retrieval signals 不重新 import）。**已修复**：第 9 节暂无；第 10 节 P1-11 行标记 ⚠️ stage 2a（manifest + DB 持久化），完整 PoC 跨三 stage 推进；§13 第 3 个月项 11 stage 2a ✅2026-05-28。 |
 | 2026-05-28 | (pending) | 第 34 批 P1-11 stage 1 落地（embedding 检索 PoC manifest 字段层，review §1.2）：本批是 §1.2 retrieval-signal 改造的最小可行第一步——只扩展 manifest 类型 + 解析 + 校验 + lint nudge，**不动 schema 不动检索逻辑**，让 stage 2（BM25 + skill_search MCP 工具）和 stage 3（pluggable embedding provider + hybrid 评分）可以增量推进。①类型层 — `src/types/index.ts` `SkillFrontmatter` 新增三个可选字段 `triggers?: string[]` / `whenToUse?: string` / `embeddingText?: string`，对应 SKILL.md frontmatter 的 `triggers` / `when_to_use` / `embedding_text`（snake_case → camelCase 与 `manifestSchema` 同形）。语义层各自定位：`triggers` 是关键词数组用于 BM25 召回；`whenToUse` 是 model-readable "use this when..." 提示文本，与端用户面向的 `description` 解耦；`embeddingText` 是显式 embedding 源文本，缺省时由 retrieval 层 fallback 到 `${name} ${description ?? ""} ${whenToUse ?? ""} ${triggers.join(" ")}`。②解析层 — `src/utils/manifest.ts` `parseSkillMeta` + `src/import/importer.ts` `parseFrontmatterFromFiles` 双路径同步透传三字段（local-fs 与 git/http 两条 import 通道都覆盖到）。③校验层 — `validateSkillMetaFields` 新增 4 个 cap 常量与 4 段 type/length/count 校验：`MAX_TRIGGERS_COUNT=32` / `MAX_TRIGGER_LENGTH=128` / `MAX_WHEN_TO_USE_LENGTH=2048` / `MAX_EMBEDDING_TEXT_LENGTH=8192`。**为何这些 caps**：与 `description=4096` 同量级思路——一个恶意包能在 50 MiB 总字节里把 `embedding_text` 塞到几 MB，导致 stage 3 调 embedding API 时被 OpenAI/本地模型按 token 计费爆，或在 stage 2 BM25 索引时把内存吃光；caps 远超合理用例（32 个触发短语 + 2KB "when" + 8KB embedding 已远超人类编辑行为）但拦住 zip-bomb 思路。④lint 层 — `src/cli/commands/lint-cmd.ts` 在 manifest_schema 检查后插入新检查：三个字段全空时 emit info-level "no retrieval signals... agent search quality will degrade once skill_search ships" 软提示（不是 warning，避免破坏现有 1100+ 测试 fixture），任一存在时打印 ✓ 行列出已配置的字段。`LintIssue.level` union 扩展 `"info"`，`printResults` 按"Info → Warnings → Errors"三段渲染、Result 行汇总三类计数。⑤测试 — 12 个新单测：`tests/unit/utils/manifest-field-caps.test.ts` (+9：accepts 三字段 within caps / triggers 非数组拒 / >32 triggers 拒 / >128 字符 trigger 拒 / 非字符串 trigger 拒 / whenToUse 非字符串拒 / >2048 whenToUse 拒 / embeddingText 非字符串拒 / >8192 embeddingText 拒) + `tests/unit/utils/manifest.test.ts` (+3：parseSkillMeta 提取三字段 / 缺省返 undefined / 与现有字段并存)。回归 1185 → 1197 passed (+12)；lint + build 干净。**未触及但属 stage 2/3 范围**：(a) DB 持久化——三字段尚未流入 `skills.attributes` 或新增 `retrieval_meta` 列，stage 2 决定持久化形态；(b) BM25 索引 + `skill_search` MCP 工具 + `skill_list?query=` 参数；(c) embedding provider 抽象 + 向量列存储 + hybrid 评分公式。**已修复**：第 9 节暂无；第 10 节 P1-11 行标记 ⚠️ stage 1（manifest 字段层），完整 PoC 跨三 stage 推进；§13 第 3 个月项 11 进入 in-progress。 |
 | 2026-05-28 | (pending) | 第 33 批 P1-22 落地（§16.4 集成测试最小可行集，review §16.4）：本批不新增产品代码，只补 in-process integration tests 锚定最近三批多模块特性的端到端契约。新增 2 个测试文件覆盖 §16.4 表中 I-06 / I-09 三条最高风险路径——共 12 个用例，全部走真实 SQLite + 真实 DI 图（与 `serve-cmd` 完全一致），无 spawn / 无 testcontainers / 热路径无 mocking：②`tests/integration/webhook-retry-loop.test.ts` (I-09, 5 测) — `WebhookRepository` + `WebhookDeliveryRepository` + `WebhookService` + `WebhookDispatcher` + 桩 `fetchImpl`，断言 8 次 500 响应下 `pending → pending(7×) → dead_letter` 状态机、attempt 计数器单调 1..8、`next_retry_at` 每次推进且终态 null、4xx 立即 dead_letter 不重试、单次 200 → success 并打 `completed_at`、多订阅 fan-out 每行隔离失败、HMAC `t=<unix>,v1=<hex>` 头 + `X-Skill-MCP-Delivery-Id` + `verifySignature` round-trip；admin replay (`reschedule`) 翻 `dead_letter → pending` 同时保留 attempt 计数器供审计；③`tests/integration/eventbus-async.test.ts` (I-06, 7 测) — `DomainEventBus({async:true})`，断言 `publish()` 在任何 listener 运行前返回（P0-B 契约：cache invalidation 不再阻塞 admin 写路径）、抛错 listener 不破坏兄弟 listener（sync + async 双模式）、rejected async listener 被 `.then(_, onRejected)` catcher 吞下不泄漏 `unhandledRejection` 同时 `eventListenerErrors{event}` Counter 自增 1、5ms spin sync listener 下 publish 仍 < 2ms（非阻塞契约）、type filtering（skill:created listener 不响应 skill:deleted）。**为何选这三个**：P1-13.5 metering / P1-16 webhook / P0-B EventBus 是最近交付的三批最复杂多模块特性，每件单元测试在各组件单层都已绿但完整链路 end-to-end 真实 wiring 此前无人覆盖——三测同时锚定（a）429 envelope 字段 shape，（b）8 次 retry + dead_letter 状态机及 4xx/5xx 分流，（c）async dispatch 不阻塞 + 异常隔离 + 度量自增。**未触及但属 §16 后续推进**：剩余 9 个 integration / 6 个 E2E / 4 个 chaos 场景（PG dialect 真实迁移、SSO/OIDC、限流并发、节点崩溃恢复等）按 review §13 第 6 个月 budget 转 P1 batch 34 推进。**回归**：1168 → 1180 passed (+12)；lint + build 干净；review doc §13 progress banner "已完成 22 项"→"已完成 23 项"、§16.4 表 I-06 / I-09 三行 ✅2026-05-28、`CHANGELOG.md` / `RELEASE_NOTES.md` 双文件同步声明（§14.5.5 强制）。 |
+| 2026-07-08 | 16ae654 | **部署模式重构**：移除 `DEPLOYMENT_MODE` 三态枚举（standalone/gateway/cloud），替换为 `--mcp-only` / `--api-only` 正交布尔标志 + `CLOUD_SERVICE_URL` 自动代理检测。探活端点精简为单一 `/api/health`（移除 `/api/livez`、`/api/readyz`、`/api/gateway/health`、`src/http/probes.ts`）。移除 `--host` / `--mode` CLI 标志和 `TRANSPORT_HOST` 环境变量，地址固定 `0.0.0.0`。Docker 配置重写为三个 compose profile（c1/c2/gateway），Nginx 替换为 Caddy 自动 HTTPS。`AUTH_TOKEN` 重命名为 `SKILL_MCP_AUTH_TOKEN`。修复 `isProxy` 在 `serve-cmd.ts` 与 `app.ts` 间的不一致（将 `isProxy` 通过 `AppDependencies` 传入）。 |
 | 2026-05-28 | (pending) | 第 23 批 P0 落地 P0-10 / P0-2 / P0-8：①P0-10 async import — `import_jobs` 表 + `ImportJobRepository` 持久化任务（pending/running/succeeded/failed + progress 0-100 + result_skill_id / error_message / options 列）；`BackgroundImportWorker` 启动时 recoverOrphans（重启幂等：把残留 running 推回 pending）+ in-process 100ms 轮询（P1 可替换为 BullMQ/外置 queue）；`POST /api/admin/skills/import` 同步 / `POST /api/admin/skills/import-async` 返回 `202 Accepted` + `{ job_id, poll_url }`；`GET /api/admin/import-jobs/:id` 返回进度 + 结果，`GET /api/admin/import-jobs?status=` 列表；**响应 projection 显式剔除 `options` 字段防止 source URL / branch / token 泄露**（专项 handler 测试断言 `body.data.options === undefined`）。`SIGTERM` 触发 worker `stop()` 优雅停机 + 复用 §C 的 5s drain。新增 `tests/unit/db/import-job-repository.test.ts` (10) + `tests/unit/services/import-worker.test.ts` (9) + `tests/unit/http/admin-import-jobs-handler.test.ts` (9)。②P0-2 OpenAPI — `src/http/openapi/spec.ts` 手写 OpenAPI 3.1（动态读 package.json 版本，含 `bearerAuth` security scheme、`servers: [{url:"/api/v1"}]`、所有 admin/gateway 路由 + Error envelope + ImportJobView 显式说明 options 不回显 + components.responses 复用）；`src/http/openapi/swagger-ui.ts` 渲染 pinned `swagger-ui-dist@5.17.14` via jsDelivr CDN（不增加运行时 dep）；`/api/v1/openapi.json`（含 `/api/openapi.json` 兼容别名）+ `/api/v1/docs` 路由（spec 设 `Cache-Control: public, max-age=300`）；新增 `tests/unit/http/openapi-spec.test.ts` (12) + server 路由 +3 用例。后续若引入 `zod-to-openapi` 可平滑迁移（用户可见契约不变）。③P0-8 Postgres dialect 骨架 — `src/db/dialect.ts` `parseDatabaseUrl` 支持 `sqlite://` / `postgres://` / `postgresql://` / 裸路径，明确拒 mysql/mongodb/空串；`resolveDialect({databaseUrl, databasePath})` 实现 `DATABASE_URL > DATABASE_PATH` 优先级，空串当未设；`src/db/connection.ts` 改 dialect-aware 工厂，cache key 含 dialect（`sqlite:${path}` / `postgres:${url}` 不互串），postgres 路径 fail-fast 抛"Postgres dialect detected ... PG schema port not yet shipped (P1, see review §3.1.1)"明确错误；`src/db/migrate.ts` 接受两种形态输入 + 非 sqlite 抛错；`src/cli/commands/migrate-cmd.ts` 实现 `skill-mcp migrate:check [--target <url>]` 只读预检（扫源/目标 URL 解析、dialect 跃迁、postgres 目标提示 P1 阻塞、列出 9 项 SQLite→PG 待迁移惯用法清单：PK strings/timestamps/JSON columns/booleans/cascade/partial unique/WAL pragma/FK pragma/连接池）；`src/config/index.ts` `database.path` 优先读 `DATABASE_URL`。新增 `tests/unit/db/dialect.test.ts` (11) + `tests/unit/db/connection-dialect.test.ts` (4)。**重要范围说明**：本批仅交付 dialect 抽象层与 migrate:check 预检 CLI（review 7d 预算契合），实际 PG schema port（drizzle-orm/pg-core 重写、列类型映射 timestamp→bigint、JSON→jsonb、boolean cast、journal_mode 移除、连接池接入、数据迁移工具）按 review §3.1.1 6 周阶段化方案转 P1 推进，仍是商用化必须项。回归 751 → 869 passed (+118)；review doc P0-2 / P0-8 / P0-10 行标记完成（P0-8 注明骨架）。 |

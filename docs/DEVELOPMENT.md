@@ -372,8 +372,14 @@ npm start
 # HTTP transport
 TRANSPORT_TYPE=http npm start
 
-# Different deployment mode
-DEPLOYMENT_MODE=gateway npm start
+# MCP-only mode
+MCP_ONLY_MODE=true npm start
+
+# API-only mode
+API_ONLY_MODE=true npm start
+
+# Proxy mode (auto-detected)
+CLOUD_SERVICE_URL=http://localhost:3001 npm start
 ```
 
 ### View Database
@@ -445,21 +451,28 @@ Common configurations:
 
 ```bash
 # Local development
-DEPLOYMENT_MODE=standalone
 TRANSPORT_TYPE=stdio
 STORAGE_TYPE=local-fs
 DATABASE_PATH=./data/skill-mcp.db
 LOG_LEVEL=debug
 
-# HTTP server
-DEPLOYMENT_MODE=standalone
+# HTTP server (full-featured)
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=3000
 
-# Gateway mode
-DEPLOYMENT_MODE=gateway
+# MCP-only mode
+TRANSPORT_TYPE=http
+TRANSPORT_PORT=3000
+MCP_ONLY_MODE=true
+
+# API-only mode
+TRANSPORT_TYPE=http
+TRANSPORT_PORT=3000
+API_ONLY_MODE=true
+
+# Proxy mode (auto-detected via CLOUD_SERVICE_URL)
 CLOUD_SERVICE_URL=http://localhost:3001
-AUTH_TOKEN=<your-token>
+SKILL_MCP_AUTH_TOKEN=<your-token>
 ```
 
 #### `DATABASE_URL` vs `DATABASE_PATH`

@@ -33,6 +33,7 @@ WORKDIR /app
 
 # Copy built files from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
+COPY --from=builder --chown=nodejs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 
 # Copy production dependencies
@@ -56,9 +57,8 @@ EXPOSE 3000 4000
 
 # Default environment variables
 ENV NODE_ENV=production \
-    TRANSPORT_TYPE=stdio \
+    TRANSPORT_TYPE=http \
     TRANSPORT_PORT=3000 \
-    DEPLOYMENT_MODE=standalone \
     STORAGE_TYPE=local-fs \
     STORAGE_BASE_PATH=/app/data/skills \
     DATABASE_PATH=/app/data/skill-mcp.db \
@@ -66,4 +66,4 @@ ENV NODE_ENV=production \
     LOG_LEVEL=info
 
 # Start the application
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/index.js", "serve"]

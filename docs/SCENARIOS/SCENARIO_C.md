@@ -99,7 +99,7 @@ cp src/config/examples/.env.scenario-c2-storage .env
 npm start
 
 # 验证
-curl http://localhost:3000/api/gateway/health
+curl http://localhost:3000/api/health
 ```
 
 #### 2. 部署 MCP 通道
@@ -110,7 +110,7 @@ cp src/config/examples/.env.scenario-c2-mcp .env
 
 # 编辑配置
 # - 修改 CLOUD_SERVICE_URL 为存储服务器地址
-# - 修改 AUTH_TOKEN 为服务账号 Bearer Token
+# - 修改 SKILL_MCP_AUTH_TOKEN 为服务账号 Bearer Token
 
 # 启动
 npm start
@@ -161,7 +161,7 @@ export STORAGE_SVC_TOKEN=$(skill-mcp user create svc-gateway --role <role-id> | 
 docker compose --profile c2 up -d --build
 
 # 3. 验证
-curl http://localhost:3000/api/gateway/health
+curl http://localhost:3000/api/health
 ```
 
 ### 带 HTTPS 网关
@@ -196,7 +196,7 @@ STORAGE_ACCESS_KEY_SECRET=xxx
 # 配置 RBAC 认证
 # 1. 创建角色：skill-mcp role create --name gateway --tags "skill:read"
 # 2. 创建服务账号：skill-mcp user create --name svc-gateway --role-ids <role-id>
-# 客户端使用输出的 JWT token 作为 AUTH_TOKEN
+# 客户端使用输出的 JWT token 作为 SKILL_MCP_AUTH_TOKEN
 ```
 
 ### MCP 层
@@ -206,7 +206,7 @@ STORAGE_ACCESS_KEY_SECRET=xxx
 MCP_ONLY_MODE=true
 
 # 使用服务账号 token
-AUTH_TOKEN=<jwt-token-from-user-create>
+SKILL_MCP_AUTH_TOKEN=<jwt-token-from-user-create>
 
 # 增加缓存
 CACHE_MEMORY_MAX_SIZE=1000
@@ -305,7 +305,7 @@ docker-compose -f docker/docker-compose.c2.yml up -d mcp-1
 ### 认证失败
 
 ```bash
-# 检查 MCP 的 AUTH_TOKEN 是否与存储服务的用户 token 匹配
+# 检查 MCP 的 SKILL_MCP_AUTH_TOKEN 是否与存储服务的用户 token 匹配
 # 运行 skill-mcp auth status 查看当前认证状态
 
 # 验证 token 是否有效

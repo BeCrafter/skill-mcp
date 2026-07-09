@@ -26,6 +26,8 @@ function readPackageVersion(): string {
   }
 }
 
+const PACKAGE_VERSION = readPackageVersion();
+
 export interface OpenApiDoc {
   openapi: string;
   info: { title: string; version: string; description: string };
@@ -41,7 +43,7 @@ export function buildOpenApiSpec(): OpenApiDoc {
     openapi: "3.1.0",
     info: {
       title: "Skill MCP HTTP API",
-      version: readPackageVersion(),
+      version: PACKAGE_VERSION,
       description:
         "REST surface of the Skill MCP server. Admin endpoints manage skills, users, roles, and import jobs; gateway endpoints serve authenticated clients. " +
         "MCP tools (`skill_list`, `skill_view`, `skill_file`) are exposed via the MCP transport at `/mcp` and `/mcp/sse` and are NOT documented here. " +
@@ -55,7 +57,7 @@ export function buildOpenApiSpec(): OpenApiDoc {
     ],
     security: [{ bearerAuth: [] }],
     tags: [
-      { name: "Health", description: "Liveness and readiness probes" },
+      { name: "Health", description: "Health check" },
       { name: "Admin / Skills", description: "Skill CRUD, import, lifecycle" },
       { name: "Admin / Jobs", description: "Async import jobs (P0-10)" },
       { name: "Admin / Users", description: "User and bearer-token management (P0-4 token rotation)" },
@@ -69,7 +71,7 @@ export function buildOpenApiSpec(): OpenApiDoc {
           scheme: "bearer",
           description:
             "Per-user bearer token issued by `skill-mcp user create` or rotated via `POST /admin/users/{id}/tokens/rotate`. " +
-            "Anonymous calls are rejected at gateway/admin paths (except `/gateway/health`).",
+            "Anonymous calls are rejected at gateway/admin paths (except `/health`).",
         },
       },
       schemas: {
@@ -157,37 +159,8 @@ export function buildOpenApiSpec(): OpenApiDoc {
         get: {
           tags: ["Health"],
           security: [],
-          summary: "Server liveness probe (back-compat alias for /livez)",
+          summary: "Server health check",
           responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string" }, timestamp: { type: "string" } } } } } } },
-        },
-      },
-      "/livez": {
-        get: {
-          tags: ["Health"],
-          security: [],
-          summary: "Liveness probe — process is alive",
-          description: "Always returns 200 if the event loop is responsive. Used by container orchestrators for liveness checks. Failure of this probe causes the container to be restarted.",
-          responses: { "200": { description: "Alive", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string", example: "ok" }, timestamp: { type: "string" } } } } } } },
-        },
-      },
-      "/readyz": {
-        get: {
-          tags: ["Health"],
-          security: [],
-          summary: "Readiness probe — accepting traffic",
-          description: "Returns 200 only when dependencies (DB) are reachable; 503 otherwise. Used by load balancers for readiness checks. Failure of this probe removes the endpoint from rotation (no restart).",
-          responses: {
-            "200": { description: "Ready", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string", example: "ok" }, checks: { type: "object" } } } } } },
-            "503": { description: "Not ready (dependency check failed)", content: { "application/json": { schema: { type: "object", properties: { status: { type: "string", example: "not_ready" }, checks: { type: "object" } } } } } },
-          },
-        },
-      },
-      "/gateway/health": {
-        get: {
-          tags: ["Health"],
-          security: [],
-          summary: "Gateway liveness (anonymous; LB/container probe)",
-          responses: { "200": { description: "OK" } },
         },
       },
       "/admin/skills": {
@@ -283,13 +256,14 @@ export function buildOpenApiSpec(): OpenApiDoc {
 
 // `components.responses` is patched in here so the inline `$ref:
 // "#/components/responses/NotFound"` shorthands above resolve.
+const _spec: OpenApiDoc = buildOpenApiSpec();
+(_spec.components as unknown as { responses: Record<string, unknown> }).responses = {
+  NotFound: {
+    description: "Not found",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+  },
+};
+
 export function getOpenApiSpec(): OpenApiDoc {
-  const doc = buildOpenApiSpec();
-  (doc.components as unknown as { responses: Record<string, unknown> }).responses = {
-    NotFound: {
-      description: "Not found",
-      content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
-    },
-  };
-  return doc;
+  return _spec;
 }

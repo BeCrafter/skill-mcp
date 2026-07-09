@@ -14,10 +14,6 @@ import { BadRequestError } from "../../../utils/errors.js";
 export function registerGatewaySkillRoutes(router: Router, deps: AppDependencies): void {
   const { skillService } = deps;
 
-  router.get("/api/gateway/health", async (ctx) => {
-    json(ctx.res, 200, { status: "ok", timestamp: new Date().toISOString() });
-  });
-
   router.get("/api/gateway/skills", async (ctx) => {
     const context = ctx.requestContext!;
     const category = ctx.query.get("category") ?? undefined;

@@ -1137,7 +1137,7 @@ All Gateway endpoints require **JWT Bearer Token** authentication. The gateway v
 Authorization: Bearer <jwt_access_token>
 ```
 
-### GET /api/gateway/health
+### GET /api/health
 
 Simple health check for the gateway service.
 
@@ -1274,46 +1274,15 @@ Get the file tree structure of a skill.
 
 ## 10. Health Check Endpoints
 
-
 ### GET /api/health
 
-**Deprecated.** Legacy health check endpoint, use `/api/livez` instead. Returns same response as `/api/livez` with `Sunset` and `Deprecation` headers.
-
-These endpoints are used for health checking in containerized deployments (Docker, load balancers, etc.).
-
-### GET /api/livez
-
-**Liveness probe.** Returns 200 as long as the process event loop is responsive. No I/O or DB calls. Used by container orchestrators to decide whether to restart the container.
+Health check endpoint. Returns 200 as long as the process is alive.
 
 **Response**:
 ```json
 {
   "status": "ok",
   "timestamp": "2026-04-29T10:00:00.000Z"
-}
-```
-
-### GET /api/readyz
-
-**Readiness probe.** Returns 200 only when dependencies (DB) are reachable. A `SELECT count(*) FROM skills` round-trip verifies the SQLite connection is healthy. Used by load balancers to gate endpoint inclusion.
-
-**Response** (ready):
-```json
-{
-  "status": "ok",
-  "checks": {
-    "db": { "ok": true, "latencyMs": 1 }
-  }
-}
-```
-
-**Response** (not ready — HTTP 503):
-```json
-{
-  "status": "not_ready",
-  "checks": {
-    "db": { "ok": false, "latencyMs": 5, "error": "SQLITE_CANTOPEN" }
-  }
 }
 ```
 

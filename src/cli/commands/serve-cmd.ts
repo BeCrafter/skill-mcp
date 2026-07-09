@@ -1,4 +1,4 @@
-import { getConfig } from "../../config/index.js";
+import { getConfig, ensureDirectories } from "../../config/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import { getDatabase, closeDatabase } from "../../db/connection.js";
 import { LocalFileSystemProvider } from "../../storage/local-fs.provider.js";
@@ -45,30 +45,48 @@ import { WebhookService } from "../../services/webhook.service.js";
 import { WebhookDispatcher } from "../../services/webhook-dispatcher.js";
 import { WebhookWorker } from "../../services/webhook-worker.js";
 import { getLogger } from "../../utils/logger.js";
-import { c, banner, kv, section, kvWidth } from "../ui.js";
+import { c, banner, kv, section, kvWidth, fail } from "../ui.js";
 
 const logger = getLogger();
 
 export interface ServeOptions {
   transport: "stdio" | "sse" | "http";
   port: number;
-  host: string;
-  mode: "standalone" | "gateway" | "cloud";
+  mcpOnly: boolean;
+  apiOnly: boolean;
+  remoteUrl?: string;
   authToken?: string;
+}
+
+/** Validate serve command argument combinations before any side effects. */
+export function validateServerProfile(options: ServeOptions): void {
+  if (options.mcpOnly && options.apiOnly) {
+    fail("--mcp-only and --api-only are mutually exclusive");
+    process.exit(1);
+  }
+  if (options.apiOnly && options.transport === "stdio") {
+    fail("--api-only cannot be used with stdio transport (stdio is MCP-only)", "Use --transport sse or --transport http for API-only mode");
+    process.exit(1);
+  }
 }
 
 export async function serveAction(options: ServeOptions): Promise<void> {
   const config = getConfig();
 
-  // Validate deployment mode with transport
-  if (options.mode === "cloud" && options.transport === "stdio") {
-    logger.error("cloud mode cannot use stdio transport (MCP not available). Use --transport sse or --transport http");
-    process.exit(1);
-  }
+  validateServerProfile(options);
+  ensureDirectories(config);
+
+  // Remote URL: CLI flag > env var
+  const remoteUrl = options.remoteUrl ?? config.gateway?.cloudServiceUrl;
+  // Remote auth token: --auth-token (CLI) > SKILL_MCP_AUTH_TOKEN (env).
+  // stdio mode: serves double duty as both MCP auth and remote proxy credential.
+  // sse/http mode: MCP auth comes from per-request Authorization header, this
+  // token is only used for remote proxy calls.
+  const remoteToken = options.authToken ?? config.auth?.stdioToken ?? "";
 
   logger.info(
-    { deploymentMode: options.mode, transport: options.transport, port: options.port, host: options.host },
-    `Starting MCP Server in ${options.mode} mode`,
+    { proxy: !!remoteUrl, mcpOnly: options.mcpOnly, apiOnly: options.apiOnly, transport: options.transport, port: options.port },
+    `Starting MCP Server${remoteUrl ? ` (proxy → ${remoteUrl})` : ""}`,
   );
 
   // Run migrations
@@ -135,13 +153,9 @@ export async function serveAction(options: ServeOptions): Promise<void> {
 
   // Initialize provider
   let skillProvider;
-  if (options.mode === "gateway" && config.gateway) {
+  if (remoteUrl) {
     skillProvider = instrumentProvider(
-      new RemoteSkillProvider(
-        config.gateway.cloudServiceUrl,
-        config.gateway.authToken,
-        cache,
-      ),
+      new RemoteSkillProvider(remoteUrl!, remoteToken, cache),
       "remote",
     );
   } else {
@@ -277,27 +291,35 @@ export async function serveAction(options: ServeOptions): Promise<void> {
         jwtIssuer: config.auth?.jwt?.issuer,
         jwtAccessExpiresIn: config.auth?.jwt?.accessExpiresIn,
         jwtRefreshExpiresIn: config.auth?.jwt?.refreshExpiresIn,
+        mcpOnly: options.mcpOnly,
+        apiOnly: options.apiOnly,
       },
       { type: options.transport as "sse" | "http" },
     );
     await new Promise<void>((resolve) => {
-      httpServer!.listen(options.port, options.host, () => resolve());
+      httpServer!.listen(options.port, "0.0.0.0", () => resolve());
     });
 
     // Show startup summary to operator
+    const labels: [string, string][] = [
+      ["proxy", remoteUrl ? remoteUrl : "(local)"],
+      ["mcp-only", String(options.mcpOnly)],
+      ["api-only", String(options.apiOnly)],
+      ["transport", options.transport],
+      ["port", String(options.port)],
+    ];
+    const maxLen = kvWidth(0, ...labels.map(([k]) => k));
     console.log();
-    console.log(section("listening", undefined, kvWidth(12, options.mode, options.transport, String(options.port), options.host)));
-    console.log();
-    console.log(kv("mode", options.mode));
-    console.log(kv("transport", options.transport));
-    console.log(kv("port", String(options.port)));
-    console.log(kv("host", options.host));
+    console.log(section("listening", undefined, 60));
+    for (const [k, v] of labels) {
+      console.log(kv(k, v, maxLen));
+    }
     console.log();
     console.log(`  ${c.boldGreen("✓")}  ${c.bold("Ready")}`);
     console.log();
 
     logger.info(
-      { transport: options.transport, port: options.port, host: options.host, mode: options.mode },
+      { transport: options.transport, port: options.port, proxy: !!remoteUrl, mcpOnly: options.mcpOnly, apiOnly: options.apiOnly },
       "MCP Server started",
     );
   }

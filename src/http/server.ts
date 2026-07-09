@@ -14,14 +14,13 @@ import type { UserRepository } from "../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../db/repositories/user-role.repository.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { UsageMeterService } from "../services/usage-meter.service.js";
-import { checkLiveness, checkReadiness } from "./probes.js";
 
 export interface RequestHandlerDeps {
   appConfig: AppConfig;
   mcpHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | null;
-  isCloudServiceOnlyMode: boolean;
-  adminRouter: Router;
-  gatewayRouter: Router;
+  mcpOnly: boolean;
+  adminRouter?: Router;
+  gatewayRouter?: Router;
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
   skillRepo?: SkillRepository;
@@ -36,7 +35,7 @@ export interface RequestHandlerDeps {
 // dispatch path can be unit-tested without booting the full server.
 export function createRequestHandler(deps: RequestHandlerDeps) {
   const logger = getLogger();
-  const { appConfig, mcpHandler, isCloudServiceOnlyMode, adminRouter, gatewayRouter } = deps;
+  const { appConfig, mcpHandler, mcpOnly, adminRouter, gatewayRouter } = deps;
 
   // Constant Prometheus label for any path that does not match a registered
   // route. Without this, every fuzzed/scanned URL (`/wp-admin`, `/.env`, …)
@@ -110,10 +109,6 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       } else if (rawUrl.startsWith("/api/admin/") || rawUrl.startsWith("/api/gateway/")) {
         isLegacyAlias = true;
         canonicalRedirect = "/api/v1/" + rawUrl.slice("/api/".length);
-      } else if (rawUrl === "/api/health") {
-        // Allow legacy `/api/health` to also emit deprecation pointing at v1.
-        isLegacyAlias = true;
-        canonicalRedirect = "/api/v1/livez";
       }
       if (isLegacyAlias && canonicalRedirect) {
         emitDeprecationHeaders(res, canonicalRedirect);
@@ -121,10 +116,12 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
 
       if (url === "/mcp" || url === "/mcp/sse" || url === "/mcp/messages") {
         if (mcpHandler) { await mcpHandler(req, res); return; }
-        if (isCloudServiceOnlyMode) { json(res, 403, { error: "MCP not available in cloud mode" }); return; }
+        json(res, 503, { error: "MCP transport not available" }); return;
       }
 
-      if (appConfig.transport.mcpOnlyMode) { json(res, 404, { error: "Not found (MCP-only mode)" }); return; }
+      if (mcpOnly && url !== "/api/health") {
+        json(res, 404, { error: "Not found (MCP-only mode)" }); return;
+      }
 
       if (url === "/metrics") {
         // T-707 — Prometheus exposition leaks route names, MCP session counts,
@@ -151,18 +148,10 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
         return;
       }
 
-      // P0-7 — Health probes: liveness ("am I alive?") vs readiness ("should I
-      // receive traffic?"). `/api/health` is a back-compat alias for liveness.
-      if (url === "/api/health" || url === "/api/livez") {
-        json(res, 200, checkLiveness());
-        recordMetrics(url === "/api/livez" ? "/api/livez" : "/api/health", req.method!, 200, startTime);
-        return;
-      }
-      if (url === "/api/readyz") {
-        const probe = await checkReadiness({ skillRepo: deps.skillRepo });
-        const code = probe.status === "ok" ? 200 : 503;
-        json(res, code, probe);
-        recordMetrics("/api/readyz", req.method!, code, startTime);
+      // Health check
+      if (url === "/api/health") {
+        json(res, 200, { status: "ok", timestamp: new Date().toISOString() });
+        recordMetrics(url, req.method!, 200, startTime);
         return;
       }
 
@@ -201,24 +190,21 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       }
 
       // Gateway routes — token enforced by enforceGatewayAuth middleware before dispatch.
-      // /api/gateway/health is the only anonymous-accessible endpoint (LB / container probes).
-      if (url.startsWith("/api/gateway/")) {
+      if (gatewayRouter && url.startsWith("/api/gateway/")) {
         const match = gatewayRouter.match(req.method!, url);
         if (match) {
           const ctx: HttpContext = { req, res, url, method: req.method!, params: match.params, query: parseQuery(req.url ?? "/", req.headers.host), logger };
-          if (url !== "/api/gateway/health") {
-            const requestContext = await enforceGatewayAuth(ctx, {
-              userRepo: deps.userRepo,
-              userRoleRepo: deps.userRoleRepo,
-              jwtSecret: deps.jwtSecret,
-              jwtIssuer: deps.jwtIssuer,
-            });
-            if (!requestContext) {
-              recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
-              return;
-            }
-            ctx.requestContext = requestContext;
+          const requestContext = await enforceGatewayAuth(ctx, {
+            userRepo: deps.userRepo,
+            userRoleRepo: deps.userRoleRepo,
+            jwtSecret: deps.jwtSecret,
+            jwtIssuer: deps.jwtIssuer,
+          });
+          if (!requestContext) {
+            recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
+            return;
           }
+          ctx.requestContext = requestContext;
           await gatewayRouter.dispatch(ctx);
           recordMetrics(url, req.method!, res.statusCode, startTime, ctx);
           return;
@@ -226,7 +212,7 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       }
 
       // Admin routes — enforce userType-gated bearer auth before dispatch.
-      if (url.startsWith("/api/admin/")) {
+      if (adminRouter && url.startsWith("/api/admin/")) {
         const match = adminRouter.match(req.method!, url);
         if (match) {
           const ctx: HttpContext = { req, res, url, method: req.method!, params: match.params, query: parseQuery(req.url ?? "/", req.headers.host), logger };

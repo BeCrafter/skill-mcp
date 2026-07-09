@@ -176,7 +176,6 @@ When user asks to: review code / find bugs / optimize code / security review / p
     const env = {
       ...process.env,
       TRANSPORT_TYPE: "stdio",
-      DEPLOYMENT_MODE: "standalone",
       DATABASE_PATH: join(testDir, "skill-mcp.db"),
       STORAGE_TYPE: "local-fs",
       STORAGE_BASE_PATH: join(testDir, "data/skills"),

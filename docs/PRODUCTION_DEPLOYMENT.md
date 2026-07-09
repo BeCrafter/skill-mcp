@@ -210,7 +210,7 @@ groups:
 ```bash
 # 创建服务账号并获取 token
 skill-mcp user create --name svc-gateway --role-ids <role-id>
-# 输出的 token 用作 AUTH_TOKEN
+# 输出的 token 用作 SKILL_MCP_AUTH_TOKEN
 
 # 定期轮换 token（每 3 个月）
 # 1. 创建新用户
@@ -332,7 +332,7 @@ docker compose --profile c2 exec storage \
 docker compose --profile c2 logs storage
 
 # 2. 检查健康状态
-curl http://localhost:3000/api/gateway/health
+curl http://localhost:3000/api/health
 
 # 3. 验证数据库
 docker compose --profile c2 exec storage \

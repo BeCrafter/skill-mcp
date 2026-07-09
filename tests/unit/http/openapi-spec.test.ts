@@ -20,9 +20,7 @@ describe("OpenAPI spec (P0-2)", () => {
 
   it("exposes health probes anonymously (security: [])", () => {
     const health = spec.paths["/health"]?.get as { security?: unknown[] };
-    const gwHealth = spec.paths["/gateway/health"]?.get as { security?: unknown[] };
     expect(health.security).toEqual([]);
-    expect(gwHealth.security).toEqual([]);
   });
 
   it("documents the four lifecycle verbs from P0-9", () => {

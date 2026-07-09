@@ -35,12 +35,12 @@ function loadConfig(): AppConfig {
       env: process.env.NODE_ENV ?? "development",
     },
     deployment: {
-      mode: (process.env.DEPLOYMENT_MODE as "standalone" | "gateway" | "cloud") ?? "standalone",
+      mcpOnly: process.env.MCP_ONLY_MODE === "true",
+      apiOnly: process.env.API_ONLY_MODE === "true",
     },
     gateway: process.env.CLOUD_SERVICE_URL
       ? {
           cloudServiceUrl: process.env.CLOUD_SERVICE_URL,
-          authToken: process.env.AUTH_TOKEN ?? "",
         }
       : undefined,
     database: {
@@ -51,7 +51,7 @@ function loadConfig(): AppConfig {
       path: process.env.DATABASE_URL ?? process.env.DATABASE_PATH ?? defaultDbPath,
     },
     storage: {
-      type: (process.env.STORAGE_TYPE as "local-fs") ?? "local-fs",
+      type: process.env.STORAGE_TYPE ?? "local-fs",
       basePath: process.env.STORAGE_BASE_PATH ?? defaultStoragePath,
     } as const,
     cache: {
@@ -65,10 +65,8 @@ function loadConfig(): AppConfig {
       },
     },
     transport: {
-      type: (process.env.TRANSPORT_TYPE as "stdio" | "sse" | "http") ?? "stdio",
+      type: process.env.TRANSPORT_TYPE ?? "stdio",
       port: parseInt(process.env.TRANSPORT_PORT ?? "3000", 10),
-      host: process.env.TRANSPORT_HOST ?? "0.0.0.0",
-      mcpOnlyMode: process.env.MCP_ONLY_MODE === "true",
     },
     security: {
       enableInjectionScan: process.env.SECURITY_INJECTION_SCAN !== "false",
@@ -107,13 +105,24 @@ function loadConfig(): AppConfig {
       const merged = deepMerge(envConfig, fileConfig);
       return configSchema.parse(merged);
     } catch (error) {
-      console.warn(`Failed to load config from ${configPath}:`, error);
+      console.error(`Failed to load config from ${configPath}:`, error);
+      process.exit(1);
     }
   }
 
-  const config = configSchema.parse(envConfig);
+  let config: AppConfig;
+  try {
+    config = configSchema.parse(envConfig);
+  } catch (error) {
+    console.error("Invalid configuration:", error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 
-  // Ensure data directories exist
+  return config;
+}
+
+/** Create data directories required by the config. Called at serve startup. */
+export function ensureDirectories(config: AppConfig): void {
   const dbDir = dirname(config.database.path);
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
 
@@ -128,8 +137,6 @@ function loadConfig(): AppConfig {
       mkdirSync(config.cache.file.cacheDir, { recursive: true });
     }
   }
-
-  return config;
 }
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {

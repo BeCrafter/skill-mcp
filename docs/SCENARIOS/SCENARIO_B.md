@@ -39,20 +39,21 @@ npm start
 
 启动成功后，应该看到：
 ```
-Starting MCP Server in standalone mode
+Starting MCP Server (proxy → (local))
 
 listening
-  mode: standalone
-  transport: http
-  port: 3000
-  host: 0.0.0.0
+  proxy:        (local)
+  mcp-only:     false
+  api-only:     false
+  transport:    http
+  port:         3000
 
   ✓  Ready
 ```
 
 验证健康检查：
 ```bash
-curl http://localhost:3000/api/gateway/health
+curl http://localhost:3000/api/health
 # 应返回：{"status":"ok","timestamp":"..."}
 ```
 
@@ -78,7 +79,7 @@ npm start
 
 启动成功后，应该看到：
 ```
-Starting MCP Server in gateway mode
+Starting MCP Server (proxy → http://server:3000)
 ```
 
 此时 Claude IDE 可以通过 stdio 连接并使用远程技能。
@@ -102,7 +103,6 @@ curl -H "Authorization: Bearer test-key-1" \
 
 ```bash
 # 必需配置
-DEPLOYMENT_MODE=standalone              # 使用本地 Provider
 TRANSPORT_TYPE=http                     # HTTP 传输
 TRANSPORT_PORT=3000                     # 服务器端口
 
@@ -111,16 +111,15 @@ STORAGE_BASE_PATH=./data/skills         # 存储路径
 CACHE_MEMORY_MAX_SIZE=500              # 内存缓存大小
 ```
 
-> **认证说明**：`/api/gateway/*` 端点需要 Bearer Token 认证（`/api/gateway/health` 除外）。
+> **认证说明**：`/api/gateway/*` 端点需要 Bearer Token 认证（`/api/health` 除外）。
 > 创建用户和角色请参考：`skill-mcp init` 或 `skill-mcp user create`。
 
 ### 客户端配置 (.env.scenario-b-client)
 
 ```bash
 # 必需配置
-DEPLOYMENT_MODE=gateway               # 使用远程 Provider
-CLOUD_SERVICE_URL=http://...          # 远程服务 URL
-AUTH_TOKEN=test-key-1                 # 连接用的 Bearer Token
+CLOUD_SERVICE_URL=http://...          # 远程服务 URL（自动启用代理模式）
+SKILL_MCP_AUTH_TOKEN=<your-token>     # 连接用的 Bearer Token（需与远程服务端的用户 token 一致）
 
 # 可选配置
 CACHE_MEMORY_MAX_SIZE=100             # 客户端缓存（通常较小）
@@ -203,7 +202,7 @@ find ./data/cache/ -name "*my-skill*" -delete
 
 ```bash
 # 1. 检查服务器是否运行
-curl http://server:3000/api/gateway/health
+curl http://server:3000/api/health
 
 # 2. 检查防火墙
 netstat -an | grep 3000
@@ -216,7 +215,7 @@ echo $CLOUD_SERVICE_URL
 
 ```bash
 # 1. 验证 Bearer Token 配置
-# 确保客户端的 AUTH_TOKEN 与服务器端创建的用户 token 匹配
+# 确保客户端的 SKILL_MCP_AUTH_TOKEN 与服务器端创建的用户 token 匹配
 
 # 2. 测试认证
 curl -H "Authorization: Bearer <your-token>" \
@@ -291,7 +290,7 @@ MCP-2 ↔ [HTTP] ↔ Storage
 MCP-3 ↔ [HTTP] ↔ Storage
 ```
 
-**配置相同**：所有客户端使用相同的 CLOUD_SERVICE_URL 和 AUTH_TOKEN
+**配置相同**：所有客户端使用相同的 CLOUD_SERVICE_URL 和 SKILL_MCP_AUTH_TOKEN
 
 **缓存独立**：每个客户端有自己的 L1 和 L2 缓存
 
@@ -313,7 +312,6 @@ COPY . .
 RUN npm run build
 
 ENV TRANSPORT_TYPE=http
-ENV DEPLOYMENT_MODE=standalone
 
 EXPOSE 3000
 
@@ -334,7 +332,6 @@ COPY . .
 RUN npm run build
 
 ENV TRANSPORT_TYPE=stdio
-ENV DEPLOYMENT_MODE=gateway
 
 CMD ["npm", "start"]
 ```
@@ -351,9 +348,8 @@ services:
       - "3000:3000"
     environment:
       TRANSPORT_TYPE: http
-      DEPLOYMENT_MODE: standalone
       # RBAC: create a user+token via `skill-mcp init` or `skill-mcp user create`,
-      # then clients use that token as AUTH_TOKEN.
+      # then clients use that token as SKILL_MCP_AUTH_TOKEN.
 
   mcp-client-1:
     image: skill-mcp:latest
@@ -361,9 +357,8 @@ services:
       - storage
     environment:
       TRANSPORT_TYPE: stdio
-      DEPLOYMENT_MODE: gateway
       CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: storage-key-prod
+      SKILL_MCP_AUTH_TOKEN: storage-key-prod
 ```
 
 ## 故障恢复
@@ -378,7 +373,7 @@ services:
 
 ```bash
 # 1. 检查服务器
-curl http://server:3000/api/gateway/health
+curl http://server:3000/api/health
 
 # 2. 重启客户端（如果缓存过期）
 npm start

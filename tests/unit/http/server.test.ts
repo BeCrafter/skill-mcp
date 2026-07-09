@@ -39,8 +39,7 @@ function makeReq(method: string, url: string) {
 }
 
 const baseConfig = {
-  deployment: { mode: "standalone" as const },
-  transport: { mcpOnlyMode: false },
+  deployment: { mcpOnly: false, apiOnly: false },
   auth: {},
   security: { enableInjectionScan: true, hstsEnabled: false },
 } as unknown as AppConfig;
@@ -56,7 +55,7 @@ describe("createRequestHandler", () => {
 
   it("/api/health returns 200 ok", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -74,7 +73,7 @@ describe("createRequestHandler", () => {
   it("emits HSTS header only when security.hstsEnabled=true (T-737)", async () => {
     const cfg = { ...baseConfig, security: { enableInjectionScan: true, hstsEnabled: true } } as unknown as AppConfig;
     const handler = createRequestHandler({
-      appConfig: cfg, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: cfg, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -85,7 +84,7 @@ describe("createRequestHandler", () => {
   it("delegates /mcp/* to mcpHandler when set", async () => {
     const mcpHandler = vi.fn(async (_req, res) => { res.writeHead(204); res.end(); });
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -94,21 +93,21 @@ describe("createRequestHandler", () => {
     expect(capture().statusCode).toBe(204);
   });
 
-  it("returns 403 on /mcp when in cloud-only mode without mcpHandler", async () => {
+  it("returns 503 on /mcp when mcpHandler is not available", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: true,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
     await handler(makeReq("GET", "/mcp"), res);
-    expect(capture().statusCode).toBe(403);
+    expect(capture().statusCode).toBe(503);
   });
 
   it("returns 404 on /api/admin/* in MCP-only mode (route table not consulted)", async () => {
-    const cfg = { ...baseConfig, transport: { mcpOnlyMode: true } } as AppConfig;
+    const cfg = { ...baseConfig, deployment: { mcpOnly: true, apiOnly: false } } as unknown as AppConfig;
     adminRouter.get("/api/admin/skills", async (ctx) => { ctx.res.writeHead(200); ctx.res.end("[]"); });
     const handler = createRequestHandler({
-      appConfig: cfg, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: cfg, mcpHandler: null, mcpOnly: true,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -118,7 +117,7 @@ describe("createRequestHandler", () => {
 
   it("returns 404 for unknown route", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -136,7 +135,7 @@ describe("createRequestHandler", () => {
       auth: { metricsAuthOptional: false },
     } as unknown as AppConfig;
     const handler = createRequestHandler({
-      appConfig: cfg, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: cfg, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
       // Provide minimal stubs so admin-auth doesn't 500 on missing repos.
       userRepo: { findByToken: () => null } as never,
@@ -153,7 +152,7 @@ describe("createRequestHandler", () => {
       auth: { metricsAuthOptional: true },
     } as unknown as AppConfig;
     const handler = createRequestHandler({
-      appConfig: cfg, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: cfg, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -164,7 +163,7 @@ describe("createRequestHandler", () => {
   // P0-2 — OpenAPI spec + Swagger UI mounted on the server (no auth required).
   it("GET /api/v1/openapi.json returns the OpenAPI 3.1 document anonymously", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -178,7 +177,7 @@ describe("createRequestHandler", () => {
 
   it("GET /api/openapi.json (unprefixed) also serves the spec", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -190,7 +189,7 @@ describe("createRequestHandler", () => {
 
   it("GET /api/v1/docs serves the Swagger UI HTML page", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -201,18 +200,14 @@ describe("createRequestHandler", () => {
     expect(out.body).toContain("/api/v1/openapi.json");
   });
 
-  it("/api/gateway/health bypasses gateway auth (used by LB probes)", async () => {
-    gatewayRouter.get("/api/gateway/health", async (ctx) => {
-      ctx.res.writeHead(200, { "Content-Type": "application/json" });
-      ctx.res.end(JSON.stringify({ ok: true }));
-    });
+  it("/api/health is served without auth", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
-    await handler(makeReq("GET", "/api/gateway/health"), res);
+    await handler(makeReq("GET", "/api/health"), res);
     expect(capture().statusCode).toBe(200);
-    expect(JSON.parse(capture().body).ok).toBe(true);
+    expect(JSON.parse(capture().body).status).toBe("ok");
   });
 });

@@ -28,11 +28,11 @@ npm run build
 ### 2. 启动本地 MCP
 
 ```bash
-# 使用默认配置（stdio transport，standalone mode）
+# 使用默认配置（stdio transport，全功能模式）
 npm start
 
 # 或显式指定
-TRANSPORT_TYPE=stdio DEPLOYMENT_MODE=standalone npm start
+TRANSPORT_TYPE=stdio npm start
 
 # 或使用配置文件
 cp src/config/examples/.env.scenario-a .env.local

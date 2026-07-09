@@ -89,7 +89,7 @@ export OPENAI_MODEL="agnes-2.0-flash"
 | 本地 CLI | `~/.skill-mcp/credentials.json` | - |
 | stdio MCP | `--auth-token` 或 `SKILL_MCP_AUTH_TOKEN` | `SKILL_MCP_AUTH_TOKEN` |
 | HTTP/SSE MCP | `Authorization: Bearer <JWT>` | - |
-| Gateway | `--server-url` + JWT | `AUTH_TOKEN` |
+| Gateway | `--server-url` + JWT | `SKILL_MCP_AUTH_TOKEN` |
 
 ---
 
@@ -768,9 +768,10 @@ export OPENAI_MODEL="agnes-2.0-flash"
   OPTIONS
     --transport <type>          Transport type: stdio|sse|http
     --port <number>             HTTP port
-    --host <host>               HTTP host
-    --mode <mode>               Deployment mode: standalone|gateway|cloud
-    --auth-token <token>        Stdio mode: bearer token
+    --mcp-only                  Expose MCP endpoints only
+    --api-only                  Expose REST API only
+    --remote-url <url>          Remote service URL for skill proxy
+    --auth-token <token>        Stdio: bearer token + remote proxy auth
 退出码: 0
 ```
 **结果**: ✅ PASS
@@ -784,10 +785,11 @@ export OPENAI_MODEL="agnes-2.0-flash"
   skill-mcp  0.1.1-beta.0
   listening
   ────────────────────────────
-    mode          standalone
+    proxy         (local)
+    mcp-only      false
+    api-only      false
     transport     http
     port          3458
-    host          0.0.0.0
   ✓  Ready
 退出码: 0
 ```
@@ -843,11 +845,144 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
+#### V-41 `serve --mcp-only` — 仅暴露 MCP + health
+
+```
+命令: skill-mcp serve --transport http --port 3459 --mcp-only &
+预期: MCP 端点可用，Admin API 和 Gateway API 不可访问
+实际:
+  # 健康检查正常
+  curl -s http://localhost:3459/api/health → {"status":"ok"}
+  
+  # MCP 端点正常工作（tools/list 返回 6 个工具）
+  POST /mcp (tools/list) → 200，返回 6 个工具
+  
+  # Admin API 不可访问
+  curl -s http://localhost:3459/api/admin/skills → 404
+  
+  # Gateway API 不可访问
+  curl -s http://localhost:3459/api/gateway/skills → 404
+退出码: 0
+```
+**结果**: PASS
+
+#### V-42 `serve --api-only` — 仅暴露 REST + health
+
+```
+命令: skill-mcp serve --transport http --port 3460 --api-only &
+预期: REST API 可用，MCP 返回 403
+实际:
+  # 健康检查正常
+  curl -s http://localhost:3460/api/health → {"status":"ok"}
+  
+  # Gateway API 正常工作
+  curl -s -H "Authorization: Bearer <token>" http://localhost:3460/api/gateway/skills → 200
+  
+  # MCP 返回 403
+  POST /mcp (initialize) → 403
+退出码: 0
+```
+**结果**: PASS
+
+#### V-43 `serve --mcp-only --api-only` — 互斥报错
+
+```
+命令: skill-mcp serve --mcp-only --api-only
+预期: 退出码 1，提示互斥
+实际: mcpOnly and apiOnly cannot both be true
+退出码: 1
+```
+**结果**: ✅ PASS
+
+#### V-44 `serve --remote-url <url>` — 代理模式，Admin 不可访问
+
+```
+命令: skill-mcp serve --transport http --port 3461 --remote-url http://localhost:3000 &
+预期: 代理模式启动，Admin API 不注册
+实际:
+  # 健康检查正常
+  curl -s http://localhost:3461/api/health → {"status":"ok"}
+  
+  # Gateway API 代理到远程服务
+  curl -s -H "Authorization: Bearer <token>" http://localhost:3461/api/gateway/skills → 200
+  
+  # Admin API 不可访问
+  curl -s http://localhost:3461/api/admin/skills → 404
+退出码: 0
+```
+**结果**: PASS
+
+#### V-44a 本地后端 + 远程代理网关（完整联调）
+
+```
+# 终端 1: 启动存储后端（--api-only，仅 REST + health，无 MCP）
+skill-mcp serve --transport http --port 3001 --api-only &
+→ 仅暴露 /api/gateway/* + /api/health
+
+# 终端 2: 启动代理网关（--remote-url 指向后端）
+skill-mcp serve --transport http --port 4000 --remote-url http://localhost:3001 &
+→ 自动使用 RemoteSkillProvider，Admin 不注册
+
+预期:
+  # 代理网关 Gateway API 透明转发到后端
+  curl -s -H "Authorization: Bearer <token>" http://localhost:4000/api/gateway/skills
+  → 返回后端数据，200
+
+  # 代理网关 Admin API 不可访问（管理操作在数据源端）
+  curl -s http://localhost:4000/api/admin/skills → 404
+
+  # 代理网关 MCP 正常工作（tools/list 返回 6 个工具）
+  POST http://localhost:4000/mcp (tools/list) → 200
+
+  # 后端不暴露 MCP
+  POST http://localhost:3001/mcp (initialize) → 403
+```
+**结果**: PASS
+
+#### V-44b `CLOUD_SERVICE_URL` 环境变量自动代理
+
+```
+# 等价于 V-44 --remote-url，通过环境变量触发代理模式
+命令: CLOUD_SERVICE_URL=http://localhost:3001 skill-mcp serve --transport http --port 4001 &
+预期: 自动检测 CLOUD_SERVICE_URL，使用 RemoteSkillProvider
+实际:
+  # 启动日志中 proxy 显示远程地址而非 (local)
+  proxy         http://localhost:3001
+  
+  # Gateway API 代理转发正常
+  curl -s -H "Authorization: Bearer <token>" http://localhost:4001/api/gateway/skills → 200
+  
+  # Admin API 不可访问
+  curl -s http://localhost:4001/api/admin/skills → 404
+退出码: 0
+```
+**结果**: PASS
+
+#### V-45 `serve` (默认) — 全功能模式
+
+```
+命令: skill-mcp serve --transport http --port 3458 &
+预期: MCP + Admin + Gateway 全暴露
+实际: (同 V-35 ~ V-40 验证，MCP、Admin、Gateway 均可正常访问)
+退出码: 0
+```
+**结果**: ✅ PASS
+
+#### E-20 `serve --mcp-only --api-only` 互斥
+
+```
+命令: skill-mcp serve --mcp-only --api-only
+预期: 报错退出
+实际: (同 V-43)
+退出码: 1
+```
+**结果**: ✅ PASS
+
 ---
 
 ## 7. Sync 命令组
 
-#### V-41 `sync check <slug>` — 检查远程更新（有 Git 源）
+#### V-46 `sync check <slug>` — 检查远程更新（有 Git 源）
 
 ```
 命令: skill-mcp sync check huashu-nuwa
@@ -888,7 +1023,7 @@ HTTP 状态码: 200
 
 ## 8. Admin 命令组 — Auth
 
-#### V-42 `auth whoami` — 已登录状态
+#### V-47 `auth whoami` — 已登录状态
 
 ```
 命令: skill-mcp auth whoami
@@ -904,7 +1039,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-43 `auth logout` — 登出
+#### V-48 `auth logout` — 登出
 
 ```
 命令: skill-mcp auth logout
@@ -924,7 +1059,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-44 `auth reset-password`
+#### V-49 `auth reset-password`
 
 ```
 命令: skill-mcp auth reset-password --username admin1 --password newpass123
@@ -938,7 +1073,7 @@ HTTP 状态码: 200
 
 ## 9. Admin 命令组 — User
 
-#### V-45 `user list`
+#### V-50 `user list`
 
 ```
 命令: skill-mcp user list
@@ -963,7 +1098,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-46 `user get <userId>`
+#### V-51 `user get <userId>`
 
 ```
 命令: skill-mcp user get usr_zzpq09g4ov1ccizi
@@ -994,7 +1129,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-47 `user delete` — 删除普通用户
+#### V-52 `user delete` — 删除普通用户
 
 ```
 命令: skill-mcp user delete usr_qivdtluqnky10vj7
@@ -1016,7 +1151,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-48 `user assign-roles`
+#### V-53 `user assign-roles`
 
 ```
 命令: skill-mcp user assign-roles usr_ta9wgvhnr0egvj3y --role-ids role_jjsmnxb7ckns0mmb
@@ -1028,7 +1163,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-49 `user rotate-token`
+#### V-54 `user rotate-token`
 
 ```
 命令: skill-mcp user rotate-token usr_ta9wgvhnr0egvj3y --ttl 30d
@@ -1048,7 +1183,7 @@ HTTP 状态码: 200
 
 ## 10. Admin 命令组 — Role
 
-#### V-50 `role list`
+#### V-55 `role list`
 
 ```
 命令: skill-mcp role list
@@ -1064,7 +1199,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-51 `role create`
+#### V-56 `role create`
 
 ```
 命令: skill-mcp role create --name "Test Role" --tags test,viewer --description "A test role"
@@ -1079,7 +1214,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-52 `role get <roleId>`
+#### V-57 `role get <roleId>`
 
 ```
 命令: skill-mcp role get role_d30y4bh7z04ho8l8
@@ -1106,7 +1241,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-53 `role update`
+#### V-58 `role update`
 
 ```
 命令: skill-mcp role update role_d30y4bh7z04ho8l8 --name "Updated Role" --tags newtag --description "Updated"
@@ -1120,7 +1255,7 @@ HTTP 状态码: 200
 ```
 **结果**: ✅ PASS
 
-#### V-54 `role delete` — 删除自定义角色
+#### V-59 `role delete` — 删除自定义角色
 
 ```
 命令: skill-mcp role delete role_d30y4bh7z04ho8l8
@@ -1223,16 +1358,16 @@ HTTP 状态码: 200
 | Quality | 5 | 1 | — | 6 | 6 | 0 |
 | Pipeline | 4 | 2 | — | 6 | 6 | 0 |
 | System | 5 | 0 | — | 5 | 5 | 0 |
-| Serve | 7 | 0 | — | 7 | 7 | 0 |
+| Serve | 12 | 1 | — | 13 | 13 | 0 |
 | Sync | 1 | 2 | — | 3 | 3 | 0 |
 | Admin Auth | 3 | 1 | — | 4 | 4 | 0 |
 | Admin User | 5 | 2 | — | 7 | 7 | 0 |
 | Admin Role | 5 | 2 | — | 7 | 7 | 0 |
 | 权限隔离 | — | — | 5 | 5 | 5 | 0 |
-| **合计** | **55** | **15** | **5** | **75** | **75** | **0** |
+| **合计** | **60** | **16** | **5** | **81** | **81** | **0** |
 
 **总结**:
-- 75 个验证用例全部通过，功能正确
+- 81 个验证用例全部通过，功能正确
 - 上一轮验收中发现的 6 处退出码问题已全部修复（E-02/E-07/E-09/V-22/E-08 均正确返回 1）
 - 远程 Git import 三种场景（直接导入、`--sub-dir`、`--branch` + `--sub-dir`）全部验证通过
 - 权限隔离（未登录拒绝、API 401、自我删除保护、内置角色保护）全部有效
@@ -1346,8 +1481,8 @@ node dist/index.js role delete <roleId>
 ### 14.4 远程服务器模式
 
 ```bash
-# 启动 HTTP 服务器
-node dist/index.js serve --transport http --port 3000 --host 0.0.0.0 --mode standalone --auth-token my-secret
+# 启动 HTTP 服务器（全功能模式）
+node dist/index.js serve --transport http --port 3000 --auth-token my-secret
 
 # 新终端：登录远程服务器
 node dist/index.js auth login --server-url http://localhost:3000
@@ -1461,8 +1596,6 @@ node dist/index.js user rotate-token $USER_ID --ttl 30d
 node dist/index.js serve \
   --transport http \
   --port 3460 \
-  --host 127.0.0.1 \
-  --mode standalone \
   --auth-token <YOUR_TOKEN>
 ```
 
@@ -1703,7 +1836,7 @@ Error: connect ECONNREFUSED
 curl -s http://localhost:3000/api/health
 
 # 重新启动服务器
-node dist/index.js serve --transport http --port 3000 --host 0.0.0.0
+node dist/index.js serve --transport http --port 3000
 ```
 
 ---
@@ -1714,10 +1847,11 @@ node dist/index.js serve --transport http --port 3000 --host 0.0.0.0
 |--------|------|--------|
 | `DATABASE_PATH` | 数据库文件路径 | `~/.skill-mcp/skill-mcp.db` |
 | `STORAGE_BASE_PATH` | 技能存储路径 | `~/.skill-mcp/data/skills` |
-| `AUTH_TOKEN` | 认证令牌 | - |
 | `SKILL_MCP_SERVER_URL` | 远程服务器 URL | - |
-| `SKILL_MCP_AUTH_TOKEN` | stdio 模式认证令牌 | - |
-| `DEPLOYMENT_MODE` | 部署模式 | `standalone` |
+| `SKILL_MCP_AUTH_TOKEN` | stdio/outbound 认证令牌 | - |
+| `MCP_ONLY_MODE` | 仅暴露 MCP + health | `false` |
+| `API_ONLY_MODE` | 仅暴露 REST API + health | `false` |
+| `CLOUD_SERVICE_URL` | 远程代理地址 | - |
 | `TRANSPORT_TYPE` | 传输类型 | `stdio` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 

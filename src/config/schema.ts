@@ -16,7 +16,6 @@ export const storageConfigSchema = z.discriminatedUnion("type", [
 
 export const gatewayConfigSchema = z.object({
   cloudServiceUrl: z.string().url(),
-  authToken: z.string(),
 }).optional();
 
 export const cacheConfigSchema = z.object({
@@ -38,7 +37,10 @@ export const configSchema = z.object({
   }),
 
   deployment: z.object({
-    mode: z.enum(["standalone", "gateway", "cloud"]).default("standalone"),
+    mcpOnly: z.boolean().default(false),
+    apiOnly: z.boolean().default(false),
+  }).refine(d => !(d.mcpOnly && d.apiOnly), {
+    message: "mcpOnly and apiOnly cannot both be true",
   }),
 
   gateway: gatewayConfigSchema,
@@ -54,13 +56,9 @@ export const configSchema = z.object({
   transport: z.object({
     type: z.enum(["stdio", "sse", "http"]).default("stdio"),
     port: z.number().default(3000),
-    host: z.string().default("0.0.0.0"),
-    mcpOnlyMode: z.boolean().default(false),
   }).default({
     type: "stdio",
     port: 3000,
-    host: "0.0.0.0",
-    mcpOnlyMode: false,
   }),
 
   security: z.object({

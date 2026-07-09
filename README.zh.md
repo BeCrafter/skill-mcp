@@ -95,8 +95,8 @@ npm start
 # 场景 C: HTTP 服务器（生产环境）
 TRANSPORT_TYPE=http npm start
 
-# 网关模式：代理到远程云服务
-DEPLOYMENT_MODE=gateway CLOUD_SERVICE_URL=http://cloud-service:3001 npm start
+# 代理模式：设置 CLOUD_SERVICE_URL 自动启用
+CLOUD_SERVICE_URL=http://cloud-service:3001 npm start
 ```
 
 ### 2. 导入技能
@@ -203,9 +203,10 @@ npx skill-mcp lint ./path/to/skill-package
     "version": "0.0.1"
   },
   "deployment": {
-    "mode": "standalone"          // "standalone" | "gateway" | "cloud"
+    "mcpOnly": false,             // 如果为 true，仅 MCP + health（无 Admin/Gateway API）
+    "apiOnly": false              // 如果为 true，仅 REST + health（无 MCP）
   },
-  "gateway": {                   // 仅用于网关模式
+  "gateway": {                    // 仅在代理到远程服务时使用
     "cloudServiceUrl": "http://cloud-service:3001",
     "authToken": "your-token"
   },
@@ -222,12 +223,11 @@ npx skill-mcp lint ./path/to/skill-package
   },
   "transport": {
     "type": "stdio",              // "stdio" | "sse" | "http"
-    "port": 3000,
-    "host": "0.0.0.0",
-    "mcpOnlyMode": false         // 如果为 true，禁用 /api/admin/* 路由
+    "port": 3000
   },
   "security": {
-    "enableInjectionScan": true
+    "enableInjectionScan": true,
+    "hstsEnabled": false
   }
 }
 ```
@@ -237,17 +237,23 @@ npx skill-mcp lint ./path/to/skill-package
 | 变量 | 描述 | 默认值 |
 |----------|-------------|---------|
 | `NODE_ENV` | 环境 | `development` |
-| `DEPLOYMENT_MODE` | 部署模式 | `standalone` |
+| `MCP_ONLY_MODE` | 仅 MCP（禁用 Admin/Gateway API） | `false` |
+| `API_ONLY_MODE` | 仅 REST（禁用 MCP） | `false` |
 | `STORAGE_TYPE` | 存储后端 | `local-fs` |
-| `STORAGE_BASE_PATH` | 技能目录 | `./data/skills` |
-| `DATABASE_PATH` | SQLite 数据库路径 | `./data/skill-mcp.db` |
+| `STORAGE_BASE_PATH` | 技能目录 | `~/.skill-mcp/data/skills` |
+| `DATABASE_PATH` | SQLite 数据库路径 | `~/.skill-mcp/skill-mcp.db` |
+| `DATABASE_URL` | 数据库 URL（优先于 `DATABASE_PATH`） | - |
+| `CACHE_MEMORY_ENABLED` | 启用内存 LRU 缓存 | `true` |
+| `CACHE_MEMORY_MAX_SIZE` | 最大内存缓存条目数 | `500` |
+| `CACHE_FILE_ENABLED` | 启用文件缓存 | `true` |
+| `CACHE_FILE_DIR` | 缓存目录 | `~/.skill-mcp/cache` |
 | `TRANSPORT_TYPE` | 传输类型 | `stdio` |
 | `TRANSPORT_PORT` | HTTP 端口 | `3000` |
-| `TRANSPORT_HOST` | HTTP 主机 | `0.0.0.0` |
-| `CLOUD_SERVICE_URL` | 云服务 URL（网关） | - |
-| `AUTH_TOKEN` | 网关出向令牌 | - |
+| `CLOUD_SERVICE_URL` | 远程服务 URL（自动启用代理模式） | - |
+| `SKILL_MCP_AUTH_TOKEN` | stdio 认证 + 代理出站令牌 | - |
 | `AUTH_JWT_SECRET` | 管理员登录的 JWT 签名密钥（最少 32 字符） | - |
-| `SKILL_MCP_AUTH_TOKEN` | stdio 模式权限隔离 bearer token | - |
+| `SKILL_MCP_SERVER_URL` | CLI 远程模式的远程服务器 URL | - |
+| `SECURITY_INJECTION_SCAN` | 启用 prompt injection 检测 | `true` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 | `OTEL_ENABLED` | 启用 OpenTelemetry tracing（`true` / `false`） | `false` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP endpoint URL；未设时回落 `ConsoleSpanExporter` | - |
@@ -274,7 +280,7 @@ stdio 传输没有 HTTP header，权限隔离通过启动时注入 bearer token 
 
 ### Gateway HTTP 鉴权
 
-`/api/gateway/*` 由鉴权中间件强制保护：每个请求必须携带 `Authorization: Bearer <token>`，缺失或无效 token 在 handler 之前直接返回 `401`。唯一的匿名端点是 `GET /api/gateway/health`（为负载均衡器 / 容器探针保留）。
+`/api/gateway/*` 由鉴权中间件强制保护：每个请求必须携带 `Authorization: Bearer <token>`，缺失或无效 token 在 handler 之前直接返回 `401`。唯一的匿名端点是 `GET /api/health`（为负载均衡器 / 容器探针保留）。
 
 ```http
 401 Unauthorized
@@ -291,7 +297,7 @@ skill-mcp user create --name alice --role-ids <role-id>
 # → 打印 sk-live-xxxx；客户端发送 `Authorization: Bearer sk-live-xxxx`
 ```
 
-对于 Gateway → Cloud Service 内部调用，建议在 cloud 侧创建一个专用 `svc-gateway` 用户，把 token 配到 gateway 侧的 `AUTH_TOKEN` 环境变量。
+对于 Proxy → Backend 内部调用，建议在 backend 侧创建一个专用 `svc-gateway` 用户，把 token 配到 proxy 侧的 `SKILL_MCP_AUTH_TOKEN` 环境变量。
 
 `/mcp/*`（SSE / Streamable HTTP）及 stdio 传输不受影响 —— stdio 使用上文 `SKILL_MCP_AUTH_TOKEN` 启动期注入路径。
 

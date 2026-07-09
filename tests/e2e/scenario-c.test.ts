@@ -50,7 +50,6 @@ describe("Scenario C: Distributed HTTP Deployment", () => {
       port: c1Port,
       env: {
         NODE_ENV: "test",
-        DEPLOYMENT_MODE: "standalone",
         DATABASE_PATH: c1Db,
         STORAGE_BASE_PATH: c1Storage,
         CACHE_FILE_DIR: join(c1Dir, "cache"),
@@ -80,7 +79,6 @@ describe("Scenario C: Distributed HTTP Deployment", () => {
       port: cloudPort,
       env: {
         NODE_ENV: "test",
-        DEPLOYMENT_MODE: "standalone",
         DATABASE_PATH: cloudDb,
         STORAGE_BASE_PATH: cloudStorage,
         CACHE_FILE_DIR: join(cloudDir, "cache"),
@@ -92,9 +90,8 @@ describe("Scenario C: Distributed HTTP Deployment", () => {
       port: gwPort,
       env: {
         NODE_ENV: "test",
-        DEPLOYMENT_MODE: "gateway",
         CLOUD_SERVICE_URL: c2Cloud.url,
-        AUTH_TOKEN: c2ServiceToken,
+        SKILL_MCP_AUTH_TOKEN: c2ServiceToken,
         DATABASE_PATH: gwDb,
         STORAGE_BASE_PATH: gwStorage,
         CACHE_FILE_DIR: join(gwDir, "cache"),
@@ -110,8 +107,8 @@ describe("Scenario C: Distributed HTTP Deployment", () => {
   });
 
   describe("C1: Single Server (standalone HTTP)", () => {
-    it("exposes /api/gateway/health unauthenticated", async () => {
-      const r = await fetch(`${c1Server!.url}/api/gateway/health`);
+    it("exposes /api/health unauthenticated", async () => {
+      const r = await fetch(`${c1Server!.url}/api/health`);
       expect(r.status).toBe(200);
     });
 
@@ -147,13 +144,13 @@ describe("Scenario C: Distributed HTTP Deployment", () => {
   });
 
   describe("C2: Distributed (Cloud + MCP-only Gateway)", () => {
-    it("cloud service is reachable on /api/gateway/health", async () => {
-      const r = await fetch(`${c2Cloud!.url}/api/gateway/health`);
+    it("cloud service is reachable on /api/health", async () => {
+      const r = await fetch(`${c2Cloud!.url}/api/health`);
       expect(r.status).toBe(200);
     });
 
-    it("gateway exposes /api/gateway/health unauthenticated", async () => {
-      const r = await fetch(`${c2Gateway!.url}/api/gateway/health`);
+    it("gateway exposes /api/health unauthenticated", async () => {
+      const r = await fetch(`${c2Gateway!.url}/api/health`);
       expect(r.status).toBe(200);
     });
 

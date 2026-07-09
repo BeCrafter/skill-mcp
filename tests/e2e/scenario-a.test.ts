@@ -50,7 +50,6 @@ describe("Scenario A: Local Standalone Mode", () => {
       ...process.env,
       NODE_ENV: "test",
       TRANSPORT_TYPE: "stdio",
-      DEPLOYMENT_MODE: "standalone",
       DATABASE_PATH: join(testDir, "skill-mcp.db"),
       STORAGE_BASE_PATH: join(testDir, "data/skills"),
       CACHE_FILE_DIR: join(testDir, "data/cache"),

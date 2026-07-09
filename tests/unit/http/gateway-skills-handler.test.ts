@@ -61,13 +61,6 @@ function setup(svc = fakeService()): Router {
 }
 
 describe("registerGatewaySkillRoutes", () => {
-  it("GET /api/gateway/health returns 200 ok", async () => {
-    const router = setup();
-    const ctx = makeCtx("GET", "/api/gateway/health");
-    expect(await router.dispatch(ctx)).toBe(true);
-    expect((ctx.res as never as { statusCode: number }).statusCode).toBe(200);
-  });
-
   it("GET /api/gateway/skills paginates and forwards filters", async () => {
     const svc = fakeService();
     const router = setup(svc);

@@ -56,6 +56,8 @@ export interface AppDependencies {
   jwtIssuer?: string;
   jwtAccessExpiresIn?: number;
   jwtRefreshExpiresIn?: number;
+  mcpOnly?: boolean;
+  apiOnly?: boolean;
 }
 
 export interface TransportConfig {

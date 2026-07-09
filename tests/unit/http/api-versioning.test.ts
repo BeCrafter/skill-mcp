@@ -40,8 +40,7 @@ function makeReq(method: string, url: string) {
 }
 
 const baseConfig = {
-  deployment: { mode: "standalone" as const },
-  transport: { mcpOnlyMode: false },
+  deployment: { mcpOnly: false, apiOnly: false },
   auth: {},
   security: { enableInjectionScan: true, hstsEnabled: false },
 } as unknown as AppConfig;
@@ -97,15 +96,11 @@ describe("API versioning (P0-1)", () => {
       ctx.res.writeHead(200, { "Content-Type": "application/json" });
       ctx.res.end(JSON.stringify({ ok: true, route: "gateway-skills" }));
     });
-    gatewayRouter.get("/api/gateway/health", async (ctx) => {
-      ctx.res.writeHead(200, { "Content-Type": "application/json" });
-      ctx.res.end(JSON.stringify({ ok: true }));
-    });
   });
 
   it("/api/v1/admin/skills dispatches to admin router (canonical path)", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter, ...fakeAdminDeps,
     });
     const { res, capture } = makeRes();
@@ -120,7 +115,7 @@ describe("API versioning (P0-1)", () => {
 
   it("/api/v1/admin/skills/:slug preserves route params after normalization", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter, ...fakeAdminDeps,
     });
     const { res, capture } = makeRes();
@@ -132,7 +127,7 @@ describe("API versioning (P0-1)", () => {
 
   it("/api/v1/gateway/skills dispatches to gateway router", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter,
       ...fakeGatewayDeps,
     });
@@ -144,19 +139,19 @@ describe("API versioning (P0-1)", () => {
     expect(out.headers["deprecation"]).toBeUndefined();
   });
 
-  it("/api/v1/gateway/health bypasses gateway auth (LB probe parity)", async () => {
+  it("/api/v1/health bypasses gateway auth (LB probe parity)", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
-    await handler(makeReq("GET", "/api/v1/gateway/health"), res);
+    await handler(makeReq("GET", "/api/v1/health"), res);
     expect(capture().statusCode).toBe(200);
   });
 
   it("/api/v1/health returns 200 ok", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -169,7 +164,7 @@ describe("API versioning (P0-1)", () => {
 
   it("legacy /api/admin/* still works and emits Deprecation + Sunset headers (RFC 8594)", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter, ...fakeAdminDeps,
     });
     const { res, capture } = makeRes();
@@ -184,7 +179,7 @@ describe("API versioning (P0-1)", () => {
 
   it("legacy /api/gateway/* emits Deprecation + Sunset headers", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter,
       ...fakeGatewayDeps,
     });
@@ -196,22 +191,21 @@ describe("API versioning (P0-1)", () => {
     expect(out.headers["link"]).toContain("/api/v1/gateway/skills");
   });
 
-  it("legacy /api/health emits Deprecation pointing at /api/v1/livez (P0-7 rename)", async () => {
+  it("/api/health returns 200 without deprecation (canonical endpoint)", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
     await handler(makeReq("GET", "/api/health"), res);
     const out = capture();
     expect(out.statusCode).toBe(200);
-    expect(out.headers["deprecation"]).toBe("true");
-    expect(out.headers["link"]).toContain("/api/v1/livez");
+    expect(out.headers["deprecation"]).toBeUndefined();
   });
 
   it("/api/v2/* returns 404 (only v1 is recognized)", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();
@@ -221,7 +215,7 @@ describe("API versioning (P0-1)", () => {
 
   it("/api/v1/unknown returns 404", async () => {
     const handler = createRequestHandler({
-      appConfig: baseConfig, mcpHandler: null, isCloudServiceOnlyMode: false,
+      appConfig: baseConfig, mcpHandler: null, mcpOnly: false, apiOnly: false,
       adminRouter, gatewayRouter,
     });
     const { res, capture } = makeRes();

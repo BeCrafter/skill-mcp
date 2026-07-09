@@ -17,7 +17,7 @@ import {
  *
  *   client ──(Bearer userTok)──> Gateway HTTP ──(Bearer svcTok)──> Cloud HTTP
  *
- * The gateway uses `AUTH_TOKEN` env to authenticate itself to the cloud; the
+ * The gateway uses `SKILL_MCP_AUTH_TOKEN` env to authenticate itself to the cloud; the
  * end user authenticates separately to the gateway with their own per-user
  * bearer token. Both DBs are pre-seeded with matching users/roles so the
  * spawned servers don't refuse the bearer at the gateway-auth middleware.
@@ -60,7 +60,6 @@ describe("Scenario B: Local Gateway + Remote Cloud Storage", () => {
       port: cloudPort,
       env: {
         NODE_ENV: "test",
-        DEPLOYMENT_MODE: "standalone",
         DATABASE_PATH: cloudDb,
         STORAGE_BASE_PATH: cloudStorage,
         CACHE_FILE_DIR: join(cloudDir, "cache"),
@@ -72,9 +71,8 @@ describe("Scenario B: Local Gateway + Remote Cloud Storage", () => {
       port: gatewayPort,
       env: {
         NODE_ENV: "test",
-        DEPLOYMENT_MODE: "gateway",
         CLOUD_SERVICE_URL: cloudServer.url,
-        AUTH_TOKEN: serviceToken,
+        SKILL_MCP_AUTH_TOKEN: serviceToken,
         DATABASE_PATH: gatewayDb,
         STORAGE_BASE_PATH: gatewayStorage,
         CACHE_FILE_DIR: join(gatewayDir, "cache"),
@@ -88,8 +86,8 @@ describe("Scenario B: Local Gateway + Remote Cloud Storage", () => {
     if (testDir) rmSync(testDir, { recursive: true, force: true });
   });
 
-  it("cloud /api/gateway/health is unauthenticated and returns 200", async () => {
-    const r = await fetch(`${cloudServer!.url}/api/gateway/health`);
+  it("cloud /api/health is unauthenticated and returns 200", async () => {
+    const r = await fetch(`${cloudServer!.url}/api/health`);
     expect(r.status).toBe(200);
     const body = await r.json() as { status: string };
     expect(body.status).toBe("ok");

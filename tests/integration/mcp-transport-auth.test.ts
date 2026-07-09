@@ -135,7 +135,6 @@ describe("MCP transport auth bridge (T-738)", () => {
       transport: "http",
       env: {
         NODE_ENV: "test",
-        DEPLOYMENT_MODE: "standalone",
         DATABASE_PATH: dbPath,
         STORAGE_BASE_PATH: storagePath,
         CACHE_FILE_DIR: join(testDir, "cache-http"),
@@ -148,7 +147,6 @@ describe("MCP transport auth bridge (T-738)", () => {
       transport: "sse",
       env: {
         NODE_ENV: "test",
-        DEPLOYMENT_MODE: "standalone",
         DATABASE_PATH: dbPath,
         STORAGE_BASE_PATH: storagePath,
         CACHE_FILE_DIR: join(testDir, "cache-sse"),

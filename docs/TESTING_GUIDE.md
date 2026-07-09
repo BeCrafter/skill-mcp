@@ -75,9 +75,11 @@ cp src/config/examples/.env.scenario-b-server .env.storage
 # 或手动配置
 export TRANSPORT_TYPE=http
 export TRANSPORT_PORT=3000
-export DEPLOYMENT_MODE=standalone
-export AUTH_TOKEN=my-secret-key
+export SKILL_MCP_AUTH_TOKEN=my-secret-key
 export DATABASE_PATH=./data/storage.db
+
+# 初次启动后创建用户并获取 token（用于客户端认证）：
+# skill-mcp user create --name client-app --role-ids <role-id>
 
 npm start
 ```
@@ -85,8 +87,8 @@ npm start
 验证服务器启动：
 ```bash
 # 另一个终端中
-curl -H "Authorization: Bearer my-secret-key" \
-  http://localhost:3000/api/gateway/health
+# /api/health 不需要认证（探针端点）
+curl http://localhost:3000/api/health
 
 # 应该返回：
 # {"status":"ok","timestamp":"..."}
@@ -97,9 +99,8 @@ curl -H "Authorization: Bearer my-secret-key" \
 ```bash
 # 新终端窗口
 export TRANSPORT_TYPE=stdio
-export DEPLOYMENT_MODE=gateway
 export CLOUD_SERVICE_URL=http://localhost:3000
-export AUTH_TOKEN=my-secret-key
+export SKILL_MCP_AUTH_TOKEN=my-secret-key
 
 npm start
 ```
@@ -161,8 +162,6 @@ curl -H "Authorization: Bearer my-secret-key" \
 ```bash
 export TRANSPORT_TYPE=http
 export TRANSPORT_PORT=3000
-export DEPLOYMENT_MODE=standalone
-export MCP_ONLY_MODE=false
 
 npm start
 ```
@@ -173,33 +172,31 @@ npm start
 curl http://localhost:3000/api/health
 
 # 检查网关 API
-curl http://localhost:3000/api/gateway/health
+curl http://localhost:3000/api/health
 
 # 两个都应该返回 200
 ```
 
 ### C2：分离部署
 
-#### 启动存储服务（Terminal 1）
+#### 启动 API-Only 后端（Terminal 1）
 
 ```bash
 export TRANSPORT_TYPE=http
 export TRANSPORT_PORT=3000
-export DEPLOYMENT_MODE=standalone
-export MCP_ONLY_MODE=true
-export AUTH_TOKEN=c2-key
+export API_ONLY_MODE=true
+export SKILL_MCP_AUTH_TOKEN=c2-key
 
 npm start
 ```
 
-#### 启动 MCP 服务（Terminal 2）
+#### 启动 MCP-Only 代理（Terminal 2）
 
 ```bash
 export TRANSPORT_TYPE=http
 export TRANSPORT_PORT=4000
-export DEPLOYMENT_MODE=gateway
 export CLOUD_SERVICE_URL=http://localhost:3000
-export AUTH_TOKEN=c2-key
+export SKILL_MCP_AUTH_TOKEN=c2-key
 export MCP_ONLY_MODE=true
 
 npm start
@@ -209,7 +206,7 @@ npm start
 ```bash
 # 存储服务只提供 /api/gateway/*
 curl -H "Authorization: Bearer c2-key" \
-  http://localhost:3000/api/gateway/health  # 200
+  http://localhost:3000/api/health  # 200
 
 curl http://localhost:3000/api/health  # 401 or 404
 
@@ -260,17 +257,17 @@ lsof -i :3000
 # 查看 Terminal 中的输出
 
 # 4. 手动测试连接
-curl http://localhost:3000/api/gateway/health
+curl http://localhost:3000/api/health
 ```
 
 ### 问题：认证失败
 
 ```bash
-# 1. 验证 AUTH_TOKEN 配置
-echo $AUTH_TOKEN
+# 1. 验证 SKILL_MCP_AUTH_TOKEN 配置
+echo $SKILL_MCP_AUTH_TOKEN
 
 # 2. 验证认证请求格式
-curl -v http://localhost:3000/api/gateway/health \
+curl -v http://localhost:3000/api/health \
   -H "Authorization: Bearer your-token"
 
 # 3. 查看服务器日志中的认证错误

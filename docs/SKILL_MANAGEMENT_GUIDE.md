@@ -33,7 +33,7 @@ node dist/index.js auth login
 
 ```bash
 # 1. 启动 HTTP 服务器
-node dist/index.js serve --transport http --port 3000 --host 0.0.0.0 --mode standalone --auth-token my-secret
+node dist/index.js serve --transport http --port 3000 --auth-token my-secret
 
 # 2. 登录获取 JWT token
 node dist/index.js auth login --server-url http://localhost:3000
@@ -45,11 +45,11 @@ node dist/index.js list --server-url http://localhost:3000
 ### 4. 认证方式说明
 
 | 模式 | 认证方式 | 环境变量 |
-------|---------|---------|
+|------|---------|---------|
 | 本地 CLI | `~/.skill-mcp/credentials.json` | - |
 | stdio MCP | `--auth-token` 或 `SKILL_MCP_AUTH_TOKEN` | `SKILL_MCP_AUTH_TOKEN` |
-| HTTP/SSE MCP | `Authorization: Bearer <JWT>` | - |
-| Gateway | `--server-url` + JWT | `AUTH_TOKEN` |
+| HTTP/SSE MCP | `Authorization: Bearer <token>` | - |
+| Proxy | `--remote-url` + `--auth-token` / `SKILL_MCP_AUTH_TOKEN` | `SKILL_MCP_AUTH_TOKEN` |
 
 
 ### 5. MCP Inspector 连接
@@ -561,9 +561,10 @@ node dist/index.js list --server-url http://localhost:3000
 |--------|------|--------|
 | `DATABASE_PATH` | 数据库文件路径 | `~/.skill-mcp/skill-mcp.db` |
 | `STORAGE_BASE_PATH` | 技能存储路径 | `~/.skill-mcp/data/skills` |
-| `AUTH_TOKEN` | 认证令牌 | - |
+| `SKILL_MCP_AUTH_TOKEN` | 认证令牌（stdio + proxy 出站） | - |
 | `SKILL_MCP_SERVER_URL` | 远程服务器 URL | - |
-| `DEPLOYMENT_MODE` | 部署模式 | `standalone` |
+| `MCP_ONLY_MODE` | 仅 MCP 模式 | `false` |
+| `API_ONLY_MODE` | 仅 API 模式 | `false` |
 | `TRANSPORT_TYPE` | 传输类型 | `stdio` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 

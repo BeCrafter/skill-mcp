@@ -134,8 +134,8 @@ export async function spawnHttpServer(opts: SpawnHttpOpts): Promise<SpawnedServe
   const { port, env, transport = "http", readyTimeoutMs = 60_000 } = opts;
   const proc = spawn(
     "node",
-    [DIST_ENTRY, "serve", "--transport", transport, "--port", String(port), "--host", "127.0.0.1"],
-    { cwd: REPO_ROOT, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] },
+    [DIST_ENTRY, "serve", "--transport", transport, "--port", String(port)],
+    { cwd: REPO_ROOT, env: { ...process.env, LOG_LEVEL: "info", ...env }, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   let buffer = "";
@@ -145,7 +145,7 @@ export async function spawnHttpServer(opts: SpawnHttpOpts): Promise<SpawnedServe
     const s = chunk.toString();
     buffer += s;
     collected.push(s);
-    if (debug) process.stderr.write(`[${env.DEPLOYMENT_MODE ?? "?"}:${port}] ${s}`);
+    if (debug) process.stderr.write(`[${port}] ${s}`);
   };
   proc.stdout?.on("data", onData);
   proc.stderr?.on("data", onData);

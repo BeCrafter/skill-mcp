@@ -1,4 +1,3 @@
-version: '3.8'
 
 # Skill MCP Server - Docker Compose配置
 # 支持多种部署场景：standalone (C1) / distributed (C2)
@@ -30,6 +29,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    command: ["node", "dist/index.js", "serve"]
     profiles: ["c1"]
     ports:
       - "${PORT:-3000}:3000"
@@ -37,8 +37,6 @@ services:
       <<: *common-env
       TRANSPORT_TYPE: http
       TRANSPORT_PORT: 3000
-      DEPLOYMENT_MODE: standalone
-      MCP_ONLY_MODE: "false"
       STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
       STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
     volumes:
@@ -56,14 +54,14 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    command: ["node", "dist/index.js", "serve"]
     profiles: ["c2"]
     restart: always
     environment:
       <<: *common-env
       TRANSPORT_TYPE: http
       TRANSPORT_PORT: 3000
-      DEPLOYMENT_MODE: standalone
-      MCP_ONLY_MODE: "true"
+      API_ONLY_MODE: "true"
       STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
       STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
     volumes:
@@ -72,7 +70,7 @@ services:
       - internal
     healthcheck:
       <<: *healthcheck
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${STORAGE_SVC_TOKEN:?设置 STORAGE_SVC_TOKEN}", "http://localhost:3000/api/gateway/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
     deploy:
       resources:
         limits:
@@ -87,15 +85,17 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    command: ["node", "dist/index.js", "serve"]
     profiles: ["c2"]
     restart: always
+    ports:
+      - "${MCP_PORT:-4000}:4000"
     environment:
       <<: *common-env
       TRANSPORT_TYPE: http
       TRANSPORT_PORT: 4000
-      DEPLOYMENT_MODE: gateway
       CLOUD_SERVICE_URL: http://storage:3000
-      AUTH_TOKEN: ${STORAGE_SVC_TOKEN:?设置 STORAGE_SVC_TOKEN}
+      SKILL_MCP_AUTH_TOKEN: ${STORAGE_SVC_TOKEN:-changeme}
       MCP_ONLY_MODE: "true"
     volumes:
       - mcp-cache:/data
@@ -128,7 +128,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp"  # HTTP/3
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -136,7 +135,8 @@ services:
     networks:
       - external
     depends_on:
-      - mcp
+      mcp:
+        condition: service_healthy
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/health"]

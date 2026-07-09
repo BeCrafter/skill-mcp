@@ -37,20 +37,26 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
     setupWebhookSubscribers(deps.eventBus, deps.webhookService);
   }
 
-  const isCloudServiceOnlyMode = appConfig.deployment.mode === "cloud";
+  const { mcpOnly: configMcpOnly, apiOnly: configApiOnly } = appConfig.deployment;
+  const mcpOnly = deps.mcpOnly ?? configMcpOnly;
+  const apiOnly = deps.apiOnly ?? configApiOnly;
+  const isProxy = !!appConfig.gateway?.cloudServiceUrl;
+
   const contextBuilder = deps.userRepo && deps.userRoleRepo
     ? createContextBuilder(deps.userRepo, deps.userRoleRepo, deps.jwtSecret, deps.jwtIssuer)
     : undefined;
 
   let mcpHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | null = null;
-  if (isCloudServiceOnlyMode) {
-    logger.info("Cloud Service only mode: MCP transport disabled");
-  } else if (transportConfig.type === "http") {
-    mcpHandler = await createHttpMcpHandler(deps, contextBuilder);
-    logger.info("Streamable HTTP transport configured at /mcp");
-  } else if (transportConfig.type === "sse") {
-    mcpHandler = await createSseMcpHandler(deps, contextBuilder);
-    logger.info("SSE transport configured at /mcp/sse");
+  if (!apiOnly) {
+    if (transportConfig.type === "http") {
+      mcpHandler = await createHttpMcpHandler(deps, contextBuilder);
+      logger.info("Streamable HTTP transport configured at /mcp");
+    } else if (transportConfig.type === "sse") {
+      mcpHandler = await createSseMcpHandler(deps, contextBuilder);
+      logger.info("SSE transport configured at /mcp/sse");
+    }
+  } else {
+    logger.info("API-only mode: MCP transport disabled");
   }
 
   // Auth routes (no admin auth required)
@@ -58,36 +64,45 @@ export async function createApp(deps: AppDependencies, transportConfig: Transpor
   authRouter.use(errorMap("Auth operation failed"));
   registerAuthRoutes(authRouter, deps);
 
-  const adminRouter = new Router();
-  adminRouter.use(errorMap("Admin operation failed"));
-  if (appConfig.rateLimit.enabled) {
-    adminRouter.use(createRateLimit({
-      capacity: appConfig.rateLimit.adminCapacity,
-      refillPerSec: appConfig.rateLimit.adminRefillPerSec,
-      scope: "admin",
-    }));
+  // Admin router: disabled in mcpOnly mode or proxy mode (admin ops belong on the data source)
+  let adminRouter: Router | undefined;
+  if (!mcpOnly && !isProxy) {
+    adminRouter = new Router();
+    adminRouter.use(errorMap("Admin operation failed"));
+    if (appConfig.rateLimit.enabled) {
+      adminRouter.use(createRateLimit({
+        capacity: appConfig.rateLimit.adminCapacity,
+        refillPerSec: appConfig.rateLimit.adminRefillPerSec,
+        scope: "admin",
+      }));
+    }
+    registerAdminSkillRoutes(adminRouter, deps);
+    registerAdminUserRoutes(adminRouter, deps);
+    registerAdminRoleRoutes(adminRouter, deps);
+    registerAdminImportJobRoutes(adminRouter, deps);
+    registerAdminUsageRoutes(adminRouter, deps);
+    registerAdminWebhookRoutes(adminRouter, deps);
   }
-  registerAdminSkillRoutes(adminRouter, deps);
-  registerAdminUserRoutes(adminRouter, deps);
-  registerAdminRoleRoutes(adminRouter, deps);
-  registerAdminImportJobRoutes(adminRouter, deps);
-  registerAdminUsageRoutes(adminRouter, deps);
-  registerAdminWebhookRoutes(adminRouter, deps);
 
-  const gatewayRouter = new Router();
-  gatewayRouter.use(errorMap("Gateway operation failed"));
-  if (appConfig.rateLimit.enabled) {
-    gatewayRouter.use(createRateLimit({
-      capacity: appConfig.rateLimit.gatewayCapacity,
-      refillPerSec: appConfig.rateLimit.gatewayRefillPerSec,
-      scope: "gateway",
-    }));
+  // Gateway router: disabled in mcpOnly mode
+  let gatewayRouter: Router | undefined;
+  if (!mcpOnly) {
+    gatewayRouter = new Router();
+    gatewayRouter.use(errorMap("Gateway operation failed"));
+    if (appConfig.rateLimit.enabled) {
+      gatewayRouter.use(createRateLimit({
+        capacity: appConfig.rateLimit.gatewayCapacity,
+        refillPerSec: appConfig.rateLimit.gatewayRefillPerSec,
+        scope: "gateway",
+      }));
+    }
+    registerGatewaySkillRoutes(gatewayRouter, deps);
   }
-  registerGatewaySkillRoutes(gatewayRouter, deps);
 
   httpServer.on("request", createRequestHandler({
-    appConfig, mcpHandler, isCloudServiceOnlyMode,
-    adminRouter, gatewayRouter,
+    appConfig, mcpHandler, mcpOnly,
+    adminRouter,
+    gatewayRouter,
     userRepo: deps.userRepo, userRoleRepo: deps.userRoleRepo,
     skillRepo: deps.skillRepo,
     usageMeter: deps.usageMeter,

@@ -128,7 +128,7 @@ For multi-step tasks, state a brief plan with verification steps. Strong success
    - 新增 / 删除 / 重命名 `src/` 一级目录或公共接口
    - 模块拆分、分层调整、依赖方向变化
    - 数据模型（drizzle schema、迁移）变化
-   - 部署形态、模式开关（`DEPLOYMENT_MODE` / `MCP_ONLY_MODE` 等）语义变化
+   - 部署形态、模式开关（`MCP_ONLY_MODE` / `API_ONLY_MODE` / `CLOUD_SERVICE_URL` 等）语义变化
    - 横切关注点变化：认证 / 缓存键约定 / 事件类型 / 权限规则 / 配置 schema
    - 新增运行时 npm 依赖
 3. **修复 `docs/ARCHITECTURE.md` 第 9 节"已知问题清单"中的任何条目时**，必须在同一 PR 中将该条目从清单移除或标注为 `已修复 (commit <sha>)`。完成第 10 节路线图中的某项时同样要更新。
@@ -219,7 +219,7 @@ CLI / MCP Client → SkillService → ISkillProvider → IStorageProvider → fi
 
 **SkillService** (`src/services/skill.service.ts`) is the core business logic layer. It delegates to `ISkillProvider` (which abstracts local vs remote skill access), applies `IPermissionFilter`, runs security scans via `scanForInjection`, and wraps cache lookups.
 
-**ISkillProvider** (`src/provider/interface.ts`) has two implementations: `LocalProvider` (reads from local storage) and `RemoteProvider` (proxies to a gateway/cloud service in gateway deployment mode).
+**ISkillProvider** (`src/provider/interface.ts`) has two implementations: `LocalProvider` (reads from local storage) and `RemoteProvider` (proxies to a remote service when `CLOUD_SERVICE_URL` or `--remote-url` is configured).
 
 ### Key patterns
 
@@ -245,7 +245,7 @@ This project implements **single binary, dual-mode deployment** rather than sepa
 
 **Why this design?**
 - **Document Design**: tech-dev-program.md recommends separate Gateway and Cloud Service
-- **Our Implementation**: Single binary with config-driven mode switching
+- **Our Implementation**: Single binary with config-driven feature toggles
 - **Rationale**:
   1. Simplified development and testing (no IPC complexity)
   2. Reduced deployment overhead (single Docker image)
@@ -254,36 +254,40 @@ This project implements **single binary, dual-mode deployment** rather than sepa
 
 **How it works**:
 ```bash
-# Standalone: All features in one process
-DEPLOYMENT_MODE=standalone npm start
+# Full mode (default): MCP + Admin + Gateway APIs
+skill-mcp serve --transport http --port 3000
 
-# Gateway: Uses RemoteProvider to call cloud service (local or remote)
-DEPLOYMENT_MODE=gateway CLOUD_SERVICE_URL=http://... npm start
+# MCP-only: Only MCP + health, no Admin or Gateway APIs
+skill-mcp serve --transport http --port 3000 --mcp-only
 
-# Cloud Service Only: Pure data service (no MCP), HTTP only
-DEPLOYMENT_MODE=cloud npm start --transport http
+# API-only: Only REST API + health, no MCP endpoint
+skill-mcp serve --transport http --port 3000 --api-only
 
-# MCP-only: Disables admin API (for security in production)
-MCP_ONLY_MODE=true npm start
+# Proxy mode: Auto-detected when --remote-url or CLOUD_SERVICE_URL is set
+skill-mcp serve --transport http --port 3000 --remote-url http://backend:3001
+CLOUD_SERVICE_URL=http://backend:3001 skill-mcp serve --transport http --port 3000
 ```
 
-**Four Deployment Modes**:
+**Mode Flags** (`--mcp-only` / `--api-only`):
 
-| Mode | Purpose | Transport | API Routes | MCP Available | Use Case |
-|------|---------|-----------|-----------|---|----------|
-| **standalone** | All-in-one | stdio/http | Admin + Gateway | ✅ | Local dev, small deployments |
-| **gateway** | Router layer | stdio/http | Gateway only | ✅ | Proxies to remote cloud service |
-| **cloud** | Data service | http only | Admin + Gateway | ❌ | Backend in distributed setup |
-| **MCP-only** | Client-facing | stdio/http | None | ✅ | Production MCP endpoint |
+| Flag | MCP | Admin API | Gateway API | Health | Use Case |
+|------|-----|-----------|-------------|--------|----------|
+| *(none)* | ✅ | ✅ | ✅ | ✅ | Full-featured (local dev, small deploys) |
+| `--mcp-only` | ✅ | ❌ | ❌ | ✅ | Client-facing MCP endpoint (production) |
+| `--api-only` | ❌ | ✅ | ✅ | ✅ | Backend data service |
+
+- `--mcp-only` and `--api-only` are **mutually exclusive** (server exits with error if both are set).
+- Both can also be set via env vars: `MCP_ONLY_MODE=true` / `API_ONLY_MODE=true`.
+- Proxy mode (triggered by `--remote-url` or `CLOUD_SERVICE_URL` env var) additionally **suppresses Admin API** on the proxy process, since management happens on the backend.
 
 **Three Scenarios at a Glance**:
 
-| Scenario | Mode | Transport | Best For | Config |
-|----------|------|-----------|----------|--------|
-| **A** | standalone | stdio | Local development | `.env.scenario-a` |
-| **B** | gateway | stdio | Hybrid dev+remote | `.env.scenario-b-*` |
-| **C1** | standalone | http | Unified HTTP server | `.env.scenario-c1` |
-| **C2** | gateway | http | Distributed (production) | `.env.scenario-c2-*` |
+| Scenario | Flags | Transport | Best For | Config |
+|----------|-------|-----------|----------|--------|
+| **A** | (none) | stdio | Local development | `.env.scenario-a` |
+| **B** | proxy (auto) | stdio → remote HTTP | Hybrid dev+remote | `.env.scenario-b-*` |
+| **C1** | (none) | http | Unified HTTP server | `.env.scenario-c1` |
+| **C2** | proxy + mcp-only / api-only | http | Distributed (production) | `.env.scenario-c2-*` |
 
 **API Route Structure**:
 - **Admin APIs**: `/api/admin/*` (internal management, e.g. `/api/admin/skills`, `/api/admin/stats`)
@@ -297,66 +301,63 @@ MCP_ONLY_MODE=true npm start
 
 ### When to Choose Each Mode
 
-**Standalone Mode**:
+**Full Mode (default — no flags)**:
 - Use for: Local development, small independent deployments, fully self-contained systems
-- Includes: MCP tools + Admin API + data storage
-- Limitation: Single-process bottleneck at scale
+- Includes: MCP tools + Admin API + Gateway API + data storage
+- Limitation: Single-process bottleneck at scale, larger attack surface
 - Example: Developer on laptop, or single small server
 
-**Gateway Mode**:
-- Use for: Multi-process communication, remote storage backends, distributed deployments
-- Proxies to: Cloud Service or another remote instance
-- Benefit: Separates routing layer from data layer
-- Example: Client SDK → Gateway → Separate cloud service in different datacenter
+**MCP-Only (`--mcp-only`)**:
+- Use for: Production AI assistant integration, minimal attack surface
+- Disables: Admin API + Gateway API (no management or REST endpoints)
+- Keeps: MCP protocol endpoint + health check
+- Best for: Secure remote endpoint, read-only client access
+- Example: Claude plugin or remote MCP endpoint
 
-**Cloud Service Only** (pure data service):
+**API-Only (`--api-only`)**:
 - Use for: Backend-only deployments, no MCP exposure, pure HTTP API
-- Disables: MCP tools (no protocol buffer overhead)
+- Disables: MCP protocol endpoint (returns 403)
+- Keeps: Admin API + Gateway API + health check
 - Best for: Storage backend in distributed architecture
 - Example: Storage microservice behind internal load balancer
 
-**MCP-Only** (client-facing):
-- Use for: Production AI assistant integration, minimal attack surface
-- Disables: Admin API (no management endpoints)
-- Best for: Secure remote endpoint, read-only client access
-- Example: Claude plugin or remote MCP endpoint
+**Proxy Mode (auto-detected via `--remote-url` or `CLOUD_SERVICE_URL`)**:
+- Use for: Multi-process communication, remote storage backends, distributed deployments
+- Proxies to: A backend (API-only or full-mode) instance
+- Additionally suppresses: Admin API (management happens on the backend)
+- Benefit: Separates routing layer from data layer
+- Example: Client SDK → Proxy Gateway → Separate backend in different datacenter
 
 ### Environment Variables Reference
 
 **Application Configuration**:
 - `NODE_ENV` — `"development"` | `"production"` (default: `"development"`)
-- `DEPLOYMENT_MODE` — `"standalone"` | `"gateway"` | `"cloud"` (default: `"standalone"`)
-- `MCP_ONLY_MODE` — `"true"` | `"false"` (disables `/api/admin/*` routes, default: `"false"`)
+- `MCP_ONLY_MODE` — `"true"` | `"false"` (disables Admin + Gateway APIs, MCP only; default: `"false"`)
+- `API_ONLY_MODE` — `"true"` | `"false"` (disables MCP endpoint, REST only; default: `"false"`)
 - `LOG_LEVEL` — `"trace"` | `"debug"` | `"info"` | `"warn"` | `"error"` (default: `"info"`)
 
 **Storage Configuration**:
 - `STORAGE_TYPE` — `"local-fs"` | `"aliyun-oss"` (default: `"local-fs"`)
-- `STORAGE_BASE_PATH` — Filesystem path to skills directory (default: `"./data/skills"`)
-- `ALIYUN_ACCESS_KEY_ID` — OSS access key (required if `STORAGE_TYPE=aliyun-oss`)
-- `ALIYUN_ACCESS_KEY_SECRET` — OSS secret key (required if `STORAGE_TYPE=aliyun-oss`)
-- `ALIYUN_BUCKET` — OSS bucket name (default: `"skill-mcp"`)
-- `ALIYUN_REGION` — OSS region (default: `"oss-cn-hangzhou"`)
+- `STORAGE_BASE_PATH` — Filesystem path to skills directory (default: `"~/.skill-mcp/data/skills"`)
 
 **Database Configuration**:
-- `DATABASE_PATH` — SQLite database file path (default: `"./data/skill-mcp.db"`)
-- `DATABASE_TIMEOUT` — Query timeout in milliseconds (default: `"5000"`)
+- `DATABASE_PATH` — SQLite database file path (default: `"~/.skill-mcp/skill-mcp.db"`)
+- `DATABASE_URL` — Alternative to `DATABASE_PATH`; takes precedence when set (supports `sqlite://...` / `postgres://...`)
 
 **Transport Configuration**:
 - `TRANSPORT_TYPE` — `"stdio"` | `"sse"` | `"http"` (default: `"stdio"`)
 - `TRANSPORT_PORT` — Port for HTTP/SSE transport (default: `"3000"`)
-- `TRANSPORT_HOST` — Host for HTTP/SSE transport (default: `"0.0.0.0"`)
+  Host is always `0.0.0.0` (not configurable).
 
-**Gateway Configuration** (only when `DEPLOYMENT_MODE=gateway`):
-- `CLOUD_SERVICE_URL` — Base URL of remote cloud service (required, e.g., `"http://localhost:3001"`)
-- `AUTH_TOKEN` — Static bearer token for cloud service calls (optional)
-- `AUTH_TOKEN_REFRESH_URL` — URL to refresh token (optional, used if token expires)
+**Gateway Configuration** (proxy mode, auto-detected when `CLOUD_SERVICE_URL` is set):
+- `CLOUD_SERVICE_URL` — Base URL of remote service (e.g., `"http://localhost:3001"`). When set, the server automatically uses RemoteSkillProvider.
+- `SKILL_MCP_AUTH_TOKEN` — Bearer token for authenticating outbound proxy calls to the remote service. In stdio mode, this same token also serves as the inbound MCP auth credential. In HTTP/SSE mode, inbound auth comes from per-request `Authorization` headers.
 
 **Cache Configuration**:
 - `CACHE_MEMORY_ENABLED` — `"true"` | `"false"` (default: `"true"`)
-- `CACHE_MEMORY_MAX_SIZE` — Max entries in memory cache (default: `"1000"`)
+- `CACHE_MEMORY_MAX_SIZE` — Max entries in memory cache (default: `"500"`)
 - `CACHE_FILE_ENABLED` — `"true"` | `"false"` (default: `"true"`)
-- `CACHE_FILE_DIR` — Directory for file-based cache (default: `"./data/cache"`)
-- `CACHE_L2_TTL_MULTIPLIER` — TTL multiplier for L2 cache (default: `"2"`)
+- `CACHE_FILE_DIR` — Directory for file-based cache (default: `"~/.skill-mcp/cache"`)
 
 **Security Configuration**:
 - `SECURITY_INJECTION_SCAN` — `"true"` | `"false"` (enable prompt injection detection, default: `"true"`)
@@ -364,14 +365,14 @@ MCP_ONLY_MODE=true npm start
 
 **Access Control (RBAC)**:
 - API Key authentication has been removed. All HTTP/SSE callers authenticate with per-user bearer tokens issued by `skill-mcp user create`.
-- `/api/gateway/*` is gated by `enforceGatewayAuth` middleware (`src/http/middleware/gateway-auth.ts`). Missing or invalid `Authorization: Bearer <token>` returns `401` *before* the handler runs. Only `GET /api/gateway/health` is exempt for LB / container liveness probes.
+- `/api/gateway/*` is gated by `enforceGatewayAuth` middleware (`src/http/middleware/gateway-auth.ts`). Missing or invalid `Authorization: Bearer <token>` returns `401` *before* the handler runs. Health checks use `/api/health` (unauthenticated, for LB / container liveness probes).
 - Roles carry tag lists (`skill-mcp role create --tags ...`); user→role joins produce the request-context tag set.
 - `TagPermissionFilter` then enforces visibility *after* the caller is authenticated:
   - `visibility="public"` — visible to any authenticated caller (anonymous still 401's at the gateway).
   - `visibility="internal"` — visible to any authenticated user.
   - `visibility="private"` (default) — empty `tags` means visible to any authenticated user; non-empty `tags` requires intersection with the caller's role tags.
 - Skills default to `visibility="private"` at all three layers (Drizzle schema, SQL migration, repository fallback). Mark a skill `public` (Admin API or DB) to expose it broadly within the platform.
-- Service accounts: reuse the user table; convention is to name them `svc-<role>` so admins can spot machine identities at a glance. Gateway → Cloud Service internal calls should use a dedicated `svc-gateway` user whose token is configured in the gateway's `AUTH_TOKEN` env var.
+- Service accounts: reuse the user table; convention is to name them `svc-<role>` so admins can spot machine identities at a glance. Gateway → Cloud Service internal calls should use a dedicated `svc-gateway` user whose token is configured via `SKILL_MCP_AUTH_TOKEN` env var.
 - stdio transport bypasses the HTTP middleware; it instead resolves a token at process startup from `--auth-token` / `SKILL_MCP_AUTH_TOKEN` and injects it via `withFallbackToken`.
 
 ### Scenario-Specific Configurations
@@ -380,7 +381,6 @@ MCP_ONLY_MODE=true npm start
 
 ```bash
 # .env.scenario-a
-DEPLOYMENT_MODE=standalone
 TRANSPORT_TYPE=stdio
 STORAGE_TYPE=local-fs
 STORAGE_BASE_PATH=./data/skills
@@ -393,14 +393,13 @@ CACHE_FILE_ENABLED=true
 **Scenario B: Hybrid Dev + Remote (localhost stdio → remote HTTP)**
 
 ```bash
-# .env.scenario-b-local (local gateway redirects to remote)
-DEPLOYMENT_MODE=gateway
+# .env.scenario-b-local (local proxy redirects to remote)
 TRANSPORT_TYPE=stdio
 CLOUD_SERVICE_URL=http://cloud-service:3001
+SKILL_MCP_AUTH_TOKEN=your-token
 LOG_LEVEL=debug
 
 # .env.scenario-b-cloud (remote service)
-DEPLOYMENT_MODE=standalone
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=3001
 STORAGE_TYPE=local-fs
@@ -412,39 +411,35 @@ DATABASE_PATH=./data/skill-mcp.db
 
 ```bash
 # .env.scenario-c1
-DEPLOYMENT_MODE=standalone
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=3000
-TRANSPORT_HOST=0.0.0.0
 STORAGE_TYPE=local-fs
 STORAGE_BASE_PATH=./data/skills
 DATABASE_PATH=./data/skill-mcp.db
-MCP_ONLY_MODE=false
 ```
 
 **Scenario C2: Distributed Production (MCP → Gateway → Cloud Service)**
 
 ```bash
 # .env.scenario-c2-mcp (client-facing MCP endpoint)
-DEPLOYMENT_MODE=gateway
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=4000
-TRANSPORT_HOST=0.0.0.0
 CLOUD_SERVICE_URL=http://gateway-lb:3001
+SKILL_MCP_AUTH_TOKEN=<storage-svc-token>
 MCP_ONLY_MODE=true
 LOG_LEVEL=info
 
 # .env.scenario-c2-gateway (routing layer)
-DEPLOYMENT_MODE=gateway
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=3001
 CLOUD_SERVICE_URL=http://cloud-service:3002
+SKILL_MCP_AUTH_TOKEN=<storage-svc-token>
 LOG_LEVEL=info
 
 # .env.scenario-c2-cloud (data service backend)
-DEPLOYMENT_MODE=cloud
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=3002
+API_ONLY_MODE=true
 STORAGE_TYPE=aliyun-oss
 ALIYUN_ACCESS_KEY_ID=<your-key>
 ALIYUN_ACCESS_KEY_SECRET=<your-secret>
@@ -468,14 +463,10 @@ A skill package directory must contain `manifest.json` (with `name`, optional `v
 
 ## Git Hooks
 
-The project has intelligent pre-commit hooks configured to ensure documentation stays in sync:
+The project has pre-commit hooks configured for code quality:
 
-- **`.git/hooks/pre-commit`** — Automatically runs `npm run docs:sync --check-new-only` when committing
-- **Smart detection**: Only prompts for docs update when you add NEW files:
-  - New CLI command: `src/cli/commands/*-cmd.ts`
-  - New MCP tool: `src/mcp/tools/*.ts`
-  - Config changes: `src/config/schema.ts`
-- Refactors and bug fixes won't trigger the hook (no docs needed)
-- Run `npm run docs:sync` for full documentation sync check at any time
+- **`.git/hooks/pre-commit`** — Runs ESLint + full test suite before every commit
+- **`.git/hooks/commit-msg`** — Strips `Co-Authored-By:` lines from commit messages
+- **Documentation sync** is manual — run `npm run docs:sync` to check if README.md is in sync with code. The script checks CLI commands, MCP tools, and environment variables against current code.
 
 ---

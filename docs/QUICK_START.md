@@ -58,7 +58,7 @@ npm start
 
 # 终端 2：启动本地 MCP 客户端
 cp src/config/examples/.env.scenario-b-client .env.local
-CLOUD_SERVICE_URL=http://localhost:3000 AUTH_TOKEN=test-key-1 npm start
+CLOUD_SERVICE_URL=http://localhost:3000 SKILL_MCP_AUTH_TOKEN=test-key-1 npm start
 ```
 
 👉 详见 [Scenario B 完整指南](./SCENARIOS/SCENARIO_B.md)
@@ -97,21 +97,22 @@ docker compose --profile c2 up -d
 | **HTTP** | 网络通信 | 生产环境（C1、C2） |
 | **SSE** | 流式推送 | 浏览器客户端 |
 
-### Deployment 层（数据源）
+### 模式开关（API 暴露）
 
-| 模式 | 数据位置 | 用途 |
-|------|---------|------|
-| **standalone** | 本地存储 | 独立部署 |
-| **gateway** | 远程服务 | 连接远程存储 |
-| **cloud** | 纯数据服务 | 后端部署（无 MCP） |
+| 模式 | 效果 | 用途 |
+|------|------|------|
+| **默认（全功能）** | MCP + Admin + Gateway | 独立部署 |
+| **`--mcp-only`** | 仅 MCP + health | 客户端面向 MCP 端点 |
+| **`--api-only`** | 仅 REST + health | 后端数据服务（无 MCP） |
+| **代理（自动检测）** | `CLOUD_SERVICE_URL` 自动启用 | 连接到远程存储 |
 
 ### 配置组合
 
 ```
-场景 A: stdio + standalone (本地)
-场景 B: stdio + gateway (混合)
-场景 C: HTTP + standalone (单体)
-场景 C: HTTP + gateway (分离)
+场景 A: stdio + 全功能 (本地)
+场景 B: stdio + 代理 (混合，本地路由 + 远程存储)
+场景 C: HTTP + 全功能 (单体)
+场景 C: HTTP + MCP-only → 代理 → API-only (分布式分离)
 ```
 
 ## 常用命令
@@ -138,10 +139,12 @@ npm run import -- <path>
 ## 环境变量快速参考
 
 ```bash
-# 最重要的三个配置
-TRANSPORT_TYPE=stdio|http       # 通信方式
-DEPLOYMENT_MODE=standalone|gateway|cloud  # 数据源
-CLOUD_SERVICE_URL=...          # 远程服务（gateway 模式）
+# 最重要的配置
+TRANSPORT_TYPE=stdio|http              # 通信方式
+MCP_ONLY_MODE=true|false               # 仅 MCP（禁用 Admin/Gateway API）
+API_ONLY_MODE=true|false               # 仅 REST（禁用 MCP）
+CLOUD_SERVICE_URL=...                  # 远程服务（自动启用代理模式）
+SKILL_MCP_AUTH_TOKEN=...               # 认证 token
 ```
 
 完整配置见 [配置参考](./ARCHITECTURE.md#71-配置srcconfig)
@@ -178,7 +181,7 @@ npm start  # 会自动创建新数据库
 
 ### Q: 能否在远程服务器上运行？
 
-可以。场景 B 和 C 都支持。关键是配置 `CLOUD_SERVICE_URL` 和 `AUTH_TOKEN`。
+可以。场景 B 和 C 都支持。关键是配置 `CLOUD_SERVICE_URL` 和 `SKILL_MCP_AUTH_TOKEN`。
 
 ### Q: 如何管理用户权限？
 

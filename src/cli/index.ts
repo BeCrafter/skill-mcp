@@ -247,15 +247,17 @@ export async function createCli(): Promise<Command> {
     .description("Start MCP server")
     .option("--transport <type>", "Transport type: stdio|sse|http", config.transport.type)
     .option("--port <number>", "HTTP port (for sse/http)", String(config.transport.port))
-    .option("--host <host>", "HTTP host", config.transport.host)
-    .option("--mode <mode>", "Deployment mode: standalone|gateway|cloud", config.deployment.mode)
-    .option("--auth-token <token>", "Stdio mode: bearer token used for permission isolation (overrides SKILL_MCP_AUTH_TOKEN)")
+    .option("--mcp-only", "Expose MCP endpoints only")
+    .option("--api-only", "Expose REST API only")
+    .option("--remote-url <url>", "Remote service URL for skill proxy")
+    .option("--auth-token <token>", "Stdio mode: bearer token (overrides SKILL_MCP_AUTH_TOKEN); also used for remote proxy auth in stdio mode")
     .action(async (opts) => {
       await serveAction({
         transport: opts.transport as "stdio" | "sse" | "http",
         port: parseInt(opts.port, 10),
-        host: opts.host,
-        mode: opts.mode as "standalone" | "gateway" | "cloud",
+        mcpOnly: (opts.mcpOnly as boolean) ?? config.deployment.mcpOnly,
+        apiOnly: (opts.apiOnly as boolean) ?? config.deployment.apiOnly,
+        remoteUrl: opts.remoteUrl as string | undefined,
         authToken: opts.authToken as string | undefined,
       });
     });

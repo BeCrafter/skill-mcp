@@ -9,22 +9,38 @@ docker/
 ├── Dockerfile              # 多阶段构建镜像
 ├── docker-compose.yml      # 统一配置（支持 C1/C2/Gateway）
 ├── Caddyfile              # Caddy 网关配置（自动 HTTPS）
+├── start.sh               # 快速启动脚本
 └── README.md              # 本文档
 ```
-
 ## 快速开始
 
-### 场景 C1：单体部署（开发/测试）
+### 使用启动脚本（推荐）
 
 ```bash
-# 构建并启动
-docker compose --profile c1 up -d --build
+# 场景 C1：单体部署（开发/测试）
+./docker/start.sh c1
 
-# 验证
+# 场景 C2：分布式部署（生产推荐）
+export STORAGE_SVC_TOKEN=<your-token>
+./docker/start.sh c2
+
+# 带 HTTPS 网关（生产部署）
+export DOMAIN=your-domain.com
+export ACME_EMAIL=admin@example.com
+export STORAGE_SVC_TOKEN=<your-token>
+./docker/start.sh gateway
+```
+
+### 手动启动
+
+#### 场景 C1：单体部署
+
+```bash
+docker compose --profile c1 up -d --build
 curl http://localhost:3000/api/health
 ```
 
-### 场景 C2：分布式部署（生产推荐）
+#### 场景 C2：分布式部署
 
 ```bash
 # 1. 创建服务账号并获取 token
@@ -34,18 +50,18 @@ export STORAGE_SVC_TOKEN=$(skill-mcp user create svc-gateway --role <role-id> | 
 docker compose --profile c2 up -d --build
 
 # 3. 验证
-curl http://localhost:3000/api/gateway/health
+curl http://localhost:3000/api/health
 ```
 
-### 带 HTTPS 网关（生产部署）
+#### 带 HTTPS 网关
 
 ```bash
 # 1. 设置环境变量
-export DOMAIN=your-domain.com          # 你的域名
-export ACME_EMAIL=admin@example.com    # Let's Encrypt 通知邮箱
-export STORAGE_SVC_TOKEN=<your-token>  # 服务账号 token
+export DOMAIN=your-domain.com
+export ACME_EMAIL=admin@example.com
+export STORAGE_SVC_TOKEN=<your-token>
 
-# 2. 启动完整服务（自动获取 HTTPS 证书）
+# 2. 启动服务
 docker compose --profile c2 --profile gateway up -d
 
 # 3. 访问
@@ -79,6 +95,7 @@ STORAGE_MEM=4G
 MCP_CPU=1
 MCP_MEM=2G
 MCP_REPLICAS=2               # MCP 实例数
+MCP_PORT=4000                 # MCP 对外端口
 
 # HTTPS 配置
 DOMAIN=your-domain.com
@@ -111,21 +128,24 @@ Caddy 自动处理 HTTPS：
 
 ```Caddyfile
 # 生产环境
-your-domain.com {
-    reverse_proxy mcp:4000
-}
-
-# 本地开发
-localhost {
-    reverse_proxy mcp:4000
+{$DOMAIN:localhost} {
+    handle /mcp* {
+        reverse_proxy mcp:4000
+    }
+    handle /api/gateway/* {
+        reverse_proxy storage:3000 {
+            header_up Authorization {>Authorization}
+        }
+    }
+    respond /health 200
 }
 ```
 
 ### 自定义域名
 
-1. 编辑 `Caddyfile`，将 `{$DOMAIN:localhost}` 改为你的域名
-2. 或设置环境变量：`export DOMAIN=your-domain.com`
-3. 确保域名 DNS 解析到服务器 IP
+1. 设置环境变量：`export DOMAIN=your-domain.com`
+2. 确保域名 DNS 解析到服务器 IP
+3. Caddy 自动从 Let's Encrypt 获取 HTTPS 证书
 
 ## 运维操作
 
