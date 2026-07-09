@@ -12,8 +12,8 @@
 x-common-env: &common-env
   NODE_ENV: ${NODE_ENV:-production}
   LOG_LEVEL: ${LOG_LEVEL:-info}
-  DATABASE_PATH: ${DATABASE_PATH:-/data/skill-mcp.db}
-  CACHE_FILE_DIR: ${CACHE_FILE_DIR:-/data/cache}
+  DATABASE_PATH: ${DATABASE_PATH:-/app/data/skill-mcp.db}
+  CACHE_FILE_DIR: ${CACHE_FILE_DIR:-/app/data/cache}
   SECURITY_INJECTION_SCAN: ${SECURITY_INJECTION_SCAN:-true}
 
 x-healthcheck: &healthcheck
@@ -41,9 +41,9 @@ services:
       TRANSPORT_TYPE: http
       TRANSPORT_PORT: 3000
       STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
-      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
+      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/app/data/skills}
     volumes:
-      - app-data:/data
+      - app-data:/app/data
     networks:
       - default
       - external
@@ -70,9 +70,9 @@ services:
       TRANSPORT_PORT: 3000
       API_ONLY_MODE: "true"
       STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
-      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
+      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/app/data/skills}
     volumes:
-      - backend-data:/data
+      - backend-data:/app/data
     restart: unless-stopped
     healthcheck:
       <<: *healthcheck
@@ -95,9 +95,9 @@ services:
       TRANSPORT_PORT: 3000
       API_ONLY_MODE: "true"
       STORAGE_TYPE: ${STORAGE_TYPE:-local-fs}
-      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/data/skills}
+      STORAGE_BASE_PATH: ${STORAGE_BASE_PATH:-/app/data/skills}
     volumes:
-      - storage-data:/data
+      - storage-data:/app/data
     networks:
       - internal
     healthcheck:
@@ -130,7 +130,7 @@ services:
       SKILL_MCP_AUTH_TOKEN: ${STORAGE_SVC_TOKEN:-changeme}
       MCP_ONLY_MODE: "true"
     volumes:
-      - mcp-cache:/data
+      - mcp-cache:/app/data
     networks:
       - internal
       - external

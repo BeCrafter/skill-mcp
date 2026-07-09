@@ -39,9 +39,10 @@ COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 # Copy production dependencies
 COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
 
-# Create data directories
+# Create data directories and set ownership
 RUN mkdir -p /app/data /app/data/skills /app/data/cache && \
-    chown -R nodejs:nodejs /app/data
+    chown -R nodejs:nodejs /app/data && \
+    chmod -R 777 /app/data
 
 # Switch to non-root user
 USER nodejs
