@@ -4,7 +4,7 @@
 #
 # 使用方法：
 #   C1 单体:         docker compose --profile c1 up -d
-#   C1 + HTTPS:      MCP_BACKEND=app:3000 STORAGE_BACKEND=app:3000 docker compose --profile c1-gateway up -d
+#   C1 + HTTPS:      DOMAIN=your-domain.com docker compose --profile c1-gateway up -d
 #   B 远程后端:      docker compose --profile backend up -d
 #   C2 分布式:       docker compose --profile c2 up -d
 #   C2 + HTTPS 网关: docker compose --profile c2 --profile gateway up -d
@@ -100,6 +100,7 @@ services:
       - storage-data:/app/data
     networks:
       - internal
+      - external
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
@@ -112,7 +113,7 @@ services:
           cpus: '1'
           memory: 2G
 
-  mcp:
+  mcp1:
     image: ${IMAGE:-skill-mcp:latest}
     build:
       context: ..
@@ -121,7 +122,7 @@ services:
     profiles: ["c2"]
     restart: always
     ports:
-      - "${MCP_PORT:-4000}:4000"
+      - "${MCP1_PORT:-4001}:4000"
     environment:
       <<: *common-env
       TRANSPORT_TYPE: http
@@ -130,7 +131,7 @@ services:
       SKILL_MCP_AUTH_TOKEN: ${STORAGE_SVC_TOKEN:-changeme}
       MCP_ONLY_MODE: "true"
     volumes:
-      - mcp-cache:/app/data
+      - mcp1-data:/app/data
     networks:
       - internal
       - external
@@ -141,7 +142,43 @@ services:
       <<: *healthcheck
       test: ["CMD", "curl", "-f", "http://localhost:4000/api/health"]
     deploy:
-      replicas: ${MCP_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '${MCP_CPU:-1}'
+          memory: ${MCP_MEM:-2G}
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  mcp2:
+    image: ${IMAGE:-skill-mcp:latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["node", "dist/index.js", "serve"]
+    profiles: ["c2"]
+    restart: always
+    ports:
+      - "${MCP2_PORT:-4002}:4000"
+    environment:
+      <<: *common-env
+      TRANSPORT_TYPE: http
+      TRANSPORT_PORT: 4000
+      CLOUD_SERVICE_URL: http://storage:3000
+      SKILL_MCP_AUTH_TOKEN: ${STORAGE_SVC_TOKEN:-changeme}
+      MCP_ONLY_MODE: "true"
+    volumes:
+      - mcp2-data:/app/data
+    networks:
+      - internal
+      - external
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/health"]
+    deploy:
       resources:
         limits:
           cpus: '${MCP_CPU:-1}'
@@ -162,8 +199,9 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - MCP_BACKEND=${MCP_BACKEND:-mcp:4000}
-      - STORAGE_BACKEND=${STORAGE_BACKEND:-storage:3000}
+      - DOMAIN=${DOMAIN:-localhost}
+      - MCP_BACKEND=${MCP_BACKEND:-app:3000}
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-app:3000}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -171,7 +209,13 @@ services:
     networks:
       - external
     depends_on:
-      mcp:
+      app:
+        condition: service_healthy
+        required: false
+      storage:
+        condition: service_healthy
+        required: false
+      mcp1:
         condition: service_healthy
         required: false
     healthcheck:
@@ -187,7 +231,8 @@ volumes:
   app-data:
   backend-data:
   storage-data:
-  mcp-cache:
+  mcp1-data:
+  mcp2-data:
   caddy-data:
   caddy-config:
 

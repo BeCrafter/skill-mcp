@@ -11,7 +11,7 @@
 | **C1** | `c1` | 单体 HTTP 开发/测试 | `./docker/start.sh c1` |
 | **C1+HTTPS** | `c1-gateway` | 单体 + HTTPS 网关 | `./docker/start.sh c1-gateway` |
 | **C2** | `c2` | 分布式生产 | `./docker/start.sh c2` |
-| **C2+HTTPS** | `gateway` | 分布式 + HTTPS 网关 | `./docker/start.sh gateway` |
+| **C2+HTTPS** | `gateway` | 分布式 + HTTPS 网关 | `MCP_BACKEND=mcp:4000 STORAGE_BACKEND=storage:3000 ./docker/start.sh gateway` |
 
 ## 目录结构
 
@@ -32,8 +32,8 @@ docker/
 # 场景 C1：单体部署（开发/测试）
 ./docker/start.sh c1
 
-# 场景 C1 + HTTPS 网关
-export DOMAIN=your-domain.com
+# 场景 C1 + HTTPS 网关（本地开发默认 HTTP）
+export DOMAIN=your-domain.com   # 设置域名启用自动 HTTPS
 export ACME_EMAIL=admin@example.com
 ./docker/start.sh c1-gateway
 
@@ -49,6 +49,7 @@ export STORAGE_SVC_TOKEN=<your-token>
 export DOMAIN=your-domain.com
 export ACME_EMAIL=admin@example.com
 export STORAGE_SVC_TOKEN=<your-token>
+export MCP_BACKEND="mcp1:4000 mcp2:4000" STORAGE_BACKEND=storage:3000
 ./docker/start.sh gateway
 ```
 
@@ -64,9 +65,13 @@ curl http://localhost:3000/api/health
 #### 场景 C1 + HTTPS 网关
 
 ```bash
-MCP_BACKEND=app:3000 STORAGE_BACKEND=app:3000 \
-  docker compose --profile c1-gateway up -d --build
-curl -k https://localhost/api/health
+# 本地开发（默认 HTTP，无证书问题）
+docker compose --profile c1-gateway up -d --build
+curl http://localhost/api/health
+
+# 自定义域名（自动 HTTPS）
+DOMAIN=your-domain.com docker compose --profile c1-gateway up -d --build
+curl https://your-domain.com/api/health
 ```
 
 #### 场景 B：远程后端
@@ -88,6 +93,8 @@ docker compose --profile c2 up -d --build
 
 # 3. 验证
 curl http://localhost:3000/api/health
+curl http://localhost:4001/api/health
+curl http://localhost:4002/api/health
 ```
 
 #### 带 HTTPS 网关
@@ -97,9 +104,11 @@ curl http://localhost:3000/api/health
 export DOMAIN=your-domain.com
 export ACME_EMAIL=admin@example.com
 export STORAGE_SVC_TOKEN=<your-token>
+export MCP_BACKEND="mcp1:4000 mcp2:4000" STORAGE_BACKEND=storage:3000
 
 # 2. 启动服务
-docker compose --profile c2 --profile gateway up -d
+MCP_BACKEND=mcp:4000 STORAGE_BACKEND=storage:3000 \
+  docker compose --profile c2 --profile gateway up -d
 
 # 3. 访问
 curl https://your-domain.com/api/health
@@ -122,7 +131,8 @@ IMAGE=skill-mcp:latest
 # 端口配置
 PORT=3000                       # C1 对外端口
 BACKEND_PORT=3001               # B 远程后端端口
-MCP_PORT=4000                   # C2 MCP 对外端口
+MCP1_PORT=4001                  # C2 MCP 实例 1 对外端口
+MCP2_PORT=4002                  # C2 MCP 实例 2 对外端口
 
 # 存储配置
 STORAGE_TYPE=local-fs           # local-fs 或 aliyun-oss
@@ -150,7 +160,8 @@ STORAGE_SVC_TOKEN=<your-token>
 | app | - | - | 单体服务 |
 | backend | - | - | 远程后端 |
 | storage | 2 核 | 4G | 存储服务 |
-| mcp | 1 核/实例 | 2G/实例 | MCP 服务 |
+| mcp1 | 1 核 | 2G | MCP 实例 1 |
+| mcp2 | 1 核 | 2G | MCP 实例 2 |
 | gateway | 0.5 核 | 256M | Caddy 网关 |
 
 ## Caddy 网关特性
@@ -158,15 +169,17 @@ STORAGE_SVC_TOKEN=<your-token>
 ### 配置方式
 
 Caddyfile 通过环境变量 `MCP_BACKEND` / `STORAGE_BACKEND` 指定后端：
-- **C2+gateway**: `MCP_BACKEND=mcp:4000`, `STORAGE_BACKEND=storage:3000`（默认）
+- **C2+gateway**: `MCP_BACKEND="mcp1:4000 mcp2:4000"`, `STORAGE_BACKEND=storage:3000`（默认）
 - **C1+gateway**: `MCP_BACKEND=app:3000`, `STORAGE_BACKEND=app:3000`
+
+`MCP_BACKEND` 支持多个上游（空格分隔），Caddy 自动负载均衡。
 
 ### 自动 HTTPS
 
-1. **Let's Encrypt 集成**：自动申请和续期证书
-2. **HTTP/2 & HTTP/3**：默认启用
-3. **自动重定向**：HTTP → HTTPS
-4. **本地开发**：localhost 自动生成本地证书
+1. **本地开发（默认）**：`DOMAIN` 未设置或为 `localhost` 时，Caddy 走纯 HTTP，无证书问题
+2. **自定义域名**：设置 `DOMAIN=your-domain.com` 后自动启用 HTTPS，从 Let's Encrypt 申请证书
+3. **HTTP/2 & HTTP/3**：HTTPS 模式下默认启用
+4. **自动续期**：证书到期前自动续期
 
 ### 自定义域名
 
@@ -191,14 +204,7 @@ docker compose --profile gateway exec gateway cat /data/access.log
 
 ### 扩缩容
 
-```bash
-# 扩展 MCP 实例
-docker compose --profile c2 up -d --scale mcp=3
-
-# 或修改环境变量
-export MCP_REPLICAS=3
-docker compose --profile c2 up -d
-```
+C2 默认启动 mcp1 + mcp2 两个 MCP 实例。如需更多实例，可在 `docker-compose.yml` 中复制 `mcp2` 定义为 `mcp3`，并更新 `start.sh` 中的 `MCP_BACKEND` 和 `gateway` 的 `depends_on`。
 
 ### 备份数据
 
@@ -221,10 +227,13 @@ docker compose --profile c2 build --no-cache
 
 # 滚动更新
 docker compose --profile c2 up -d --no-deps storage
-docker compose --profile c2 up -d --no-deps mcp
+docker compose --profile c2 up -d --no-deps mcp1
+docker compose --profile c2 up -d --no-deps mcp2
 ```
 
 ## 故障排查
+
+详见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)，包含 6 个常见问题的完整排查步骤。
 
 ### 健康检查失败
 
@@ -236,7 +245,7 @@ docker compose --profile c2 ps
 docker inspect --format='{{json .State.Health}}' <container>
 
 # 手动测试健康检查
-docker compose --profile c2 exec mcp curl http://localhost:4000/api/health
+docker compose --profile c2 exec mcp1 curl http://localhost:4000/api/health
 ```
 
 ### HTTPS 证书问题
@@ -252,6 +261,37 @@ docker compose --profile gateway logs gateway
 docker compose --profile gateway exec gateway caddy renew --all
 ```
 
+#### 信任 Caddy 本地 CA（推荐，一次配置永久生效）
+
+Caddy 为 `localhost` 生成自签名证书，Node.js 默认不信任该证书。在本地开发调试 MCP inspector 时会出现证书错误。
+
+**Step 1**：提取 Caddy 本地 CA 根证书
+
+```bash
+# 在 docker-compose.yml 所在目录执行
+mkdir -p ~/.local/share/caddy
+docker compose exec gateway \
+  cat /data/caddy/pki/authorities/local/root.crt \
+  > ~/.local/share/caddy/root.crt
+```
+
+**Step 2**：配置 Node.js 信任该证书
+
+```bash
+# 添加到 shell 配置（永久生效）
+echo 'export NODE_EXTRA_CA_CERTS="$HOME/.local/share/caddy/root.crt"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Step 3**：启动 MCP inspector
+
+```bash
+npx @modelcontextprotocol/inspector
+# 连接：https://localhost/mcp
+```
+
+> 另见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) 第 5 节，包含更多替代方案（跳过 TLS 验证、纯 HTTP 模式、生产域名）。
+
 ### 性能问题
 
 ```bash
@@ -263,7 +303,8 @@ docker compose --profile c2 exec storage \
   sqlite3 /data/skill-mcp.db "SELECT COUNT(*) FROM skills;"
 
 # 清理缓存
-docker compose --profile c2 exec mcp rm -rf /data/cache/*
+docker compose --profile c2 exec mcp1 rm -rf /data/cache/*
+docker compose --profile c2 exec mcp2 rm -rf /data/cache/*
 ```
 
 ## 迁移指南

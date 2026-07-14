@@ -69,6 +69,10 @@ check_env() {
         if [[ "$profile" == "c1-gateway" ]]; then
             export MCP_BACKEND="${MCP_BACKEND:-app:3000}"
             export STORAGE_BACKEND="${STORAGE_BACKEND:-app:3000}"
+            # 本地开发默认走 HTTP，避免自签证书问题
+            if [[ -z "$DOMAIN" || "$DOMAIN" == "localhost" ]]; then
+                export DOMAIN="http://localhost"
+            fi
         fi
     fi
 }
@@ -94,9 +98,15 @@ start_services() {
             docker compose --profile c1-gateway up -d --build
             echo ""
             echo -e "${GREEN}✓ 服务已启动${NC}"
-            echo -e "  HTTPS: https://${DOMAIN}"
-            echo -e "  MCP端点: https://${DOMAIN}/mcp"
-            echo -e "  健康检查: curl https://${DOMAIN}/api/health"
+            if [[ "$DOMAIN" == http://* ]]; then
+                echo -e "  HTTP: ${DOMAIN}"
+                echo -e "  MCP端点: ${DOMAIN}/mcp"
+                echo -e "  健康检查: curl ${DOMAIN}/api/health"
+            else
+                echo -e "  HTTPS: https://${DOMAIN}"
+                echo -e "  MCP端点: https://${DOMAIN}/mcp"
+                echo -e "  健康检查: curl https://${DOMAIN}/api/health"
+            fi
             ;;
         backend)
             docker compose --profile backend up -d --build
@@ -111,10 +121,14 @@ start_services() {
             echo ""
             echo -e "${GREEN}✓ 服务已启动${NC}"
             echo -e "  Storage: http://localhost:3000"
-            echo -e "  MCP: http://localhost:4000"
+            echo -e "  MCP1: http://localhost:${MCP1_PORT:-4001}"
+            echo -e "  MCP2: http://localhost:${MCP2_PORT:-4002}"
             echo -e "  健康检查: curl http://localhost:3000/api/health"
             ;;
         gateway)
+            # c2 模式的 gateway 负载均衡到 mcp1 和 mcp2
+            export MCP_BACKEND="${MCP_BACKEND:-mcp1:4000 mcp2:4000}"
+            export STORAGE_BACKEND="${STORAGE_BACKEND:-storage:3000}"
             docker compose --profile c2 --profile gateway up -d --build
             echo ""
             echo -e "${GREEN}✓ 服务已启动${NC}"
