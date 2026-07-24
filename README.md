@@ -18,6 +18,13 @@ A Model Context Protocol (MCP) server that provides a managed skill file system 
 - **Versioning** — Automatic semantic versioning with content-hash tracking and rollback support
 - **Caching** — Layered memory (LRU) + file-based caching for fast skill retrieval
 - **SQLite Storage** — Persistent metadata storage via Drizzle ORM + better-sqlite3
+- **Semantic Search** — BM25 keyword search (default) with optional vector/hybrid via OpenAI/Ollama embeddings
+- **Webhooks** — Outbound webhook subscriptions with HMAC signing, retry queue, and delivery tracking
+- **OpenAPI & Swagger** — Built-in API reference at `/api/docs` for HTTP mode deployments
+- **Audit Logging** — Automatic tracking of skill mutations with before/after snapshots
+- **Async Import Worker** — Background job queue for importing skills from remote sources
+- **Eval Framework** — Define test cases for skills with automated regression gating
+- **Metrics & Tracing** — Prometheus metrics at `/metrics` and optional OpenTelemetry tracing
 - **CLI Management** — Full command-line interface for importing, listing, searching, and managing skills
 - **Self-upgrade Check** — `skill-mcp upgrade` checks npm registry + mirror for newer versions
 
@@ -316,6 +323,21 @@ Configuration is loaded from environment variables or a `skill-mcp.config.json` 
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP endpoint URL; falls back to `ConsoleSpanExporter` when unset | - |
 | `OTEL_SERVICE_NAME` | `service.name` resource attribute | `skill-mcp` |
 | `OTEL_SERVICE_VERSION` | `service.version` resource attribute | package.json version |
+| `AUTH_JWT_ACCESS_EXPIRES_IN` | Access token lifetime in seconds | `7200` (2h) |
+| `AUTH_JWT_REFRESH_EXPIRES_IN` | Refresh token lifetime in seconds | `604800` (7d) |
+| `AUTH_JWT_ISSUER` | JWT issuer claim | `skill-mcp` |
+| `RATE_LIMIT_ENABLED` | Master switch for rate limiting (`true` / `false`) | `true` |
+| `RATE_LIMIT_ADMIN_CAPACITY` | Admin route token bucket capacity (burst size) | `60` |
+| `RATE_LIMIT_ADMIN_REFILL_PER_SEC` | Admin route token refill rate per second | `10` |
+| `RATE_LIMIT_GATEWAY_CAPACITY` | Gateway route token bucket capacity (burst size) | `120` |
+| `RATE_LIMIT_GATEWAY_REFILL_PER_SEC` | Gateway route token refill rate per second | `20` |
+| `SECURITY_HSTS_ENABLED` | Emit `Strict-Transport-Security` header (only when TLS-terminated) | `false` |
+| `SKILL_MCP_METRICS_AUTH_OPTIONAL` | Allow unauthenticated access to `/metrics` | `false` |
+| `SKILL_MCP_CONFIG` | Path to JSON config file (overrides env vars) | `~/.skill-mcp/config.json` |
+| `SKILL_MCP_PKG_MANAGER` | Override package manager for `upgrade` command | auto-detected |
+| `OPENAI_API_KEY` | OpenAI API key for LLM eval provider | - |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL for LLM eval | `https://api.openai.com/v1` |
+| `OPENAI_EVAL_MODEL` | Model name for LLM eval provider | `gpt-4o-mini` |
 
 ### Stdio Permission Isolation
 
@@ -492,24 +514,28 @@ output:
 src/
 ├── cli/              # CLI commands (import, list, serve, pipeline, user, role, etc.)
 ├── config/           # Configuration schema and loader
-├── mcp/              # MCP server, tools, and transport
-│   └── tools/        # MCP tool implementations
-├── services/         # Business logic (skill service, access log)
+├── mcp/              # MCP server, tools, transport, and system prompt
+│   ├── tools/        # MCP tool implementations
+│   ├── transport/    # MCP transport (stdio, SSE, HTTP streamable)
+│   └── prompt/       # System prompt builder
+├── services/         # Business logic (skill service, access log, search, webhook, usage, import worker)
 ├── provider/         # Data providers (local, remote)
 ├── pipeline/         # Pipeline engine (DAG, executor, parser)
 ├── permission/       # Permission filters and RBAC
-├── storage/          # Storage providers (local FS)
+├── storage/          # Storage providers (local FS, aliyun OSS)
 ├── cache/            # Cache providers (memory LRU, file, composite)
 ├── db/               # Database schema, migrations, repositories
 ├── import/           # Skill import pipeline (validator, sources)
-├── prompt/           # System prompt builder
-├── admin/            # Admin API routes
-├── http/             # HTTP server and middleware
-├── events/           # Event system
-├── telemetry/        # Metrics and monitoring
-├── middleware/       # Request middleware
+├── http/             # HTTP server, router, middleware, handlers, OpenAPI
+│   ├── handlers/     # Admin (skills/users/roles/webhooks/import-jobs) and gateway handlers
+│   ├── openapi/      # OpenAPI 3.1 spec and Swagger UI
+│   └── middleware/   # Auth, rate-limit, request-id, error-map
+├── events/           # Event system (event bus, cache subscriber, webhook subscriber)
+├── telemetry/        # Prometheus metrics and OpenTelemetry tracing
+├── retrieval/        # Semantic retrieval (BM25 index, vector index, hybrid scorer)
+├── eval/             # Skill evaluation framework (echo/LLM providers, runner)
 ├── types/            # TypeScript type definitions
-└── utils/            # Shared utilities (security, errors, manifest)
+└── utils/            # Shared utilities (security, errors, manifest, JWT)
 ```
 
 ## CLI Commands Reference
@@ -532,7 +558,7 @@ src/
 | `rollback <slug>` | Rollback to previous version |
 | `lint <path>` | Lint skill package |
 | `manifest:migrate <dir>` | Scan & migrate `manifest_schema` (P1-21, supports `--apply` / `--patch`) |
-| `migrate:check` | Check migration status |
+| `migrate:check` | Pre-flight migration check: parse source/target DB URLs, detect dialect changes, list SQLite→PG migration idioms |
 | `upgrade` | Check for newer version of skill-mcp on npm |
 | `pipeline validate` | Validate pipeline YAML |
 | `pipeline graph` | Visualize pipeline DAG |
@@ -543,13 +569,9 @@ src/
 | `user list/create/get/delete/assign-roles` | Manage users (requires admin+ login, supports remote mode) |
 | `user create --username <u> --password <p> --user-type <type>` | Create user with login credentials (admin/superadmin only for --user-type admin) |
 | `role list/create/get/update/delete` | Manage roles (requires admin+ login, supports remote mode) |
-| `release:patch` | Bump patch version and create tag |
-| `release:minor` | Bump minor version and create tag |
-| `release:major` | Bump major version and create tag |
-| `release:alpha` | Bump alpha prerelease and create tag |
-| `release:beta` | Bump beta prerelease and create tag |
-| `release:rc` | Bump RC prerelease and create tag |
-| `release:dev` | Bump dev prerelease and create tag |
+| `sync check [slug]` | Check sync status of imported skills |
+| `sync pull <slug>` | Pull latest from remote source |
+| `user rotate-token <userId>` | Rotate API token for a user |
 
 ## Scripts
 
@@ -564,10 +586,20 @@ src/
 | `npm run lint` | Lint source files |
 | `npm run lint:fix` | Lint and auto-fix |
 | `npm run db:migrate` | Run database migrations |
+| `npm run db:generate` | Generate Drizzle migration files |
+| `npm run db:studio` | Launch Drizzle Studio UI |
 | `npm run docs:sync` | Check README.md sync status |
+| `npm run serve` | Start server in HTTP mode |
+| `npm run import` | Import a skill package |
+| `npm run list` | List all installed skills |
 | `npm run release:patch` | Bump patch version and create tag |
 | `npm run release:minor` | Bump minor version and create tag |
 | `npm run release:major` | Bump major version and create tag |
+| `npm run release:alpha` | Bump alpha prerelease and create tag |
+| `npm run release:beta` | Bump beta prerelease and create tag |
+| `npm run release:rc` | Bump RC prerelease and create tag |
+| `npm run release:dev` | Bump dev prerelease and create tag |
+| `npm run prepublishOnly` | Pre-publish build check |
 
 ## Testing
 

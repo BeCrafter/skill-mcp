@@ -9,14 +9,24 @@
 - **MCP 协议** — 将技能作为 MCP 工具暴露，兼容任何 MCP 客户端
 - **多传输方式** — 支持 stdio、SSE 和可流式 HTTP 传输
 - **流程编排引擎** — 基于 DAG 的技能编排，支持并行执行
-- **RBAC** — 基于标签的基于角色的访问控制
+- **三级 RBAC** — 超级管理员 / 管理员 / 用户，支持基于角色标签的权限控制
+- **JWT 认证** — 管理员通过用户名+密码登录，获取 JWT access/refresh token
+- **CLI 双模式** — 本地 DB 直连或通过 `--server-url` 远程 HTTP API
 - **技能反馈** — 收集技能效果反馈，以数据驱动改进
 - **技能导入** — 从本地目录或 Git 仓库导入技能包
 - **安全扫描** — 对所有导入的技能内容进行内置提示词注入检测
 - **版本管理** — 自动语义版本控制，基于内容哈希跟踪和回滚支持
 - **缓存** — 分层内存（LRU）+ 文件缓存，实现快速技能检索
 - **SQLite 存储** — 通过 Drizzle ORM + better-sqlite3 持久化元数据
+- **语义检索** — BM25 关键词搜索（默认），可选向量/混合检索（OpenAI/Ollama embeddings）
+- **Webhooks** — 出站 Webhook 订阅，支持 HMAC 签名、重试队列和投递追踪
+- **OpenAPI & Swagger** — 内置 API 文档，HTTP 模式下可通过 `/api/docs` 访问
+- **审计日志** — 自动记录技能变更操作，包含变更前后的快照
+- **异步导入** — 后台任务队列，支持从远程源异步导入技能
+- **评估框架** — 为 skill 定义测试用例，支持自动回归门禁
+- **指标与追踪** — Prometheus 指标（`/metrics`）和可选 OpenTelemetry 追踪
 - **CLI 管理** — 完整的命令行界面，用于导入、列出、搜索和管理技能
+- **自升级检查** — `skill-mcp upgrade` 可检查 npm registry + 镜像的新版本
 
 ## 📚 文档导航
 
@@ -53,6 +63,20 @@
 npm install
 npm run build
 ```
+
+## 📂 数据存储位置
+
+默认情况下，所有技能数据、数据库和缓存文件存储在你的用户主目录中：
+
+```
+~/.skill-mcp/
+├── data/
+│   └── skills/          # 技能包
+├── skill-mcp.db         # SQLite 数据库
+└── cache/               # 文件缓存
+```
+
+这意味着 **skill-mcp 可以在任何目录下运行** —— 你可以在任意文件夹执行 `skill-mcp list` 等命令并访问相同的数据。
 
 ## 📋 选择您的部署场景
 
@@ -259,6 +283,21 @@ npx skill-mcp lint ./path/to/skill-package
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP endpoint URL；未设时回落 `ConsoleSpanExporter` | - |
 | `OTEL_SERVICE_NAME` | `service.name` 资源属性 | `skill-mcp` |
 | `OTEL_SERVICE_VERSION` | `service.version` 资源属性 | package.json 版本 |
+| `AUTH_JWT_ACCESS_EXPIRES_IN` | Access token 有效期（秒） | `7200`（2h） |
+| `AUTH_JWT_REFRESH_EXPIRES_IN` | Refresh token 有效期（秒） | `604800`（7d） |
+| `AUTH_JWT_ISSUER` | JWT issuer 声明 | `skill-mcp` |
+| `RATE_LIMIT_ENABLED` | 限流总开关（`true` / `false`） | `true` |
+| `RATE_LIMIT_ADMIN_CAPACITY` | 管理路由令牌桶容量 | `60` |
+| `RATE_LIMIT_ADMIN_REFILL_PER_SEC` | 管理路由令牌补充速率（每秒） | `10` |
+| `RATE_LIMIT_GATEWAY_CAPACITY` | 网关路由令牌桶容量 | `120` |
+| `RATE_LIMIT_GATEWAY_REFILL_PER_SEC` | 网关路由令牌补充速率（每秒） | `20` |
+| `SECURITY_HSTS_ENABLED` | 发送 `Strict-Transport-Security` header（仅在有 TLS 终端时启用） | `false` |
+| `SKILL_MCP_METRICS_AUTH_OPTIONAL` | 允许不认证访问 `/metrics` | `false` |
+| `SKILL_MCP_CONFIG` | JSON 配置文件路径（覆盖环境变量） | `~/.skill-mcp/config.json` |
+| `SKILL_MCP_PKG_MANAGER` | `upgrade` 命令的包管理器覆盖 | 自动检测 |
+| `OPENAI_API_KEY` | LLM 评估提供者的 OpenAI API 密钥 | - |
+| `OPENAI_BASE_URL` | LLM 评估的 OpenAI 兼容 API URL | `https://api.openai.com/v1` |
+| `OPENAI_EVAL_MODEL` | LLM 评估提供者的模型名称 | `gpt-4o-mini` |
 
 ### Stdio 模式权限隔离
 
@@ -436,23 +475,27 @@ src/
 ├── cli/              # CLI 命令（import, list, serve, pipeline, user, role 等）
 ├── config/           # 配置模式和加载器
 ├── mcp/              # MCP 服务器、工具和传输
-│   └── tools/        # MCP 工具实现
-├── services/         # 业务逻辑（skill 服务、访问日志）
+│   ├── tools/        # MCP 工具实现
+│   ├── transport/    # MCP 传输层（stdio、SSE、HTTP streamable）
+│   └── prompt/       # 系统提示词构建器
+├── services/         # 业务逻辑（skill 服务、访问日志、检索、webhook、用量）
 ├── provider/         # 数据提供者（local, remote）
 ├── pipeline/         # 流程引擎（DAG, executor, parser）
 ├── permission/       # 权限过滤器和 RBAC
-├── storage/          # 存储提供者（local FS）
+├── storage/          # 存储提供者（local FS, aliyun OSS）
 ├── cache/            # 缓存提供者（memory LRU, file, composite）
 ├── db/               # 数据库模式、迁移、仓库
 ├── import/           # 技能导入流程（validator, sources）
-├── prompt/           # 系统提示词构建器
-├── admin/            # 管理 API 路由
-├── http/             # HTTP 服务器和中间件
-├── events/           # 事件系统
-├── telemetry/        # 指标和监控
-├── middleware/       # 请求中间件
+├── http/             # HTTP 服务器、路由、中间件、处理器、OpenAPI
+│   ├── handlers/     # 管理端处理器（skills/users/roles/webhooks/import-jobs）
+│   ├── openapi/      # OpenAPI 3.1 规范和 Swagger UI
+│   └── middleware/   # 认证、限流、request-id、错误映射
+├── events/           # 事件系统（event bus, cache subscriber, webhook subscriber）
+├── telemetry/        # Prometheus 指标和 OpenTelemetry 追踪
+├── retrieval/        # 语义检索（BM25 索引、向量索引、混合评分器）
+├── eval/             # 技能评估框架（echo/LLM 提供者、运行器）
 ├── types/            # TypeScript 类型定义
-└── utils/            # 共享工具（security, errors, manifest）
+└── utils/            # 共享工具（security, errors, manifest, JWT）
 ```
 
 ## CLI 命令参考
@@ -460,10 +503,10 @@ src/
 | 命令 | 描述 |
 |---------|-------------|
 | `init` | 初始化系统，创建超级管理员账户（首次部署） |
-| `auth login` | 管理员登录获取 JWT |
+| `auth login` | 管理员登录获取 JWT（支持 `--server-url` 远程模式） |
 | `auth logout` | 清除本地 JWT 凭证 |
 | `auth whoami` | 查看当前登录用户信息 |
-| `auth reset-password` | 重置管理员密码（仅限服务器本地访问） |
+| `auth reset-password` | 重置管理员密码（需要 admin+ 登录，支持远程模式） |
 | `serve` | 启动 MCP 服务器 |
 | `import <source>` | 从本地路径或 Git 仓库导入技能 |
 | `list` | 列出所有技能 |
@@ -475,15 +518,20 @@ src/
 | `rollback <slug>` | 回滚到之前的版本 |
 | `lint <path>` | 检查技能包 |
 | `manifest:migrate <dir>` | 扫描并迁移 `manifest_schema`（P1-21，支持 `--apply` / `--patch`）|
+| `migrate:check` | 迁移预检：解析源/目标数据库 URL、检测 dialect 变更、列出 SQLite→PG 迁移惯用法 |
+| `upgrade` | 检查 skill-mcp 在 npm 上是否有新版本 |
 | `pipeline validate` | 验证流程 YAML |
 | `pipeline graph` | 可视化流程 DAG |
 | `pipeline run` | 执行流程 |
 | `eval list` | 列出评估用例 |
 | `eval run` | 运行评估用例 |
 | `eval results` | 显示评估结果 |
-| `migrate:check` | 检查迁移状态 |
-| `user list/create/get/delete/assign-roles` | 管理用户（需要 admin+ 登录） |
-| `role list/create/get/update/delete` | 管理角色（需要 admin+ 登录） |
+| `user list/create/get/delete/assign-roles` | 管理用户（需要 admin+ 登录，支持远程模式） |
+| `user create --username <u> --password <p> --user-type <type>` | 创建带登录凭据的用户（admin/superadmin 仅限 `--user-type admin`） |
+| `role list/create/get/update/delete` | 管理角色（需要 admin+ 登录，支持远程模式） |
+| `sync check [slug]` | 检查已导入技能的同步状态 |
+| `sync pull <slug>` | 从远程源拉取最新版本 |
+| `user rotate-token <userId>` | 轮换用户的 API token |
 
 ## 脚本
 
@@ -498,6 +546,20 @@ src/
 | `npm run lint` | 检查源文件 |
 | `npm run lint:fix` | 检查并自动修复 |
 | `npm run db:migrate` | 运行数据库迁移 |
+| `npm run db:generate` | 生成 Drizzle 迁移文件 |
+| `npm run db:studio` | 启动 Drizzle Studio UI |
+| `npm run docs:sync` | 检查 README.md 同步状态 |
+| `npm run serve` | 以 HTTP 模式启动服务器 |
+| `npm run import` | 导入技能包 |
+| `npm run list` | 列出所有已安装技能 |
+| `npm run release:patch` | 升级补丁版本并创建标签 |
+| `npm run release:minor` | 升级次版本并创建标签 |
+| `npm run release:major` | 升级主版本并创建标签 |
+| `npm run release:alpha` | 升级 alpha 预发布版本并创建标签 |
+| `npm run release:beta` | 升级 beta 预发布版本并创建标签 |
+| `npm run release:rc` | 升级 RC 预发布版本并创建标签 |
+| `npm run release:dev` | 升级 dev 预发布版本并创建标签 |
+| `npm run prepublishOnly` | 发布前构建检查 |
 
 ## 测试
 
@@ -547,6 +609,16 @@ npm run test:watch
 - `skill.visibility = "private"` + `skill.tags ∩ user.tags = ∅` → 不可访问
 
 > **用户类型**控制**你能做什么**（操作权限）。**角色标签**控制**你能看什么**（数据可见性）。两者独立。
+
+## CLI 远程模式
+
+所有管理命令都支持通过 `--server-url` 或 `SKILL_MCP_SERVER_URL` 进行远程操作：
+
+```bash
+# 通过环境变量使用远程模式
+export SKILL_MCP_SERVER_URL=http://server:3000
+skill-mcp user list    # 调用 HTTP API
+```
 
 ## 安全性
 
