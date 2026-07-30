@@ -1,6 +1,5 @@
 import type { CacheEpochRepository } from "../db/repositories/cache-epoch.repository.js";
 import { getLogger } from "../utils/logger.js";
-import { withSpanSync } from "../telemetry/spans.js";
 
 /**
  * Per-user cache invalidation via monotonic version counters (epochs).
@@ -103,14 +102,7 @@ export class CacheEpochManager {
 
   /** Compose the per-user version suffix used by SkillService cache keys. */
   versionSuffix(userId: string): string {
-    // P0-6 — `cache.epoch` span (§17.6). The suffix lookup is the canonical
-    // moment a request commits to its (globalEpoch, userEpoch) tuple, so the
-    // span timing here corresponds to "epoch resolution" in the trace tree.
-    return withSpanSync(
-      "cache.epoch",
-      { attributes: { "cache.user_id": userId, "cache.global_epoch": this.globalEpoch, "cache.user_epoch": this.getUserEpoch(userId) } },
-      () => `g${this.globalEpoch}:u${this.getUserEpoch(userId)}`,
-    );
+    return `g${this.globalEpoch}:u${this.getUserEpoch(userId)}`;
   }
 
   private persistUser(userId: string, epoch: number): void {

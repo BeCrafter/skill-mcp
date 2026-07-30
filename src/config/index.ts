@@ -1,8 +1,8 @@
-import { configSchema, type AppConfig } from "./schema.js";
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
+import { configSchema, type AppConfig } from "./schema.js";
 
 const APP_VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
@@ -10,166 +10,120 @@ function readLocalJwtSecret(): string | undefined {
   const configPath = join(homedir(), ".skill-mcp", "config.json");
   if (!existsSync(configPath)) return undefined;
   try {
-    const config = JSON.parse(readFileSync(configPath, "utf-8")) as { jwt_secret?: string };
-    return config.jwt_secret;
+    return (JSON.parse(readFileSync(configPath, "utf-8")) as { jwt_secret?: string }).jwt_secret;
   } catch {
     return undefined;
   }
 }
 
 function getDefaultDataDir(): string {
-  const userHome = homedir();
-  return join(userHome, ".skill-mcp");
+  return join(homedir(), ".skill-mcp");
+}
+
+function rejectRemovedEnvironment(): void {
+  // CLOUD_SERVICE_URL is intentionally allowed: it enables C2 remote-proxy
+  // mode (RemoteSkillProvider fronts a remote storage Registry). It is not a
+  // generic backend switch — see docs/releases/v0.1.md.
+  if (process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is no longer supported: set DATABASE_PATH to a SQLite file path.");
+  }
+  if (process.env.STORAGE_TYPE && process.env.STORAGE_TYPE !== "local-fs") {
+    throw new Error(`STORAGE_TYPE=${process.env.STORAGE_TYPE} is no longer supported: migrate OSS data before using local-fs.`);
+  }
 }
 
 function loadConfig(): AppConfig {
-  const defaultDataDir = getDefaultDataDir();
-  const defaultDbPath = join(defaultDataDir, "skill-mcp.db");
-  const defaultStoragePath = join(defaultDataDir, "data", "skills");
-  const defaultCachePath = join(defaultDataDir, "cache");
-
-  // Start with env-based defaults
-  const envConfig = {
-    app: {
-      version: APP_VERSION,
-      env: process.env.NODE_ENV ?? "development",
-    },
-    deployment: {
-      mcpOnly: process.env.MCP_ONLY_MODE === "true",
-      apiOnly: process.env.API_ONLY_MODE === "true",
-    },
-    gateway: process.env.CLOUD_SERVICE_URL
-      ? {
-          cloudServiceUrl: process.env.CLOUD_SERVICE_URL,
-        }
-      : undefined,
-    database: {
-      // P0-8 — DATABASE_URL takes precedence over DATABASE_PATH. URL format
-      // (`sqlite://...` / `postgres://...`) lets the dialect factory pick the
-      // right driver. DATABASE_PATH remains supported as a bare-path shortcut
-      // for the SQLite default install.
-      path: process.env.DATABASE_URL ?? process.env.DATABASE_PATH ?? defaultDbPath,
-    },
-    storage: {
-      type: process.env.STORAGE_TYPE ?? "local-fs",
-      basePath: process.env.STORAGE_BASE_PATH ?? defaultStoragePath,
-    } as const,
-    cache: {
-      memory: {
-        enabled: process.env.CACHE_MEMORY_ENABLED !== "false",
-        maxSize: parseInt(process.env.CACHE_MEMORY_MAX_SIZE ?? "500", 10),
-      },
-      file: {
-        enabled: process.env.CACHE_FILE_ENABLED !== "false",
-        cacheDir: process.env.CACHE_FILE_DIR ?? defaultCachePath,
-      },
-    },
-    transport: {
-      type: process.env.TRANSPORT_TYPE ?? "stdio",
-      port: parseInt(process.env.TRANSPORT_PORT ?? "3000", 10),
-    },
-    security: {
-      enableInjectionScan: process.env.SECURITY_INJECTION_SCAN !== "false",
-      hstsEnabled: process.env.SECURITY_HSTS_ENABLED === "true",
-    },
-    auth: {
-      stdioToken: process.env.SKILL_MCP_AUTH_TOKEN,
-      metricsAuthOptional: process.env.SKILL_MCP_METRICS_AUTH_OPTIONAL === "true",
-      jwt: (() => {
-        // Read JWT secret from: env var > local config file
-        const secret = process.env.AUTH_JWT_SECRET || readLocalJwtSecret();
-        if (!secret) return undefined;
-        return {
-          secret,
-          accessExpiresIn: parseInt(process.env.AUTH_JWT_ACCESS_EXPIRES_IN ?? "7200", 10),
-          refreshExpiresIn: parseInt(process.env.AUTH_JWT_REFRESH_EXPIRES_IN ?? "604800", 10),
-          issuer: process.env.AUTH_JWT_ISSUER ?? "skill-mcp",
-        };
-      })(),
-    },
-    rateLimit: {
-      enabled: process.env.RATE_LIMIT_ENABLED !== "false",
-      adminCapacity: parseInt(process.env.RATE_LIMIT_ADMIN_CAPACITY ?? "60", 10),
-      adminRefillPerSec: parseFloat(process.env.RATE_LIMIT_ADMIN_REFILL_PER_SEC ?? "10"),
-      gatewayCapacity: parseInt(process.env.RATE_LIMIT_GATEWAY_CAPACITY ?? "120", 10),
-      gatewayRefillPerSec: parseFloat(process.env.RATE_LIMIT_GATEWAY_REFILL_PER_SEC ?? "20"),
-    },
-  };
-
-  // Load config file if exists
-  const configPath = process.env.SKILL_MCP_CONFIG;
-  if (configPath && existsSync(configPath)) {
-    try {
-      const fileContent = readFileSync(configPath, "utf-8");
-      const fileConfig = JSON.parse(fileContent);
-      const merged = deepMerge(envConfig, fileConfig);
-      return configSchema.parse(merged);
-    } catch (error) {
-      console.error(`Failed to load config from ${configPath}:`, error);
-      process.exit(1);
-    }
-  }
-
-  let config: AppConfig;
   try {
-    config = configSchema.parse(envConfig);
+    rejectRemovedEnvironment();
+    const dataDir = getDefaultDataDir();
+    const envConfig = {
+      app: { version: APP_VERSION, env: process.env.NODE_ENV ?? "development" },
+      deployment: {
+        mcpOnly: process.env.MCP_ONLY_MODE === "true",
+        apiOnly: process.env.API_ONLY_MODE === "true",
+      },
+      gateway: {
+        cloudServiceUrl: process.env.CLOUD_SERVICE_URL || undefined,
+      },
+      database: { path: process.env.DATABASE_PATH ?? join(dataDir, "skill-mcp.db") },
+      storage: {
+        type: "local-fs" as const,
+        basePath: process.env.STORAGE_BASE_PATH ?? join(dataDir, "data", "skills"),
+      },
+      cache: {
+        memory: {
+          enabled: process.env.CACHE_MEMORY_ENABLED !== "false",
+          maxSize: parseInt(process.env.CACHE_MEMORY_MAX_SIZE ?? "500", 10),
+        },
+        file: {
+          enabled: process.env.CACHE_FILE_ENABLED !== "false",
+          cacheDir: process.env.CACHE_FILE_DIR ?? join(dataDir, "cache"),
+        },
+      },
+      transport: {
+        type: process.env.TRANSPORT_TYPE ?? "stdio",
+        port: parseInt(process.env.TRANSPORT_PORT ?? "3000", 10),
+      },
+      security: {
+        enableInjectionScan: process.env.SECURITY_INJECTION_SCAN !== "false",
+        hstsEnabled: process.env.SECURITY_HSTS_ENABLED === "true",
+      },
+      auth: {
+        stdioToken: process.env.SKILL_MCP_AUTH_TOKEN,
+        metricsAuthOptional: process.env.SKILL_MCP_METRICS_AUTH_OPTIONAL === "true",
+        jwt: (() => {
+          const secret = process.env.AUTH_JWT_SECRET || readLocalJwtSecret();
+          return secret ? {
+            secret,
+            accessExpiresIn: parseInt(process.env.AUTH_JWT_ACCESS_EXPIRES_IN ?? "7200", 10),
+            refreshExpiresIn: parseInt(process.env.AUTH_JWT_REFRESH_EXPIRES_IN ?? "604800", 10),
+            issuer: process.env.AUTH_JWT_ISSUER ?? "skill-mcp",
+          } : undefined;
+        })(),
+      },
+      rateLimit: {
+        enabled: process.env.RATE_LIMIT_ENABLED !== "false",
+        adminCapacity: parseInt(process.env.RATE_LIMIT_ADMIN_CAPACITY ?? "60", 10),
+        adminRefillPerSec: parseFloat(process.env.RATE_LIMIT_ADMIN_REFILL_PER_SEC ?? "10"),
+        gatewayCapacity: parseInt(process.env.RATE_LIMIT_GATEWAY_CAPACITY ?? "120", 10),
+        gatewayRefillPerSec: parseFloat(process.env.RATE_LIMIT_GATEWAY_REFILL_PER_SEC ?? "20"),
+      },
+    };
+
+    const configPath = process.env.SKILL_MCP_CONFIG;
+    if (configPath && existsSync(configPath)) {
+      const fileConfig = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+      return configSchema.parse(deepMerge(envConfig, fileConfig));
+    }
+    return configSchema.parse(envConfig);
   } catch (error) {
     console.error("Invalid configuration:", error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
-
-  return config;
 }
 
-/** Create data directories required by the config. Called at serve startup. */
 export function ensureDirectories(config: AppConfig): void {
-  const dbDir = dirname(config.database.path);
-  if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
-
-  if (config.storage.type === "local-fs") {
-    if (!existsSync(config.storage.basePath)) {
-      mkdirSync(config.storage.basePath, { recursive: true });
-    }
-  }
-
-  if (config.cache.file.enabled) {
-    if (!existsSync(config.cache.file.cacheDir)) {
-      mkdirSync(config.cache.file.cacheDir, { recursive: true });
-    }
-  }
+  const dirs = [dirname(config.database.path), config.storage.basePath];
+  if (config.cache.file.enabled) dirs.push(config.cache.file.cacheDir);
+  for (const dir of dirs) if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target };
   for (const key of Object.keys(source)) {
-    const targetVal = result[key];
-    const sourceVal = source[key];
-    if (
-      targetVal && sourceVal &&
-      typeof targetVal === "object" && !Array.isArray(targetVal) &&
-      typeof sourceVal === "object" && !Array.isArray(sourceVal)
-    ) {
-      result[key] = deepMerge(targetVal as Record<string, unknown>, sourceVal as Record<string, unknown>);
-    } else {
-      result[key] = sourceVal;
-    }
+    const left = result[key];
+    const right = source[key];
+    result[key] = left && right && typeof left === "object" && typeof right === "object" && !Array.isArray(left) && !Array.isArray(right)
+      ? deepMerge(left as Record<string, unknown>, right as Record<string, unknown>)
+      : right;
   }
   return result;
 }
 
-// Singleton config
-let _config: AppConfig | null = null;
-
+let configSingleton: AppConfig | null = null;
 export function getConfig(): AppConfig {
-  if (!_config) {
-    _config = loadConfig();
-  }
-  return _config;
+  configSingleton ??= loadConfig();
+  return configSingleton;
 }
-
-/** Fresh config bypassing the singleton. Used by tests. */
-export function createConfig(): AppConfig {
-  return loadConfig();
-}
-
+export function createConfig(): AppConfig { return loadConfig(); }
 export { configSchema, getDefaultDataDir };

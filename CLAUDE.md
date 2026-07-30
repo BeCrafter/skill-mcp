@@ -123,6 +123,8 @@ For multi-step tasks, state a brief plan with verification steps. Strong success
 
 **`docs/ARCHITECTURE.md` 是本项目唯一、完整的技术架构文档（Single Source of Truth）。每次会话执行编码任务时都必须遵守以下规则：**
 
+> ✅ 已恢复（2026-07-31）：`docs/ARCHITECTURE.md`、`docs/refactoring-backlog.md`、`docs/advanced/` 均已重建（历史 backlog/设计文档从 git 历史提取并按 lowercase-kebab 重命名，`tech-dev-program.md` 标注为已废弃）。下列规则据这些文档执行。
+
 1. **进入任何非平凡任务前**：先读 `docs/ARCHITECTURE.md`，确认当前模块的预期分层、依赖方向、横切契约。本文档优先级高于其它 `docs/` 子文件。
 2. **下列变更必须在同一 PR 中同步更新 `docs/ARCHITECTURE.md`**：
    - 新增 / 删除 / 重命名 `src/` 一级目录或公共接口
@@ -132,9 +134,9 @@ For multi-step tasks, state a brief plan with verification steps. Strong success
    - 横切关注点变化：认证 / 缓存键约定 / 事件类型 / 权限规则 / 配置 schema
    - 新增运行时 npm 依赖
 3. **修复 `docs/ARCHITECTURE.md` 第 9 节"已知问题清单"中的任何条目时**，必须在同一 PR 中将该条目从清单移除或标注为 `已修复 (commit <sha>)`。完成第 10 节路线图中的某项时同样要更新。
-   - **执行优化任务时，先读 [`docs/REFACTORING_BACKLOG.md`](docs/REFACTORING_BACKLOG.md)**，按其中的 T-XXX 条目逐项推进。每条目完成后：①把该条目状态改为 `✅ 已完成 (<commit-sha>, <date>)` 并移到"完成历史"章节（保留完整内容，不删）；②同步更新 `ARCHITECTURE.md` 第 9 / 10 节。
+   - **执行优化任务时，先读 [`docs/refactoring-backlog.md`](docs/refactoring-backlog.md)**，按其中的 T-XXX 条目逐项推进。每条目完成后：①把该条目状态改为 `✅ 已完成 (<commit-sha>, <date>)` 并移到"完成历史"章节（保留完整内容，不删）；②同步更新 `ARCHITECTURE.md` 第 9 / 10 节。
    - 接到优化类需求时，禁止凭印象动手，必须先在 BACKLOG 中找到对应条目；若无对应条目，先按 BACKLOG 末尾的"新增条目模板"补齐再开工。
-4. **禁止把架构相关说明拆分到其它新文档**。架构图、模块清单、关键流程、问题清单、优化路线图必须留在 `docs/ARCHITECTURE.md` 同一份文件。需要更深入的子主题（RFC / 设计权衡）时，可在 `docs/ADVANCED/` 下新增，但必须从 `docs/ARCHITECTURE.md` 链接过去。
+4. **禁止把架构相关说明拆分到其它新文档**。架构图、模块清单、关键流程、问题清单、优化路线图必须留在 `docs/ARCHITECTURE.md` 同一份文件。需要更深入的子主题（RFC / 设计权衡）时，可在 `docs/advanced/` 下新增，但必须从 `docs/ARCHITECTURE.md` 链接过去。
 5. **职责边界**：README 面向使用者（怎么跑），`docs/ARCHITECTURE.md` 面向开发者与架构师（怎么实现、为何这样、还能怎样）。不要把架构内容写进 README，也不要把使用说明写进 ARCHITECTURE。
 6. **文档末尾"变更日志"必须追加一行**：日期、commit sha、变更摘要。
 7. **PR 自检清单**：提交前自问"我的改动是否触及第 2 条列出的任何范围？"，是 → 必须改 `docs/ARCHITECTURE.md`，否则视为未完成。
@@ -143,17 +145,17 @@ For multi-step tasks, state a brief plan with verification steps. Strong success
 
 ### 5.1 Permission Control (强制)
 
-**`docs/PERMISSION_CONTROL.md` 是系统权限管控的唯一权威来源。** 任何涉及用户管理、角色管理、权限校验的开发必须严格遵循该文档。
+**`docs/permission-control.md` 是系统权限管控的唯一权威来源。** 任何涉及用户管理、角色管理、权限校验的开发必须严格遵循该文档。
 
-1. **开发前必读**：进入任何涉及 `user`/`role`/`auth` 相关改动前，先读 `docs/PERMISSION_CONTROL.md`，确认当前权限矩阵和边界规则。
-2. **下列变更必须同步更新 `docs/PERMISSION_CONTROL.md`**：
+1. **开发前必读**：进入任何涉及 `user`/`role`/`auth` 相关改动前，先读 `docs/permission-control.md`，确认当前权限矩阵和边界规则。
+2. **下列变更必须同步更新 `docs/permission-control.md`**：
    - 用户类型（superadmin/admin/user）的增减或语义变化
    - 内置角色列表变化
    - 任何权限矩阵的调整（谁能对谁做什么）
    - 新增或修改 `requireSuperadmin` / `assertSuperadminProtected` 守卫
    - 新增管理员 API 端点（`/api/admin/*`）
    - CLI 管理命令的权限逻辑变更
-3. **验证用例必须覆盖**：权限相关改动必须在 `docs/PERMISSION_CONTROL.md` 的验证用例中新增对应 TC，并实际执行验证。
+3. **验证用例必须覆盖**：权限相关改动必须在 `docs/permission-control.md` 的验证用例中新增对应 TC，并实际执行验证。
 4. **禁止绕过**：不允许在未更新文档的情况下修改权限逻辑。PR 自检时必须确认权限文档已同步。
 
 ---
@@ -207,7 +209,7 @@ npx vitest run -t "scanForInjection"
 
 ## Architecture
 
-This is an **MCP (Model Context Protocol) server** that manages reusable skill packages for AI assistants. It exposes three MCP tools (`skill_list`, `skill_view`, `skill_file`) and supports stdio, SSE, and Streamable HTTP transports.
+This is an **MCP (Model Context Protocol) server** that manages reusable skill packages for AI assistants. It exposes five MCP tools (`skill_list`, `skill_search`, `skill_view`, `skill_file`, `skill_feedback`) and supports stdio, SSE, and Streamable HTTP transports.
 
 ### Layered data flow
 
@@ -219,7 +221,7 @@ CLI / MCP Client → SkillService → ISkillProvider → IStorageProvider → fi
 
 **SkillService** (`src/services/skill.service.ts`) is the core business logic layer. It delegates to `ISkillProvider` (which abstracts local vs remote skill access), applies `IPermissionFilter`, runs security scans via `scanForInjection`, and wraps cache lookups.
 
-**ISkillProvider** (`src/provider/interface.ts`) has two implementations: `LocalProvider` (reads from local storage) and `RemoteProvider` (proxies to a remote service when `CLOUD_SERVICE_URL` or `--remote-url` is configured).
+**ISkillProvider** (`src/provider/interface.ts`) has two implementations: `LocalSkillProvider` (reads from local SQLite + local-fs) and `RemoteSkillProvider` (proxies to a remote storage Registry when `CLOUD_SERVICE_URL` is set; `skill_search` delegates to the remote's `/api/gateway/skills/search`).
 
 ### Key patterns
 
@@ -231,7 +233,7 @@ CLI / MCP Client → SkillService → ISkillProvider → IStorageProvider → fi
 
 ### Config & storage
 
-Config can come from env vars (e.g. `DATABASE_PATH`, `TRANSPORT_TYPE`, `STORAGE_TYPE`) or a `skill-mcp.config.json` file. Storage backends: `local-fs` (default, `./data/skills`) or `aliyun-oss`. All data dirs are auto-created on startup.
+Config can come from env vars (e.g. `DATABASE_PATH`, `TRANSPORT_TYPE`, `STORAGE_TYPE`) or a `skill-mcp.config.json` file. v0.1 storage backend: `local-fs` only (default `~/.skill-mcp/data/skills`); `DATABASE_URL` and non-`local-fs` `STORAGE_TYPE` are rejected at startup. All data dirs are auto-created on startup.
 
 **Skill storage organization**:
 - Skills are organized by **slug** (kebab-case), not by name
@@ -241,11 +243,10 @@ Config can come from env vars (e.g. `DATABASE_PATH`, `TRANSPORT_TYPE`, `STORAGE_
 
 ### Deployment Modes: Architecture Design Decisions
 
-This project implements **single binary, dual-mode deployment** rather than separate Gateway/Cloud services (as described in `tech-dev-program.md`).
+This project implements **single binary, config-driven deployment**: full / mcp-only / api-only modes plus C2 remote proxy via `CLOUD_SERVICE_URL`.
 
 **Why this design?**
-- **Document Design**: tech-dev-program.md recommends separate Gateway and Cloud Service
-- **Our Implementation**: Single binary with config-driven feature toggles
+- **Single binary** with config-driven mode flags (`--mcp-only` / `--api-only`) and C2 remote proxy (`CLOUD_SERVICE_URL`)
 - **Rationale**:
   1. Simplified development and testing (no IPC complexity)
   2. Reduced deployment overhead (single Docker image)
@@ -263,9 +264,8 @@ skill-mcp serve --transport http --port 3000 --mcp-only
 # API-only: Only REST API + health, no MCP endpoint
 skill-mcp serve --transport http --port 3000 --api-only
 
-# Proxy mode: Auto-detected when --remote-url or CLOUD_SERVICE_URL is set
-skill-mcp serve --transport http --port 3000 --remote-url http://backend:3001
-CLOUD_SERVICE_URL=http://backend:3001 skill-mcp serve --transport http --port 3000
+# C2 proxy mode: set CLOUD_SERVICE_URL (serve has no --remote-url flag)
+CLOUD_SERVICE_URL=http://storage:3000 skill-mcp serve --transport http --port 4000 --mcp-only
 ```
 
 **Mode Flags** (`--mcp-only` / `--api-only`):
@@ -278,26 +278,26 @@ CLOUD_SERVICE_URL=http://backend:3001 skill-mcp serve --transport http --port 30
 
 - `--mcp-only` and `--api-only` are **mutually exclusive** (server exits with error if both are set).
 - Both can also be set via env vars: `MCP_ONLY_MODE=true` / `API_ONLY_MODE=true`.
-- Proxy mode (triggered by `--remote-url` or `CLOUD_SERVICE_URL` env var) additionally **suppresses Admin API** on the proxy process, since management happens on the backend.
+- C2 proxy mode (triggered by `CLOUD_SERVICE_URL`) fronts a remote storage Registry via `RemoteSkillProvider`; `skill_search` delegates to the remote's gateway search endpoint. Combine with `--mcp-only` to suppress Admin/Gateway APIs on the proxy node.
 
 **Three Scenarios at a Glance**:
 
-| Scenario | Flags | Transport | Best For | Config |
-|----------|-------|-----------|----------|--------|
-| **A** | (none) | stdio | Local development | `.env.scenario-a` |
-| **B** | proxy (auto) | stdio → remote HTTP | Hybrid dev+remote | `.env.scenario-b-*` |
-| **C1** | (none) | http | Unified HTTP server | `.env.scenario-c1` |
-| **C2** | proxy + mcp-only / api-only | http | Distributed (production) | `.env.scenario-c2-*` |
+| Scenario | Flags | Transport | Best For | Docs |
+|----------|-------|-----------|----------|------|
+| **A** | (none) | stdio | Local development | `docs/deployment/local-stdio.md` |
+| **C1** | (none) | http | Unified HTTP server | `docs/deployment/single-http.md` |
+| **C2** | `CLOUD_SERVICE_URL` + mcp-only / api-only | http | Distributed (production) | `docs/deployment/distributed-c2.md` |
+| **backend** | `--api-only` | http | REST management / C2 storage | `docs/deployment/api-only-backend.md` |
 
 **API Route Structure**:
 - **Admin APIs**: `/api/admin/*` (internal management, e.g. `/api/admin/skills`, `/api/admin/stats`)
 - **Gateway APIs**: `/api/gateway/*` (client-facing, e.g. `/api/gateway/skills`)
 - **Legacy**: `/api/health` (backward compatibility only)
 
-**Key Files for Each Scenario**:
-- **Scenario A**: `src/provider/local.provider.ts`, `src/app.ts` (MCP routing only)
-- **Scenario B**: `src/provider/remote.provider.ts`, API endpoints (`/api/gateway/*`)
-- **Scenario C**: `docker/docker-compose.yml` (profiles: c1/c2/gateway), `docker/Caddyfile`, multi-service setup
+**Key Files**:
+- Local provider: `src/provider/local.provider.ts`
+- C2 proxy: `src/provider/remote.provider.ts`, gateway search `src/http/handlers/gateway/skills.handler.ts`
+- Docker: `docker/docker-compose.yml` (profiles: c1/c1-gateway/backend/c2/gateway), `docker/Caddyfile`
 
 ### When to Choose Each Mode
 
@@ -321,12 +321,12 @@ CLOUD_SERVICE_URL=http://backend:3001 skill-mcp serve --transport http --port 30
 - Best for: Storage backend in distributed architecture
 - Example: Storage microservice behind internal load balancer
 
-**Proxy Mode (auto-detected via `--remote-url` or `CLOUD_SERVICE_URL`)**:
-- Use for: Multi-process communication, remote storage backends, distributed deployments
-- Proxies to: A backend (API-only or full-mode) instance
-- Additionally suppresses: Admin API (management happens on the backend)
-- Benefit: Separates routing layer from data layer
-- Example: Client SDK → Proxy Gateway → Separate backend in different datacenter
+**C2 Proxy Mode (triggered by `CLOUD_SERVICE_URL`; `serve` has no `--remote-url` flag)**:
+- Use for: Distributed deployments — MCP proxy nodes front a remote storage Registry
+- Proxies to: A storage (API-only) instance; `skill_search` delegates to the remote's gateway search endpoint
+- Suppress Admin/Gateway APIs on the proxy node via `--mcp-only` (independent of proxy mode)
+- Benefit: Separates MCP serving from authoritative data + BM25 index
+- Example: MCP client → mcp1/mcp2 (MCP-only) → storage (API-only) behind Caddy gateway
 
 ### Environment Variables Reference
 
@@ -337,12 +337,12 @@ CLOUD_SERVICE_URL=http://backend:3001 skill-mcp serve --transport http --port 30
 - `LOG_LEVEL` — `"trace"` | `"debug"` | `"info"` | `"warn"` | `"error"` (default: `"info"`)
 
 **Storage Configuration**:
-- `STORAGE_TYPE` — `"local-fs"` | `"aliyun-oss"` (default: `"local-fs"`)
+- `STORAGE_TYPE` — `"local-fs"` only (default: `"local-fs"`; v0.1 rejects other values)
 - `STORAGE_BASE_PATH` — Filesystem path to skills directory (default: `"~/.skill-mcp/data/skills"`)
 
 **Database Configuration**:
 - `DATABASE_PATH` — SQLite database file path (default: `"~/.skill-mcp/skill-mcp.db"`)
-- `DATABASE_URL` — Alternative to `DATABASE_PATH`; takes precedence when set (supports `sqlite://...` / `postgres://...`)
+- `DATABASE_URL` — **rejected at startup in v0.1** (use `DATABASE_PATH` with a SQLite file path)
 
 **Transport Configuration**:
 - `TRANSPORT_TYPE` — `"stdio"` | `"sse"` | `"http"` (default: `"stdio"`)
@@ -377,75 +377,41 @@ CLOUD_SERVICE_URL=http://backend:3001 skill-mcp serve --transport http --port 30
 
 ### Scenario-Specific Configurations
 
-**Scenario A: Local Development (stdio)**
+> 完整带注释列表见 `.env.example`。下方为各场景最小配置（v0.1：local-fs + SQLite only）。
+
+**Scenario A — Local Development (stdio)**
 
 ```bash
-# .env.scenario-a
 TRANSPORT_TYPE=stdio
-STORAGE_TYPE=local-fs
-STORAGE_BASE_PATH=./data/skills
 DATABASE_PATH=./data/skill-mcp.db
+STORAGE_BASE_PATH=./data/skills
 LOG_LEVEL=debug
-CACHE_MEMORY_ENABLED=true
-CACHE_FILE_ENABLED=true
 ```
 
-**Scenario B: Hybrid Dev + Remote (localhost stdio → remote HTTP)**
+**Scenario C1 — Unified HTTP Server**
 
 ```bash
-# .env.scenario-b-local (local proxy redirects to remote)
-TRANSPORT_TYPE=stdio
-CLOUD_SERVICE_URL=http://cloud-service:3001
-SKILL_MCP_AUTH_TOKEN=your-token
-LOG_LEVEL=debug
-
-# .env.scenario-b-cloud (remote service)
-TRANSPORT_TYPE=http
-TRANSPORT_PORT=3001
-STORAGE_TYPE=local-fs
-STORAGE_BASE_PATH=./data/skills
-DATABASE_PATH=./data/skill-mcp.db
-```
-
-**Scenario C1: Unified HTTP Server**
-
-```bash
-# .env.scenario-c1
 TRANSPORT_TYPE=http
 TRANSPORT_PORT=3000
-STORAGE_TYPE=local-fs
-STORAGE_BASE_PATH=./data/skills
 DATABASE_PATH=./data/skill-mcp.db
+STORAGE_BASE_PATH=./data/skills
 ```
 
-**Scenario C2: Distributed Production (MCP → Gateway → Cloud Service)**
+**Scenario C2 — Distributed (storage + MCP proxy + Caddy gateway)**
 
 ```bash
-# .env.scenario-c2-mcp (client-facing MCP endpoint)
-TRANSPORT_TYPE=http
-TRANSPORT_PORT=4000
-CLOUD_SERVICE_URL=http://gateway-lb:3001
-SKILL_MCP_AUTH_TOKEN=<storage-svc-token>
-MCP_ONLY_MODE=true
-LOG_LEVEL=info
+# storage（API-only 权威库）
+TRANSPORT_TYPE=http  TRANSPORT_PORT=3000  API_ONLY_MODE=true
+DATABASE_PATH=/app/data/skill-mcp.db  STORAGE_BASE_PATH=/app/data/skills
+SKILL_MCP_AUTH_TOKEN=<shared-token>
 
-# .env.scenario-c2-gateway (routing layer)
-TRANSPORT_TYPE=http
-TRANSPORT_PORT=3001
-CLOUD_SERVICE_URL=http://cloud-service:3002
-SKILL_MCP_AUTH_TOKEN=<storage-svc-token>
-LOG_LEVEL=info
-
-# .env.scenario-c2-cloud (data service backend)
-TRANSPORT_TYPE=http
-TRANSPORT_PORT=3002
-API_ONLY_MODE=true
-STORAGE_TYPE=aliyun-oss
-ALIYUN_ACCESS_KEY_ID=<your-key>
-ALIYUN_ACCESS_KEY_SECRET=<your-secret>
-ALIYUN_BUCKET=skill-mcp
-DATABASE_PATH=/data/skill-mcp.db
+# mcp 代理节点（MCP-only，代理到 storage）
+TRANSPORT_TYPE=http  TRANSPORT_PORT=4000  MCP_ONLY_MODE=true
+CLOUD_SERVICE_URL=http://storage:3000
+SKILL_MCP_AUTH_TOKEN=<shared-token>
 ```
+
+> Scenario "backend"（API-only 单独后端，供 CLI `--server-url` 管理）= C1 配置加 `API_ONLY_MODE=true`。详见 `docs/deployment/distributed-c2.md` 与 `docker/docker-compose.yml`（`--profile c2`）。
 
 ### Skill package format
 

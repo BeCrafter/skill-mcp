@@ -6,10 +6,6 @@ import { UserRepository } from "../../db/repositories/user.repository.js";
 import { RoleRepository } from "../../db/repositories/role.repository.js";
 import { UserRoleRepository } from "../../db/repositories/user-role.repository.js";
 import { DomainEventBus } from "../../events/event-bus.js";
-import { WebhookRepository } from "../../db/repositories/webhook.repository.js";
-import { WebhookDeliveryRepository } from "../../db/repositories/webhook-delivery.repository.js";
-import { WebhookService } from "../../services/webhook.service.js";
-import { getLogger } from "../../utils/logger.js";
 import { c, kv, table, section, ok, warn, kvWidth, hint, fail } from "../ui.js";
 import { sha256 } from "../../utils/crypto.js";
 import { requireAuth, readCredentials } from "./auth-cmd.js";
@@ -18,17 +14,17 @@ import { ConflictError } from "../../utils/errors.js";
 
 const PRIVILEGED_ROLE_NAMES = new Set(["superadmin", "admin"]);
 
-function assertCanOperateOnCli(targetUserType: string, callerUserType: string, targetId?: string, callerId?: string): void {
-  // 超管之间互相保护，但允许操作自己
+function assertCanOperateOnCli(targetUserType: string, callerUserType: string, targetId?: string, callerId?: string, mutate = false): void {
+  // 超管之间互相保护，但允许操作自己（自删由 userDeleteAction 单独拦截）
   if (targetUserType === "superadmin") {
     if (targetId && callerId && targetId === callerId) return;
     fail("Cannot operate on superadmin user");
     closeDatabase();
     process.exit(1);
   }
-  // admin 操作 admin 需要 superadmin 权限，但允许操作自己
+  // 读取：admin 可查看自己；变更（modify/rotate/delete）：admin 不可操作任何 admin（含自己），需 superadmin
   if (targetUserType === "admin" && callerUserType !== "superadmin") {
-    if (targetId && callerId && targetId === callerId) return;
+    if (!mutate && targetId && callerId && targetId === callerId) return;
     fail("Only superadmin can operate on admin users");
     closeDatabase();
     process.exit(1);
@@ -44,8 +40,6 @@ function initRepos() {
     userRepo: new UserRepository(db),
     roleRepo: new RoleRepository(db),
     userRoleRepo: new UserRoleRepository(db),
-    webhookRepo: new WebhookRepository(db),
-    webhookDeliveryRepo: new WebhookDeliveryRepository(db),
     eventBus: new DomainEventBus(),
   };
 }
@@ -278,14 +272,14 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
 
   // Local mode
   const creds = requireAuth();
-  const { userRepo, webhookRepo, webhookDeliveryRepo } = initRepos();
+  const { userRepo } = initRepos();
   const user = await userRepo.findById(userId);
   if (!user) {
     fail(`User not found: ${userId}`, "Use `skill-mcp user list` to see available users");
     closeDatabase();
     process.exit(1);
   }
-  assertCanOperateOnCli(user.userType, creds.userType, user.id, creds.userId);
+  assertCanOperateOnCli(user.userType, creds.userType, user.id, creds.userId, true);
   const tokenExpiresAt = opts.ttl ? Date.now() + parseTtlToMs(opts.ttl) : null;
   const graceMs = opts.grace ? parseTtlToMs(opts.grace) : undefined;
   const token = generateToken();
@@ -306,18 +300,6 @@ export async function userRotateTokenAction(userId: string, opts: { ttl?: string
 
   hint("Old token still valid until grace expires");
 
-  try {
-    const config = getConfig();
-    const allowPlaintext = config.app.env !== "production";
-    const webhookService = new WebhookService(webhookRepo, webhookDeliveryRepo, getLogger(), { allowPlaintext });
-    webhookService.publishEvent("user.token_rotated", {
-      user_id: rotated.id,
-      rotated_at: Date.now(),
-      previous_token_expires_at: rotated.previousTokenExpiresAt ?? null,
-    });
-  } catch {
-    // CLI must succeed even if webhook fan-out fails.
-  }
   closeDatabase();
 }
 
@@ -424,7 +406,7 @@ export async function userDeleteAction(userId: string, opts: { serverUrl?: strin
     closeDatabase();
     process.exit(1);
   }
-  assertCanOperateOnCli(target.userType, creds.userType, target.id, creds.userId);
+  assertCanOperateOnCli(target.userType, creds.userType, target.id, creds.userId, true);
   await userRoleRepo.deleteByUserId(userId);
   await userRepo.delete(userId);
   ok(`${c.bold("Deleted")}  user  ${c.dim(userId)}`);

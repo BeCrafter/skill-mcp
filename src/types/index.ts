@@ -14,38 +14,12 @@ export type VersionBump = "major" | "minor" | "patch";
 /** File encoding */
 export type FileEncoding = "utf-8" | "base64";
 
-/**
- * P1-11 — retrieval-signal envelope persisted on the skill row. Extended in
- * stage 3 with embedding metadata (vector hash, provider/model version);
- * keeping it under a single JSON column means stage 3 can add fields without
- * a follow-up migration.
- */
+/** Retrieval signal envelope persisted on the skill row. */
 export interface SkillRetrievalMeta {
   triggers?: string[];
   whenToUse?: string;
+  /** Historic field name retained as stored BM25 corpus text. */
   embeddingText?: string;
-}
-
-/**
- * P1-12 stage 1 — Skill eval case authored in SKILL.md frontmatter. Stage 1
- * only persists the contract (manifest validation + lint nudge); stage 2
- * adds DB persistence + runner; stage 3 wires version-transition gating.
- */
-export interface SkillEvalCase {
-  /** Stable identifier for the case, unique within a skill. 1..128 chars. */
-  name: string;
-  /** Natural-language input the agent receives when running the case. 1..4096 chars. */
-  input: string;
-  /**
-   * Output substrings the run must contain — EVERY entry must appear.
-   * Empty / omitted skips this assertion.
-   */
-  expectedOutputContains?: string[];
-  /**
-   * Output substrings the run must NOT contain — NO entry may appear.
-   * Empty / omitted skips this assertion.
-   */
-  expectedOutputNotContains?: string[];
 }
 
 /** Skill metadata (DB entity) */
@@ -151,12 +125,6 @@ export interface SkillFrontmatter {
    * Use this when the natural metadata is too short or noisy.
    */
   embeddingText?: string;
-  /**
-   * P1-12 stage 1 — eval cases authored alongside the skill. Stage 1 only
-   * validates + persists the contract; stages 2/3 add the runner and
-   * version-transition regression gate.
-   */
-  evalCases?: SkillEvalCase[];
 }
 
 /** Import options */
@@ -202,7 +170,7 @@ export interface AccessLogEntry {
 export type TransportType = "stdio" | "sse" | "http";
 
 /** Storage type */
-export type StorageType = "local-fs" | "aliyun-oss";
+export type StorageType = "local-fs";
 
 
 /** Request context for permission and session tracking */

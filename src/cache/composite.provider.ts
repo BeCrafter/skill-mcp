@@ -2,7 +2,6 @@ import type { CacheEntryMeta, ICacheProvider } from "./provider.interface.js";
 import { MemoryLRUCacheProvider } from "./memory-lru.provider.js";
 import { FileCacheProvider } from "./file.provider.js";
 import { metrics } from "../telemetry/metrics.js";
-import { withSpan } from "../telemetry/spans.js";
 
 export class CompositeCacheProvider implements ICacheProvider {
   private l1: ICacheProvider;
@@ -32,17 +31,14 @@ export class CompositeCacheProvider implements ICacheProvider {
   }
 
   async getWithMeta<T>(key: string): Promise<CacheEntryMeta<T> | null> {
-    // P0-6 — emit one span per cache layer (§17.6: `cache.l1.get` / `cache.l2.get`).
-    // We tag with `cache.key` and the hit/miss result; cardinality is bounded
-    // by the deterministic key shape (`skill:list:{userId}:gN:uM`).
-    const l1Meta = await withSpan("cache.l1.get", { attributes: { "cache.key": key } }, () => this.l1.getWithMeta<T>(key));
+    const l1Meta = await this.l1.getWithMeta<T>(key);
     if (l1Meta !== null) {
       metrics.cacheOps.inc({ layer: "l1", result: "hit" });
       return l1Meta;
     }
     metrics.cacheOps.inc({ layer: "l1", result: "miss" });
 
-    const l2Meta = await withSpan("cache.l2.get", { attributes: { "cache.key": key } }, () => this.l2.getWithMeta<T>(key));
+    const l2Meta = await this.l2.getWithMeta<T>(key);
     if (l2Meta !== null) {
       metrics.cacheOps.inc({ layer: "l2", result: "hit" });
       // Promote to L1, preserving the L2 entry's remaining TTL so the L1

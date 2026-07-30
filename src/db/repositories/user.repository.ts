@@ -2,7 +2,6 @@ import { eq, or } from "drizzle-orm";
 import { generateId, generateUniqueId } from "../../utils/id.js";
 import type { DrizzleDB } from "../connection.js";
 import { users } from "../schema.js";
-import { withSpan } from "../../telemetry/spans.js";
 import { ConflictError } from "../../utils/errors.js";
 
 export interface UserEntity {
@@ -42,11 +41,11 @@ export class UserRepository {
    *   - no row matches either slot
    *   - the matched row's primary token has expired (`token_expires_at < now`)
    *   - only the previous slot matched and its grace window has passed
-   * The expiry checks happen in JS so the same logic ports cleanly to a future
-   * Postgres dialect (P0-8) without dialect-specific SQL.
+   * The expiry checks happen in JS rather than SQL so the logic stays in one
+   * place and is easy to audit.
    */
   async findByToken(tokenHash: string): Promise<UserEntity | null> {
-    return withSpan("db.query", { attributes: { "db.repo": "users", "db.method": "findByToken" } }, () => this._findByTokenImpl(tokenHash));
+    return this._findByTokenImpl(tokenHash);
   }
 
   private async _findByTokenImpl(tokenHash: string): Promise<UserEntity | null> {

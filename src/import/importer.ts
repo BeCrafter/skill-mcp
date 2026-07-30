@@ -5,7 +5,6 @@ import type { ICacheProvider } from "../cache/provider.interface.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
 import type { SkillFileRepository } from "../db/repositories/skill-file.repository.js";
 import type { SkillVersionRepository } from "../db/repositories/skill-version.repository.js";
-import type { SkillEvalRepository } from "../db/repositories/skill-eval.repository.js";
 import type { ImportOptions, ImportResult, SkillFileInput, SkillFrontmatter, SkillMeta, SkillRetrievalMeta } from "../types/index.js";
 
 /**
@@ -31,11 +30,10 @@ function isUniqueConstraintError(err: unknown): boolean {
   return typeof e.message === "string" && /UNIQUE constraint failed/i.test(e.message);
 }
 import type { DomainEventBus } from "../events/event-bus.js";
-import type { UsageMeterService } from "../services/usage-meter.service.js";
 import { LocalSourceResolver } from "./local-source.js";
 import { GitSourceResolver } from "./git-source.js";
 import { validateSkillPackage } from "./validator.js";
-import { computeContentHash, slugify, extractFrontmatter, extractDescription, validateSkillMetaFields, parseEvalCases } from "../utils/manifest.js";
+import { computeContentHash, slugify, extractFrontmatter, extractDescription, validateSkillMetaFields } from "../utils/manifest.js";
 import { bumpVersion } from "../db/repositories/skill.repository.js";
 import { isTextFile, getMimeType } from "../utils/security.js";
 import { pMap } from "../utils/concurrency.js";
@@ -98,15 +96,8 @@ export class SkillImporter {
     private logger: Logger,
     private eventBus?: DomainEventBus,
     private versionRepo?: SkillVersionRepository,
-    private usageMeter?: UsageMeterService,
-    /**
-     * P1-12 stage 2 — optional. When wired, the importer persists the
-     * stage-1-validated `eval_cases:` frontmatter into `skill_eval_cases`
-     * after the skill row + file rows commit. Left unset in tests / contexts
-     * that don't need eval support so we don't have to update every call site.
-     */
-    private evalRepo?: SkillEvalRepository,
     private enableInjectionScan: boolean = true,
+    private onMutation?: (slug: string) => Promise<void>,
   ) {}
 
   async import(source: string, options: ImportOptions): Promise<ImportResult> {
@@ -202,6 +193,7 @@ export class SkillImporter {
       if (targetSkill.contentHash === contentHash) {
         if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
           await this.updateMetadata(targetSkill, options, tags, targetSkill.slug);
+          await this.onMutation?.(targetSkill.slug);
           this.logger.info({ slug: targetSkill.slug, name: meta.name }, "Skill metadata updated (content unchanged)");
           return {
             id: targetSkill.id,
@@ -238,6 +230,7 @@ export class SkillImporter {
         if (targetSkill.contentHash === contentHash) {
           if (this.shouldUpdateMetadata(targetSkill, options, tags, description)) {
             await this.updateMetadata(targetSkill, options, tags, existing[0].slug);
+            await this.onMutation?.(existing[0].slug);
             this.logger.info({ slug: existing[0].slug, name: meta.name }, "Skill metadata updated (content unchanged)");
             return {
               id: existing[0].id,
@@ -395,15 +388,6 @@ export class SkillImporter {
           mimeType: getMimeType(file.path),
         })));
 
-        // 6. P1-12 stage 2 — replace persisted eval cases with the validated
-        //    frontmatter view. `replaceAll` semantics: a re-imported skill
-        //    that dropped a case gets that row pruned. Stage 1's caps and
-        //    name-uniqueness checks already ran via validateSkillMetaFields
-        //    above; the repo writes the rows verbatim. If `evalCases` is
-        //    undefined the repo no-ops cleanly (delete-then-empty-loop).
-        if (this.evalRepo) {
-          this.evalRepo.replaceAllForSkill(skillId, meta.evalCases ?? []);
-        }
       }
     } catch (error) {
       // Compensating cleanup. Order matters: roll DB before storage so the
@@ -492,19 +476,7 @@ export class SkillImporter {
       version,
       action,
     });
-
-    // P1-13 — record `storage.write` with `quantity = bytes written`. Counts
-    // raw payload size of the imported files (post-validation, pre-staging),
-    // matching review §9.1 example.
-    if (this.usageMeter) {
-      const bytes = skillFiles.reduce((acc, f) => acc + f.buffer.byteLength, 0);
-      void this.usageMeter.record({
-        eventType: "storage.write",
-        resourceId: slug,
-        quantity: bytes,
-        metadata: { action, fileCount: skillFiles.length },
-      });
-    }
+    await this.onMutation?.(slug);
 
     this.logger.info({ slug, name: meta.name, version, action, fileCount: skillFiles.length }, "Skill imported");
 
@@ -566,7 +538,6 @@ export class SkillImporter {
       triggers: frontmatter["triggers"] as string[] | undefined,
       whenToUse: (frontmatter["when_to_use"] as string) ?? undefined,
       embeddingText: (frontmatter["embedding_text"] as string) ?? undefined,
-      evalCases: parseEvalCases(frontmatter["eval_cases"] ?? frontmatter["evalCases"]),
     };
   }
 

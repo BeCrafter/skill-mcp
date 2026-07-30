@@ -50,6 +50,8 @@ export interface SearchOptions {
   limit?: number;
   /** Skip hits scoring below this threshold. Defaults to 0 (return everything). */
   minScore?: number;
+  /** Optional caller-owned visibility candidate set, applied before ranking. */
+  allowedSkillIds?: ReadonlySet<string>;
 }
 
 export class BM25Index {
@@ -119,6 +121,7 @@ export class BM25Index {
   search(query: string, opts: SearchOptions = {}): SearchHit[] {
     const limit = opts.limit ?? 20;
     const minScore = opts.minScore ?? 0;
+    const allowedSkillIds = opts.allowedSkillIds;
     const tokens = tokenize(query);
     if (tokens.length === 0 || this.docs.size === 0) return [];
 
@@ -136,6 +139,7 @@ export class BM25Index {
       const nT = posting.size;
       const idf = Math.log(((N - nT + 0.5) / (nT + 0.5)) + 1);
       for (const [skillId, { tf }] of posting) {
+        if (allowedSkillIds && !allowedSkillIds.has(skillId)) continue;
         const doc = this.docs.get(skillId)!;
         const dl = doc.length;
         const norm = tf + K1 * (1 - B + (B * dl) / (avgdl || 1));

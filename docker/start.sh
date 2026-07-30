@@ -24,7 +24,7 @@ show_help() {
     echo "PROFILE:"
     echo "  c1          单体部署（开发/测试）"
     echo "  c1-gateway  单体 + HTTPS 网关"
-    echo "  backend     远程后端（配合 Scenario B 本地 stdio proxy）"
+    echo "  backend     API-only 后端（REST 管理用，C1 限制模式）"
     echo "  c2          分布式部署（生产推荐）"
     echo "  gateway     分布式 + HTTPS 网关"
     echo "  help        显示此帮助信息"
@@ -33,7 +33,7 @@ show_help() {
     echo "  $0 c1          # 启动单体部署"
     echo "  $0 c2          # 启动分布式部署"
     echo "  $0 gateway     # 启动分布式 + HTTPS 网关"
-    echo "  $0 backend     # 仅启动远程后端"
+    echo "  $0 backend     # 启动 API-only 后端"
     echo "  $0 c1-gateway  # 单体 + HTTPS 网关"
     echo ""
     echo "环境变量:"
@@ -111,19 +111,19 @@ start_services() {
         backend)
             docker compose --profile backend up -d --build
             echo ""
-            echo -e "${GREEN}✓ 远程后端已启动${NC}"
+            echo -e "${GREEN}✓ API-only 后端已启动${NC}"
             echo -e "  访问: http://localhost:${BACKEND_PORT:-3001}"
             echo -e "  健康检查: curl http://localhost:${BACKEND_PORT:-3001}/api/health"
-            echo -e "  本地接入: skill-mcp serve --remote-url http://localhost:${BACKEND_PORT:-3001}"
+            echo -e "  CLI 管理: skill-mcp --server-url http://localhost:${BACKEND_PORT:-3001} list"
             ;;
         c2)
             docker compose --profile c2 up -d --build
             echo ""
             echo -e "${GREEN}✓ 服务已启动${NC}"
-            echo -e "  Storage: http://localhost:3000"
+            echo -e "  Storage: 内部网络（无主机端口）"
             echo -e "  MCP1: http://localhost:${MCP1_PORT:-4001}"
             echo -e "  MCP2: http://localhost:${MCP2_PORT:-4002}"
-            echo -e "  健康检查: curl http://localhost:3000/api/health"
+            echo -e "  健康检查: curl http://localhost:${MCP1_PORT:-4001}/api/health"
             ;;
         gateway)
             # c2 模式的 gateway 负载均衡到 mcp1 和 mcp2

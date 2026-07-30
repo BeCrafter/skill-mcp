@@ -103,7 +103,7 @@ function extractReadmeCommands(readme) {
   if (cliMatch) {
     const lines = cliMatch[0].split('\n');
     for (const line of lines) {
-      const matches = line.matchAll(/\`([a-z]+)(?:\s|\`)/g);
+      const matches = line.matchAll(/\`([a-z][a-z:]*)(?:\s|\`)/g);
       for (const match of matches) {
         commands.add(match[1]);
       }
@@ -111,7 +111,7 @@ function extractReadmeCommands(readme) {
   }
 
   // 从其他部分也提取（比如 Quick Start）
-  const otherMatches = readme.matchAll(/\`skill-mcp ([a-z]+)\`/g);
+  const otherMatches = readme.matchAll(/\`skill-mcp ([a-z][a-z:]*)\`/g);
   for (const match of otherMatches) {
     commands.add(match[1]);
   }
@@ -138,7 +138,11 @@ function scanCliCommands() {
       // Helper modules (e.g. serve-stdio-auth.ts) live in the same directory
       // but are not standalone commands.
       if (file.endsWith('-cmd.ts') && !file.startsWith('_')) {
-        const cmdName = file.replace(/-cmd\.ts$/, '').replace(/_/g, '-');
+        let cmdName = file.replace(/-cmd\.ts$/, '').replace(/_/g, '-');
+        // Filename uses hyphens but the command is registered with a colon
+        // (e.g. manifest-migrate-cmd.ts → `manifest:migrate`). Normalize so
+        // the README check compares against the real command name.
+        if (cmdName === 'manifest-migrate') cmdName = 'manifest:migrate';
         commands.add(cmdName);
       }
     }

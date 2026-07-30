@@ -10,9 +10,7 @@ import type { AccessLogRepository } from "../db/repositories/access-log.reposito
 import type { DomainEventBus } from "../events/event-bus.js";
 import type { SkillImporter } from "../import/importer.js";
 import type { IStorageProvider } from "../storage/provider.interface.js";
-import type { UsageMeterService } from "./usage-meter.service.js";
 import type { SkillSearchService } from "./skill-search.service.js";
-import type { SkillEvalRepository } from "../db/repositories/skill-eval.repository.js";
 import type { AuditLogRepository } from "../db/repositories/audit-log.repository.js";
 import { buildUnifiedDiff } from "../utils/diff.js";
 import { getMimeType, isTextFile } from "../utils/security.js";
@@ -21,11 +19,9 @@ import { TagPermissionFilter } from "../permission/tag-filter.js";
 import { assertTransition, IllegalTransitionError, nextStates } from "./skill-lifecycle.js";
 import { scanForInjection } from "../utils/security.js";
 import { metrics } from "../telemetry/metrics.js";
-import { withSpan } from "../telemetry/spans.js";
 import {
   BadRequestError,
   ConfigurationError,
-  EvalRegressionError,
   PermissionDeniedError,
   SkillNotFoundError,
   VersionNotFoundError,
@@ -57,32 +53,11 @@ export interface SkillServiceAdminDeps {
   importer?: SkillImporter;
   accessLogRepo?: AccessLogRepository;
   auditRepo?: AuditLogRepository;
-  // P1-13 — usage metering hook for skill.view. Optional so MCP-read paths
-  // continue to work without it; when wired, every accessible viewSkillEntry
-  // emits a fire-and-forget `skill.view` event tagged with the resolved slug.
-  usageMeter?: UsageMeterService;
-  // P1-11 stage 2b — BM25 retrieval. Optional so service-layer tests that
-  // only exercise the read path keep passing without an in-memory index;
-  // when absent, listAccessibleSkills({query}) and searchAccessibleSkills
-  // fall back to a substring scan on name/description.
+  /** In-process BM25 retrieval for permission-aware search. */
   searchService?: SkillSearchService;
-  // P1-12 stage 3 — eval regression gate. When wired, transitions to
-  // `published` consult `findLatestRunStatusByCase(skillId, version)` and
-  // refuse the transition unless every case has a `pass` row for the
-  // current version. Absent → gate is a no-op (legacy callers preserved).
-  evalRepo?: SkillEvalRepository;
-}
-
-export interface TransitionLifecycleOptions {
-  /**
-   * P1-12 stage 3 — emergency override for the publish-time eval regression
-   * gate. Skips the `findLatestRunStatusByCase` check; the transition still
-   * runs through the state machine. Defaults to false. The admin REST handler
-   * surfaces this via `?force=true`; callers must justify use because a
-   * forced publish leaves a regression-prone version live until the next
-   * `eval run` writes a fresh result.
-   */
-  skipEvalGate?: boolean;
+  /** C2 remote-proxy search: when wired, searchAccessibleSkills delegates
+   * to the remote storage Registry (RBAC + BM25 handled there). */
+  remoteSearch?: (query: string, opts: { limit: number; tags?: string[] }) => Promise<SkillSearchHit[]>;
 }
 
 const SKILL_LIST_TTL_SECONDS = 600;
@@ -118,10 +93,6 @@ export interface ListSkillsOptions {
   query?: string;
   /** Hard cap when {@link query} is set. Defaults to 20. */
   searchLimit?: number;
-  /** P1-11 stage 3 — selects ranking signal when query is set. Defaults to "bm25". */
-  searchMode?: "bm25" | "vector" | "hybrid";
-  /** P1-11 stage 3 — α weight on BM25 when searchMode is "hybrid". */
-  searchHybridAlpha?: number;
 }
 
 /** P1-11 stage 2b — public hit shape for `skill_search` consumers. */
@@ -144,9 +115,8 @@ export class SkillService {
   private eventBus: DomainEventBus | null;
   private importer: SkillImporter | null;
   private accessLogRepo: AccessLogRepository | null;
-  private usageMeter: UsageMeterService | null;
   private searchService: SkillSearchService | null;
-  private evalRepo: SkillEvalRepository | null;
+  private remoteSearch: ((query: string, opts: { limit: number; tags?: string[] }) => Promise<SkillSearchHit[]>) | null;
   private auditRepo: AuditLogRepository | null;
 
   constructor(
@@ -171,9 +141,8 @@ export class SkillService {
     this.eventBus = adminDeps?.eventBus ?? null;
     this.importer = adminDeps?.importer ?? null;
     this.accessLogRepo = adminDeps?.accessLogRepo ?? null;
-    this.usageMeter = adminDeps?.usageMeter ?? null;
     this.searchService = adminDeps?.searchService ?? null;
-    this.evalRepo = adminDeps?.evalRepo ?? null;
+    this.remoteSearch = adminDeps?.remoteSearch ?? null;
     this.auditRepo = adminDeps?.auditRepo ?? null;
     // Falls back to a private (no-op-as-far-as-the-app-is-concerned) manager
     // when not wired in (CLI scripts, unit tests). The cache key still
@@ -217,24 +186,23 @@ export class SkillService {
     skills: SkillMetaPublic[],
     query: string,
     limit: number,
-    mode: "bm25" | "vector" | "hybrid" = "bm25",
-    hybridAlpha?: number,
   ): Promise<SkillSearchHit[]> {
     const trimmed = query.trim();
     if (trimmed.length === 0) return skills.slice(0, limit).map(skill => ({ skill, score: 0 }));
 
     if (this.searchService && this.searchService.isReady()) {
-      const hits = mode === "bm25"
-        ? this.searchService.search(trimmed, { limit: Math.max(limit, 20) })
-        : await this.searchService.searchAsync(trimmed, { limit: Math.max(limit, 20), mode, hybridAlpha });
       const byId = new Map(skills.map(s => [s.id, s] as const));
-      const ranked: SkillSearchHit[] = [];
-      for (const hit of hits) {
-        const skill = byId.get(hit.skillId);
-        if (skill) ranked.push({ skill, score: hit.score });
-        if (ranked.length >= limit) break;
-      }
-      return ranked;
+      const hits = this.searchService.search(trimmed, {
+        limit,
+        allowedSkillIds: new Set(byId.keys()),
+      });
+      return hits
+        .map((hit) => {
+          const skill = byId.get(hit.skillId);
+          return skill ? { skill, score: hit.score } : null;
+        })
+        .filter((hit): hit is SkillSearchHit => hit !== null)
+        .slice(0, limit);
     }
 
     const needle = trimmed.toLowerCase();
@@ -280,16 +248,14 @@ export class SkillService {
    */
   async listAccessibleSkills(context: RequestContext | undefined, opts?: ListSkillsOptions): Promise<SkillMetaPublic[]> {
     const ctx = context ?? anonymousContext();
-    return withSpan("skill.service.listAccessibleSkills", { ctx }, async () => {
-      const allowed = await this.getAccessibleSkillsForUser(ctx);
-      const filtered = this.applyListFilters(allowed, opts);
-      if (opts?.query && opts.query.trim().length > 0) {
-        const limit = opts.searchLimit ?? 20;
-        const ranked = await this.rankByQuery(filtered, opts.query, limit, opts.searchMode, opts.searchHybridAlpha);
-        return ranked.map((h) => h.skill);
-      }
-      return filtered;
-    });
+    const allowed = await this.getAccessibleSkillsForUser(ctx);
+    const filtered = this.applyListFilters(allowed, opts);
+    if (opts?.query && opts.query.trim().length > 0) {
+      const limit = opts.searchLimit ?? 20;
+      const ranked = await this.rankByQuery(filtered, opts.query, limit);
+      return ranked.map((h) => h.skill);
+    }
+    return filtered;
   }
 
   /**
@@ -306,26 +272,25 @@ export class SkillService {
       limit?: number;
       tags?: string[];
       category?: string;
-      /** P1-11 stage 3 — selects ranking signal. */
-      mode?: "bm25" | "vector" | "hybrid";
-      /** P1-11 stage 3 — α weight on BM25 in hybrid mode (0..1). */
-      hybridAlpha?: number;
     } = {},
   ): Promise<SkillSearchHit[]> {
+    // C2 remote-proxy mode: delegate search to the remote storage Registry
+    // which handles both RBAC and BM25 ranking via its own local index.
+    if (this.remoteSearch) {
+      return this.remoteSearch(query, { limit: opts.limit ?? 20, tags: opts.tags });
+    }
     const ctx = context ?? anonymousContext();
-    return withSpan("skill.service.searchAccessibleSkills", { ctx }, async () => {
-      const allowed = await this.getAccessibleSkillsForUser(ctx);
-      const filtered = this.applyListFilters(allowed, { tags: opts.tags, category: opts.category });
-      const limit = opts.limit ?? 20;
-      return this.rankByQuery(filtered, query, limit, opts.mode ?? "bm25", opts.hybridAlpha);
-    });
+    const allowed = await this.getAccessibleSkillsForUser(ctx);
+    const filtered = this.applyListFilters(allowed, { tags: opts.tags, category: opts.category });
+    const limit = opts.limit ?? 20;
+    return this.rankByQuery(filtered, query, limit);
   }
 
   /** Build the skills index for MCP instructions (flat list, no grouping) */
   async listSkillsIndex(context?: RequestContext, tags?: string[], query?: string): Promise<string> {
     const start = Date.now();
     const ctx = context ?? anonymousContext();
-    return withSpan("skill.service.listSkillsIndex", { ctx }, () => this._listSkillsIndexImpl(ctx, tags, query, start));
+    return this._listSkillsIndexImpl(ctx, tags, query, start);
   }
 
   private async _listSkillsIndexImpl(ctx: RequestContext, tags: string[] | undefined, query: string | undefined, start: number): Promise<string> {
@@ -418,11 +383,7 @@ export class SkillService {
   async viewSkillEntry(identifier: string, context?: RequestContext): Promise<string> {
     const start = Date.now();
     const ctx = context ?? anonymousContext();
-    return withSpan(
-      "skill.service.viewSkillEntry",
-      { ctx, attributes: { "skill.identifier": identifier } },
-      () => this._viewSkillEntryImpl(identifier, ctx, start),
-    );
+    return this._viewSkillEntryImpl(identifier, ctx, start);
   }
 
   private async _viewSkillEntryImpl(identifier: string, ctx: RequestContext, start: number): Promise<string> {
@@ -455,16 +416,6 @@ export class SkillService {
       }).catch(() => {});
     }
 
-    // P1-13 — usage metering. Fire-and-forget; the underlying service swallows
-    // errors so a metering DB hiccup never blocks or fails a view request.
-    if (this.usageMeter) {
-      void this.usageMeter.record({
-        userId: ctx.userId,
-        eventType: "skill.view",
-        resourceId: skill.slug,
-      });
-    }
-
     return [
       `[SYSTEM: The user is using the "${skill.slug}" skill. Below are the full instructions. Follow them strictly.]`,
       "",
@@ -480,11 +431,7 @@ export class SkillService {
   async readSkillFiles(identifier: string, filePaths: string[], context?: RequestContext): Promise<SkillFileContent[]> {
     const start = Date.now();
     const ctx = context ?? anonymousContext();
-    return withSpan(
-      "skill.service.readSkillFiles",
-      { ctx, attributes: { "skill.identifier": identifier, "skill.file_count": filePaths.length } },
-      () => this._readSkillFilesImpl(identifier, filePaths, ctx, start),
-    );
+    return this._readSkillFilesImpl(identifier, filePaths, ctx, start);
   }
 
   private async _readSkillFilesImpl(identifier: string, filePaths: string[], ctx: RequestContext, start: number): Promise<SkillFileContent[]> {
@@ -838,21 +785,12 @@ export class SkillService {
   async transitionLifecycle(
     identifier: string,
     target: SkillStatus,
-    options?: TransitionLifecycleOptions,
   ): Promise<SkillMeta> {
     if (!this.skillRepo) throw new ConfigurationError("Skill repository not configured");
     const skill = await this.resolveSkill(identifier);
     if (!skill) throw new SkillNotFoundError(identifier);
     const current = (skill.status ?? "draft") as SkillStatus;
     assertTransition(current, target);
-
-    // P1-12 stage 3 — regression gate. Only blocks transitions *into*
-    // `published` (publish + republish); deprecate/archive paths bypass.
-    // Gate is a no-op when evalRepo isn't wired (legacy callers / unit tests
-    // without an eval store) or when the caller passes skipEvalGate=true.
-    if (target === "published" && this.evalRepo && !options?.skipEvalGate) {
-      this.assertEvalRegressionGate(skill);
-    }
 
     const updated = await this.skillRepo.update(skill.id, { status: target });
     if (!updated) throw new SkillNotFoundError(identifier);
@@ -862,40 +800,10 @@ export class SkillService {
     // until SKILL_LIST_TTL_SECONDS elapses.
     this.epochs.bumpGlobal();
     this.logger.info(
-      { slug: skill.slug, from: current, to: target, forced: options?.skipEvalGate === true },
+      { slug: skill.slug, from: current, to: target },
       "Skill lifecycle transitioned",
     );
     return updated;
-  }
-
-  /**
-   * P1-12 stage 3 — publish-time eval regression gate. Throws
-   * `EvalRegressionError` when at least one case is failing or untested for
-   * the skill's *current* version. A skill with zero persisted cases passes
-   * the gate trivially — opting in to evals is the user's choice, not the
-   * platform's mandate. We also count `error`-status runs as untested
-   * because a provider crash leaves us with no signal about the case's
-   * behaviour.
-   */
-  private assertEvalRegressionGate(skill: SkillMeta): void {
-    const evalRepo = this.evalRepo;
-    if (!evalRepo) return;
-    const cases = evalRepo.findCasesBySkillId(skill.id);
-    if (cases.length === 0) return;
-    const latest = evalRepo.findLatestRunStatusByCase(skill.id, skill.version);
-    const failing: string[] = [];
-    const untested: string[] = [];
-    for (const c of cases) {
-      const status = latest.get(c.caseName);
-      if (status === undefined) untested.push(c.caseName);
-      else if (status !== "pass") failing.push(c.caseName);
-    }
-    if (failing.length === 0 && untested.length === 0) return;
-    this.logger.warn(
-      { slug: skill.slug, version: skill.version, failing, untested },
-      "Eval regression gate refused publish",
-    );
-    throw new EvalRegressionError(skill.slug, skill.version, failing, untested);
   }
 
   /** Returns the legal next states for a skill, used by admin UIs to render allowed actions. */
@@ -957,6 +865,7 @@ export class SkillService {
       });
     }
     if (!updated) throw new SkillNotFoundError(slug);
+    await this.searchService?.refreshOne(slug);
     if (this.auditRepo) this.auditRepo.log({ action: "skill.update", entityType: "skill", entityId: skill.id, before: { slug, ...projected }, after: updated });
     return toSkillMetaPublic(updated);
   }
@@ -980,6 +889,7 @@ export class SkillService {
       });
     }
     if (!deleted) throw new SkillNotFoundError(slug);
+    this.searchService?.removeBySlug(slug);
   }
 
   /** Admin entry — raw SKILL.md without permission filter. */
@@ -1034,6 +944,7 @@ export class SkillService {
         tags: skillAfter?.tags,
       });
     }
+    await this.searchService?.refreshOne(slug);
   }
 
   /**
@@ -1112,6 +1023,7 @@ export class SkillService {
         tags: updated.tags,
       });
     }
+    await this.searchService?.refreshOne(slug);
     return toSkillMetaPublic(updated);
   }
 
@@ -1119,9 +1031,8 @@ export class SkillService {
   async adminTransitionLifecycle(
     slug: string,
     target: SkillStatus,
-    options?: TransitionLifecycleOptions,
   ): Promise<SkillMeta> {
-    const updated = await this.transitionLifecycle(slug, target, options);
+    const updated = await this.transitionLifecycle(slug, target);
     if (this.auditRepo) this.auditRepo.log({ action: "skill.lifecycle", entityType: "skill", entityId: updated.id, after: { from: updated.status, to: target } });
     if (this.eventBus) {
       this.eventBus.publish({

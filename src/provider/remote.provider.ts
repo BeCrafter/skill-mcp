@@ -271,6 +271,21 @@ export class RemoteSkillProvider implements ISkillProvider {
     return (data.data ?? null) as unknown as SkillMeta | null;
   }
 
+  /** C2 D-A — proxy `skill_search` to the remote storage Registry's gateway
+   *  search endpoint. Storage runs its own local BM25 + RBAC on the authorised
+   *  data; this method is wired as `SkillService.remoteSearch` in proxy mode. */
+  async search(query: string, opts: { limit: number; tags?: string[] }): Promise<{ skill: SkillMeta; score: number }[]> {
+    const params = new URLSearchParams({ q: query, limit: String(opts.limit) });
+    if (opts.tags && opts.tags.length > 0) params.set("tags", opts.tags.join(","));
+    const url = `${this.cloudServiceUrl}/api/gateway/skills/search?${params.toString()}`;
+    const resp = await this.fetchWithRetry(url, { headers: this.getHeaders() });
+    if (!resp.ok) throw new UpstreamError(`Failed to search: ${resp.statusText}`, resp.status);
+    const raw = await resp.json();
+    const hitSchema = z.object({ skill: skillMetaSchema, score: z.number() });
+    const data = validateOrThrow("search", apiResponseSchema(z.array(hitSchema)), raw);
+    return (data.data ?? []) as unknown as { skill: SkillMeta; score: number }[];
+  }
+
   async getSkillEntry(slug: string): Promise<string> {
     const cacheKey = `skill:entry:${slug}`;
     const cached = await this.cache.get<string>(cacheKey);

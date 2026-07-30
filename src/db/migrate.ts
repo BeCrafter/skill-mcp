@@ -1,95 +1,79 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseDatabaseUrl } from "./dialect.js";
 
-/**
- * Resolve the drizzle migrations folder. We ship migration SQL alongside the
- * compiled JS (dist/db/migrate.js), but in dev/tests we run from src/. The
- * migrations themselves live at <repoRoot>/drizzle.
- */
+/** Resolve the packaged Drizzle migration folder. */
 function resolveMigrationsFolder(): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  // Walk up looking for a `drizzle` directory containing meta/_journal.json.
-  // This handles src/db/, dist/db/, and packaged installs alike.
-  for (let dir = here, i = 0; i < 6; i++, dir = dirname(dir)) {
+  for (let dir = here, i = 0; i < 6; i += 1, dir = dirname(dir)) {
     const candidate = join(dir, "drizzle");
     if (existsSync(join(candidate, "meta", "_journal.json"))) return candidate;
   }
-  // Fallback: assume cwd-relative.
   return resolve(process.cwd(), "drizzle");
 }
 
-
-
 /**
- * Drop all application tables so drizzle can recreate from the single baseline.
- * Only drops when the DB is legacy (no __drizzle_migrations) or empty.
- * Skips when __drizzle_migrations already has entries (already migrated).
+ * This release deliberately never reconstructs a pre-Drizzle database.
+ * The former baseline bootstrap path dropped every application table, which
+ * could silently destroy real skills, users, roles, and version history.
+ *
+ * An untracked, non-empty database therefore fails closed. Operators must
+ * back it up and migrate it with an explicit, reviewed migration tool; fresh
+ * databases and databases already tracked by Drizzle remain supported.
  */
-function resetAndRecreate(db: Database.Database): void {
-  const hasDrizzleTable = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='__drizzle_migrations'")
+function assertSafeMigrationState(sqlite: Database.Database): void {
+  const migrationTable = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'")
     .get();
-  if (hasDrizzleTable) {
-    const cnt = db.prepare("SELECT COUNT(*) as n FROM __drizzle_migrations").get() as { n: number };
-    if (cnt.n > 0) return; // already migrated
+  if (migrationTable) return;
+
+  const existingTable = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1")
+    .get() as { name?: string } | undefined;
+  if (existingTable) {
+    throw new Error(
+      `Refusing to migrate untracked legacy database containing table "${existingTable.name}". ` +
+      "No data was changed. Back up the database and use an explicit in-place migration before starting v0.1.",
+    );
   }
-  const anyTable = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1")
-    .get();
-  if (!anyTable) return; // fresh DB
-  db.exec(`
-    PRAGMA foreign_keys = OFF;
-    DROP TABLE IF EXISTS skill_eval_runs;
-    DROP TABLE IF EXISTS skill_eval_cases;
-    DROP TABLE IF EXISTS skill_embeddings;
-    DROP TABLE IF EXISTS audit_logs;
-    DROP TABLE IF EXISTS webhook_deliveries;
-    DROP TABLE IF EXISTS webhooks;
-    DROP TABLE IF EXISTS usage_events;
-    DROP TABLE IF EXISTS cache_user_epochs;
-    DROP TABLE IF EXISTS cache_global_epoch;
-    DROP TABLE IF EXISTS pipeline_runs;
-    DROP TABLE IF EXISTS import_jobs;
-    DROP TABLE IF EXISTS skill_versions;
-    DROP TABLE IF EXISTS skill_feedbacks;
-    DROP TABLE IF EXISTS skill_tags;
-    DROP TABLE IF EXISTS skill_files;
-    DROP TABLE IF EXISTS access_logs;
-    DROP TABLE IF EXISTS user_roles;
-    DROP TABLE IF EXISTS roles;
-    DROP TABLE IF EXISTS users;
-    DROP TABLE IF EXISTS skills;
-    DROP TABLE IF EXISTS __drizzle_migrations;
-    PRAGMA foreign_keys = ON;
-  `);
 }
 
-export function runMigrations(dbInput: string): void {
-  const cfg = parseDatabaseUrl(dbInput);
-  if (cfg.dialect !== "sqlite" || !cfg.path) {
-    throw new Error(`runMigrations: only sqlite is supported (got dialect=${cfg.dialect}).`);
+/** Run the immutable SQLite migration history without destructive recovery. */
+export function runMigrations(dbPath: string): void {
+  if (!dbPath || dbPath.trim().length === 0) {
+    throw new Error("Database path is empty. Set DATABASE_PATH.");
   }
-  const dbPath = cfg.path;
-
-  const dir = dirname(dbPath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(dbPath) && !dbPath.startsWith("sqlite://")) {
+    throw new Error("Only SQLite database paths are supported in v0.1. Set DATABASE_PATH.");
   }
+  const resolvedPath = dbPath.startsWith("sqlite://") ? dbPath.slice("sqlite://".length) : dbPath;
+  if (!resolvedPath) throw new Error("Invalid sqlite:// URL: missing database path.");
 
-  const migrationsFolder = resolveMigrationsFolder();
-  const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
+  const dir = dirname(resolvedPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  resetAndRecreate(sqlite);
-
-  sqlite.pragma("foreign_keys = OFF");
-  const db = drizzle(sqlite);
-  migrate(db, { migrationsFolder });
-  sqlite.pragma("foreign_keys = ON");
-  sqlite.close();
+  const sqlite = new Database(resolvedPath);
+  try {
+    sqlite.pragma("journal_mode = WAL");
+    assertSafeMigrationState(sqlite);
+    sqlite.pragma("foreign_keys = OFF");
+    const db = drizzle(sqlite);
+    // Dynamic import preserves direct invocation from compiled dist.
+    void db;
+    const { migrate } = requireMigration();
+    migrate(db, { migrationsFolder: resolveMigrationsFolder() });
+    sqlite.pragma("foreign_keys = ON");
+  } finally {
+    sqlite.close();
+  }
 }
+
+function requireMigration(): { migrate: typeof import("drizzle-orm/better-sqlite3/migrator").migrate } {
+  // ESM static import is intentionally avoided only to keep this helper's
+  // return type narrow; this has no runtime configurability.
+  return { migrate: (awaitlessMigrate as typeof import("drizzle-orm/better-sqlite3/migrator").migrate) };
+}
+
+import { migrate as awaitlessMigrate } from "drizzle-orm/better-sqlite3/migrator";

@@ -31,12 +31,19 @@ describe("OpenAPI spec (P0-2)", () => {
     expect(spec.paths["/admin/skills/{slug}/lifecycle/next"]?.get).toBeTruthy();
   });
 
-  it("documents the P0-10 async import surface (POST /import/async + jobs)", () => {
-    const post = spec.paths["/admin/skills/import/async"]?.post as { responses: Record<string, unknown> };
-    expect(post.responses["202"]).toBeTruthy();
-    expect(spec.paths["/admin/jobs"]?.get).toBeTruthy();
-    expect(spec.paths["/admin/jobs/{jobId}"]?.get).toBeTruthy();
-    expect(spec.paths["/admin/jobs/{jobId}/progress"]?.get).toBeTruthy();
+  it("does not expose async import jobs in v0.1", () => {
+    expect(spec.paths["/admin/skills/import/async"]).toBeUndefined();
+    expect(spec.paths["/admin/jobs"]).toBeUndefined();
+    expect(spec.paths["/admin/jobs/{jobId}"]).toBeUndefined();
+    expect(spec.components.schemas.ImportJobView).toBeUndefined();
+    expect(spec.tags.find(t => t.name === "Admin / Jobs")).toBeUndefined();
+    expect(spec.info.description).not.toMatch(/import jobs/i);
+  });
+
+  it("description lists all five MCP tools exposed via the MCP transport", () => {
+    for (const tool of ["skill_list", "skill_search", "skill_view", "skill_file", "skill_feedback"]) {
+      expect(spec.info.description).toContain(tool);
+    }
   });
 
   it("documents the P0-4 token rotation endpoint", () => {
@@ -48,12 +55,6 @@ describe("OpenAPI spec (P0-2)", () => {
   it("defines a stable Error envelope schema with a code field", () => {
     const err = spec.components.schemas.Error as { properties: { error: { properties: { code: { type: string } } } } };
     expect(err.properties.error.properties.code.type).toBe("string");
-  });
-
-  it("ImportJobView intentionally omits the options blob (secret-leak guard)", () => {
-    const view = spec.components.schemas.ImportJobView as { properties: Record<string, unknown>; description?: string };
-    expect(view.properties.options).toBeUndefined();
-    expect(view.description).toMatch(/options.*omitted/i);
   });
 
   it("path refs to components/responses/NotFound resolve", () => {

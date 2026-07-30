@@ -21,7 +21,6 @@ export type DomainEvent =
   | ({ type: "skill:deleted" } & SkillMutationCommon)
   | ({ type: "skill:imported" } & SkillMutationCommon & { version?: string; action?: "created" | "updated"; name?: string })
   | ({ type: "skill:deprecated" } & SkillMutationCommon & { version?: string })
-  | { type: "pipeline:completed"; runId?: string; pipelineName: string; status: "success" | "partial" | "failed"; stageCount: number }
   | { type: "user:token_rotated"; userId: string; rotatedAt: number; previousTokenExpiresAt?: number | null }
   | { type: "user:roles_changed"; userId: string }
   | { type: "user:logged_in"; userId: string; username: string }

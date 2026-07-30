@@ -176,20 +176,20 @@ describe("skill_search MCP tool", () => {
       expect(() => tool.inputSchema.parse({ query: "x", hybridAlpha: 1.5 })).toThrow();
     });
 
-    it("forwards mode to searchAccessibleSkills", async () => {
+    it("accepts but ignores legacy mode", async () => {
       const svc = fakeService([]);
       const tool = createSkillSearchTool(svc);
       await tool.handler({ query: "x", mode: "hybrid" });
       expect((svc.searchAccessibleSkills as unknown as ReturnType<typeof vi.fn>))
-        .toHaveBeenCalledWith(undefined, "x", expect.objectContaining({ mode: "hybrid" }));
+        .toHaveBeenCalledWith(undefined, "x", { limit: 10, tags: undefined });
     });
 
-    it("forwards hybridAlpha to searchAccessibleSkills", async () => {
+    it("accepts but ignores legacy hybridAlpha", async () => {
       const svc = fakeService([]);
       const tool = createSkillSearchTool(svc);
       await tool.handler({ query: "x", mode: "hybrid", hybridAlpha: 0.7 });
       expect((svc.searchAccessibleSkills as unknown as ReturnType<typeof vi.fn>))
-        .toHaveBeenCalledWith(undefined, "x", expect.objectContaining({ mode: "hybrid", hybridAlpha: 0.7 }));
+        .toHaveBeenCalledWith(undefined, "x", { limit: 10, tags: undefined });
     });
 
     it("omits mode/hybridAlpha when caller doesn't supply them (service applies its own default)", async () => {

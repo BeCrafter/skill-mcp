@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import yaml from "js-yaml";
 import { getLogger } from "./logger.js";
 import { InvalidPathError } from "./errors.js";
-import type { SkillFrontmatter, SkillFileInput, SkillEvalCase } from "../types/index.js";
+import type { SkillFrontmatter, SkillFileInput } from "../types/index.js";
 
 // T-601 — bound walk so a malicious skill package can't blow the stack via
 // pathologically deep directory nesting.
@@ -35,17 +35,6 @@ const MAX_TRIGGERS_COUNT = 32;
 const MAX_TRIGGER_LENGTH = 128;
 const MAX_WHEN_TO_USE_LENGTH = 2048;
 const MAX_EMBEDDING_TEXT_LENGTH = 8192;
-// P1-12 — eval-case caps. A case is structurally `name + input + 0..3 lists
-// of expectations`; without caps a malicious package could ship 1000 cases
-// with multi-MB inputs and balloon both validation cost and the row payload
-// once stage 2 persists them. Numbers chosen to match real-world test suites
-// (tens of cases per skill, prompt sized like a chat turn).
-const MAX_EVAL_CASES = 32;
-const MAX_EVAL_NAME_LENGTH = 128;
-const MAX_EVAL_INPUT_LENGTH = 4096;
-const MAX_EVAL_EXPECT_ENTRIES = 16;
-const MAX_EVAL_EXPECT_LENGTH = 1024;
-
 /**
  * P1-21 — Manifest schema version contract (review doc §14.5).
  *
@@ -76,37 +65,6 @@ function safeJoin(base: string, child: string): string {
     throw new InvalidPathError(child);
   }
   return resolved;
-}
-
-/**
- * P1-12 stage 1 — parse eval_cases from YAML frontmatter. Accepts both
- * snake_case and camelCase keys, normalizes to camelCase. Returns
- * `undefined` when the input is missing / not an array so downstream callers
- * can preserve "absent" vs "explicitly empty" distinctions.
- *
- * NOTE: this only normalizes shape — caps and uniqueness are enforced later
- * by `validateSkillMetaFields`. Keeping parse + validate separate matches the
- * pattern used for triggers/whenToUse and means malformed YAML still surfaces
- * a typed error from the validator.
- */
-export function parseEvalCases(raw: unknown): SkillEvalCase[] | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (!Array.isArray(raw)) return raw as never; // let validator reject
-  return raw.map(item => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return item as never; // pass through; validator will reject
-    }
-    const r = item as Record<string, unknown>;
-    const out: SkillEvalCase = {
-      name: r["name"] as string,
-      input: r["input"] as string,
-    };
-    const contains = r["expected_output_contains"] ?? r["expectedOutputContains"];
-    if (contains !== undefined) out.expectedOutputContains = contains as string[];
-    const notContains = r["expected_output_not_contains"] ?? r["expectedOutputNotContains"];
-    if (notContains !== undefined) out.expectedOutputNotContains = notContains as string[];
-    return out;
-  });
 }
 
 /**
@@ -142,7 +100,6 @@ export function parseSkillMeta(dirPath: string): SkillFrontmatter {
     triggers: frontmatter["triggers"] as string[] | undefined,
     whenToUse: (frontmatter["when_to_use"] as string) ?? undefined,
     embeddingText: (frontmatter["embedding_text"] as string) ?? undefined,
-    evalCases: parseEvalCases(frontmatter["eval_cases"] ?? frontmatter["evalCases"]),
   };
 }
 
@@ -212,71 +169,6 @@ export function validateSkillMetaFields(meta: SkillFrontmatter): void {
     }
     if (meta.embeddingText.length > MAX_EMBEDDING_TEXT_LENGTH) {
       throw new Error(`Skill embedding_text exceeds max length (${MAX_EMBEDDING_TEXT_LENGTH})`);
-    }
-  }
-  // P1-12 stage 1 — eval-case shape + caps. Non-fatal (info nudge) when the
-  // field is absent; we only reject malformed shapes and cap violations here.
-  if (meta.evalCases !== undefined) {
-    validateEvalCases(meta.evalCases);
-  }
-}
-
-/**
- * P1-12 stage 1 — strict shape + caps + per-case sanity check. Throws on the
- * first violation so the importer surfaces one clear error instead of a flood.
- */
-export function validateEvalCases(raw: unknown): void {
-  if (!Array.isArray(raw)) {
-    throw new Error(`Skill eval_cases must be an array of case objects`);
-  }
-  if (raw.length > MAX_EVAL_CASES) {
-    throw new Error(`Skill eval_cases exceed max count (${MAX_EVAL_CASES})`);
-  }
-  const seen = new Set<string>();
-  for (let i = 0; i < raw.length; i += 1) {
-    const c = raw[i];
-    if (!c || typeof c !== "object" || Array.isArray(c)) {
-      throw new Error(`Skill eval_cases[${i}] must be an object`);
-    }
-    const ec = c as SkillEvalCase;
-    if (typeof ec.name !== "string" || ec.name.length === 0) {
-      throw new Error(`Skill eval_cases[${i}].name is required and must be a non-empty string`);
-    }
-    if (ec.name.length > MAX_EVAL_NAME_LENGTH) {
-      throw new Error(`Skill eval_cases[${i}].name exceeds max length (${MAX_EVAL_NAME_LENGTH})`);
-    }
-    if (seen.has(ec.name)) {
-      throw new Error(`Skill eval_cases[${i}].name "${ec.name}" is duplicated within the skill`);
-    }
-    seen.add(ec.name);
-    if (typeof ec.input !== "string" || ec.input.length === 0) {
-      throw new Error(`Skill eval_cases[${i}].input is required and must be a non-empty string`);
-    }
-    if (ec.input.length > MAX_EVAL_INPUT_LENGTH) {
-      throw new Error(`Skill eval_cases[${i}].input exceeds max length (${MAX_EVAL_INPUT_LENGTH})`);
-    }
-    validateExpectList(ec.expectedOutputContains, `eval_cases[${i}].expected_output_contains`);
-    validateExpectList(ec.expectedOutputNotContains, `eval_cases[${i}].expected_output_not_contains`);
-  }
-}
-
-function validateExpectList(list: string[] | undefined, label: string): void {
-  if (list === undefined) return;
-  if (!Array.isArray(list)) {
-    throw new Error(`Skill ${label} must be an array of strings`);
-  }
-  if (list.length > MAX_EVAL_EXPECT_ENTRIES) {
-    throw new Error(`Skill ${label} exceed max count (${MAX_EVAL_EXPECT_ENTRIES})`);
-  }
-  for (const entry of list) {
-    if (typeof entry !== "string") {
-      throw new Error(`Skill ${label} entries must be strings`);
-    }
-    if (entry.length === 0) {
-      throw new Error(`Skill ${label} entries must be non-empty strings`);
-    }
-    if (entry.length > MAX_EVAL_EXPECT_LENGTH) {
-      throw new Error(`Skill ${label} entry exceeds max length (${MAX_EVAL_EXPECT_LENGTH})`);
     }
   }
 }

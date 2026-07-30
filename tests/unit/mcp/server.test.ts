@@ -24,7 +24,7 @@ describe("createMcpServer", () => {
     const info = (server as unknown as { server: { _serverInfo: { name: string; version: string } } })
       .server._serverInfo;
     expect(info.name).toBe("skill-mcp");
-    expect(info.version).toBe("0.0.1");
+    expect(info.version).toBe("0.1.0");
   });
 
   it("honors custom name + version", async () => {

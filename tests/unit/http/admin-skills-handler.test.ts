@@ -268,7 +268,7 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
       const { router, skillService } = setup();
       const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams(), {});
       await router.dispatch(ctx);
-      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: false });
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published");
       expect(bodyOf(ctx).statusCode).toBe(200);
     });
 
@@ -276,7 +276,7 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
       const { router, skillService } = setup();
       const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams("force=true"), {});
       await router.dispatch(ctx);
-      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: true });
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published");
       expect(bodyOf(ctx).statusCode).toBe(200);
     });
 
@@ -284,14 +284,14 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
       const { router, skillService } = setup();
       const ctx = makeCtx("POST", "/api/admin/skills/demo/publish", new URLSearchParams("force=1"), {});
       await router.dispatch(ctx);
-      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: false });
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published");
     });
 
     it("POST /api/admin/skills/:slug/deprecate calls adminTransitionLifecycle('deprecated')", async () => {
       const { router, skillService } = setup();
       const ctx = makeCtx("POST", "/api/admin/skills/demo/deprecate", new URLSearchParams(), {});
       await router.dispatch(ctx);
-      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "deprecated", { skipEvalGate: false });
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "deprecated");
       expect(bodyOf(ctx).statusCode).toBe(200);
     });
 
@@ -299,7 +299,7 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
       const { router, skillService } = setup();
       const ctx = makeCtx("POST", "/api/admin/skills/demo/archive", new URLSearchParams(), {});
       await router.dispatch(ctx);
-      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "archived", { skipEvalGate: false });
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "archived");
       expect(bodyOf(ctx).statusCode).toBe(200);
     });
 
@@ -307,7 +307,7 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
       const { router, skillService } = setup();
       const ctx = makeCtx("POST", "/api/admin/skills/demo/republish", new URLSearchParams(), {});
       await router.dispatch(ctx);
-      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: false });
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published");
       expect(bodyOf(ctx).statusCode).toBe(200);
     });
 
@@ -315,7 +315,7 @@ describe("registerAdminSkillRoutes — P0-A admin convergence", () => {
       const { router, skillService } = setup();
       const ctx = makeCtx("POST", "/api/admin/skills/demo/republish", new URLSearchParams("force=true"), {});
       await router.dispatch(ctx);
-      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published", { skipEvalGate: true });
+      expect(skillService.adminTransitionLifecycle).toHaveBeenCalledWith("demo", "published");
     });
 
     it("POST /api/admin/skills/:slug/publish returns 409 when service throws IllegalTransitionError", async () => {

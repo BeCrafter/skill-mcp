@@ -1,13 +1,12 @@
 
-# Skill MCP Server - Docker Compose配置
-# 支持全部 5 种部署场景
+# Skill MCP Server — Docker Compose  (v0.1 + C2)
 #
-# 使用方法：
-#   C1 单体:         docker compose --profile c1 up -d
-#   C1 + HTTPS:      DOMAIN=your-domain.com docker compose --profile c1-gateway up -d
-#   B 远程后端:      docker compose --profile backend up -d
-#   C2 分布式:       docker compose --profile c2 up -d
-#   C2 + HTTPS 网关: docker compose --profile c2 --profile gateway up -d
+# Usage:
+#   C1 single-node:   docker compose --profile c1 up -d
+#   C1 + HTTPS:       DOMAIN=your-domain.com docker compose --profile c1-gateway up -d
+#   Backend (API-only): docker compose --profile backend up -d
+#   C2 distributed:   docker compose --profile c2 up -d
+#   C2 + HTTPS:       docker compose --profile c2 --profile gateway up -d
 
 x-common-env: &common-env
   NODE_ENV: ${NODE_ENV:-production}

@@ -121,36 +121,7 @@ export class ConfigurationError extends AppError {
   }
 }
 
-/**
- * P1-12 stage 3 — eval regression gate refused a publish transition because
- * the latest run set for the skill's current version isn't all-pass. Carries
- * the failing and untested case names so the admin UI / CLI can render
- * actionable feedback ("run these, then retry") without re-querying.
- */
-export class EvalRegressionError extends AppError {
-  constructor(
-    public readonly slug: string,
-    public readonly version: string,
-    public readonly failingCases: string[],
-    public readonly untestedCases: string[],
-  ) {
-    const parts: string[] = [];
-    if (failingCases.length > 0) parts.push(`failing: ${failingCases.join(", ")}`);
-    if (untestedCases.length > 0) parts.push(`untested: ${untestedCases.join(", ")}`);
-    super(
-      `Eval regression gate blocked publish of "${slug}" v${version}. ${parts.join("; ")}`,
-      "EVAL_REGRESSION_GATE",
-      409,
-    );
-    this.name = "EvalRegressionError";
-  }
-}
-
-/**
- * Failure when calling a remote dependency (cloud service, OSS, etc.).
- * Carries the upstream HTTP status / cause so observability can dimension on it,
- * while presenting a single 502 to clients.
- */
+/** Remote/cloud upstream returned an invalid or unreachable response (502). */
 export class UpstreamError extends AppError {
   constructor(
     message: string,

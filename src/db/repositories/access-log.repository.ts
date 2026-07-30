@@ -32,7 +32,7 @@ export class AccessLogRepository {
       .limit(limit)
       .all();
 
-    // T-716 — same defensive parse as PipelineRunRepository.findById (T-501).
+    // T-716 — defensive JSON parse for a TEXT blob column.
     // `filePaths` is a TEXT JSON blob; one corrupt row used to bubble a raw
     // SyntaxError out of the admin audit endpoint and 500 the whole listing.
     // Drop the malformed value (treat as undefined) and keep serving the rest.

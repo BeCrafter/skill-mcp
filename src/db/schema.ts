@@ -153,16 +153,11 @@ export const skillVersions = sqliteTable("skill_versions", {
   index("idx_skill_versions_created_at").on(table.createdAt),
 ]);
 
-// P0-10 — async import jobs. The sync POST /api/v1/admin/skills path holds
-// the request for the entire staging-commit cycle, which is fine for small
-// payloads but becomes unusable for large git imports (commercialization
-// review §17.2 lists 50MB ≤ 30s). The async route enqueues a row here and
-// hands the request to the BackgroundImportWorker; clients poll
-// GET /api/v1/admin/jobs/:jobId for progress + final result.
-//
-// Persisted (rather than in-memory) so progress survives restart: on boot,
-// any rows left in `running` are reset to `queued` so the worker can pick
-// them back up. Failed rows are kept for audit (`error` carries the message).
+// Compatibility-only tombstone (v0.1). The async import-job capability was
+// removed; v0.1 imports synchronously via POST /api/v1/admin/skills. Retained
+// only so a legacy database can still be opened by a v0.1 binary — no
+// repository or runtime write path exists. Do not generate a DROP migration
+// (see docs/releases/v0.1.md).
 export const importJobs = sqliteTable("import_jobs", {
   id: text("id").primaryKey(),
   status: text("status", { enum: ["queued", "running", "succeeded", "failed"] }).notNull().default("queued"),
@@ -206,16 +201,10 @@ export const cacheUserEpochs = sqliteTable("cache_user_epochs", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-// P1-13 — Usage metering events (review §9.1). Distinct from `access_logs`
-// (operational audit, short retention) — this table is the billing-grade source
-// of truth, with `quantity` carrying byte counts / token counts rather than the
-// "this happened once" semantics of access logs. `hour_bucket` is pre-computed
-// UTC ("YYYY-MM-DDTHH") so aggregation queries can hit a covering index.
-//
-// Write path is fire-and-forget through `UsageMeterService`: failures log a
-// warn and bump a metric but never block the request. The hot-path overhead
-// is one INSERT per metered call (a few hundred microseconds at SQLite's
-// WAL mode); for higher volumes, batch via Redis counters and archive hourly.
+// Compatibility-only tombstone (v0.1). Usage metering was removed; there is
+// no UsageMeterService or runtime write path. Retained only so a legacy
+// database can still be opened by a v0.1 binary. Do not generate a DROP
+// migration (see docs/releases/v0.1.md).
 export const usageEvents = sqliteTable("usage_events", {
   id: text("id").primaryKey(),
   userId: text("user_id"),
@@ -358,13 +347,11 @@ export const skillEvalRuns = sqliteTable("skill_eval_runs", {
   index("idx_skill_eval_runs_created_at").on(table.createdAt),
 ]);
 
-// P1-11 stage 3 — Embedding sidecar. One row per skill (PK = skill_id).
-// `vector` stores the raw Float32Array bytes via Buffer; the repository
-// translates to/from Float32Array on read/write so consumers never see the
-// raw blob. `model_name` lets the search service detect rows written by a
-// previous embedding model (dimension change → wholesale re-embed) and
-// `content_hash` lets it skip re-embedding when the SKILL.md content
-// didn't change but some other unrelated field did. See drizzle/0014.
+// Compatibility-only tombstone (v0.1). Vector/embedding retrieval was
+// removed; `embedding_text` is now ordinary BM25 corpus text and no repository
+// or runtime write path touches this table. Retained only so a legacy database
+// can still be opened by a v0.1 binary. Do not generate a DROP migration
+// (see docs/releases/v0.1.md).
 export const skillEmbeddings = sqliteTable("skill_embeddings", {
   skillId: text("skill_id").primaryKey().references(() => skills.id, { onDelete: "cascade" }),
   modelName: text("model_name").notNull(),

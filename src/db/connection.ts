@@ -3,59 +3,34 @@ import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import * as schema from "./schema.js";
-import { parseDatabaseUrl, type DialectConfig } from "./dialect.js";
 
-// P0-8 — `DrizzleDB` is now an alias for whichever driver the user picked.
-// Until the PG schema port lands (P1, see review §3.1.1) the runtime type is
-// always BetterSQLite3Database; the union widens once we add pg.
-//
-// Why a union here vs swapping the type per dialect? Repositories type their
-// constructor parameter as `DrizzleDB` and use the schema relations from
-// drizzle — both surfaces are dialect-agnostic in normal CRUD. The only
-// dialect-sensitive call site is migrate.ts (raw SQL), which is already
-// dialect-aware.
 export type DrizzleDB = BetterSQLite3Database<typeof schema>;
+let db: DrizzleDB | null = null;
+let sqlite: Database.Database | null = null;
+let currentPath: string | null = null;
 
-let _db: DrizzleDB | null = null;
-let _sqlite: Database.Database | null = null;
-let _currentKey: string | null = null;
-
-/**
- * Open (or reuse) a database connection. Accepts either a bare filesystem
- * path (legacy `DATABASE_PATH`) or a URL (`sqlite://...`, `postgres://...`).
- */
-export function getDatabase(input: string): DrizzleDB {
-  const cfg = parseDatabaseUrl(input);
-  const key = cfg.dialect === "sqlite" ? `sqlite:${cfg.path}` : `postgres:${cfg.url}`;
-  if (_db && _currentKey === key) return _db;
-
-  closeDatabase();
-
-  if (cfg.dialect === "postgres") {
-    // Postgres support is gated on the schema port (P1). Failing fast here is
-    // better than letting a partial implementation corrupt data; the user's
-    // intent is unambiguous (they set DATABASE_URL=postgres://...).
-    throw new Error(
-      "Postgres dialect detected (DATABASE_URL=postgres://...) but the PG schema port is not yet shipped. " +
-        "Tracked as P1 (see review §3.1.1). Use sqlite for now.",
-    );
+function normalizeSqlitePath(input: string): string {
+  if (!input || input.trim().length === 0) throw new Error("Database path is empty. Set DATABASE_PATH.");
+  if (input.startsWith("sqlite://")) return input.slice("sqlite://".length);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(input)) {
+    throw new Error("Only SQLite database paths are supported in v0.1. Set DATABASE_PATH.");
   }
-
-  return openSqlite(cfg, key);
+  return input;
 }
 
-function openSqlite(cfg: DialectConfig, key: string): DrizzleDB {
-  if (!cfg.path) throw new Error("sqlite dialect requires a path");
-  const dir = dirname(cfg.path);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  _sqlite = new Database(cfg.path);
-  _sqlite.pragma("journal_mode = WAL");
-  _sqlite.pragma("foreign_keys = ON");
-  _currentKey = key;
-  _db = drizzle(_sqlite, { schema });
-  return _db;
+/** Open or reuse the configured SQLite database. */
+export function getDatabase(input: string): DrizzleDB {
+  const path = normalizeSqlitePath(input);
+  if (db && currentPath === path) return db;
+  closeDatabase();
+  const dir = dirname(path);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  sqlite = new Database(path);
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("foreign_keys = ON");
+  currentPath = path;
+  db = drizzle(sqlite, { schema });
+  return db;
 }
 
 export function createDatabase(dbPath: string): DrizzleDB {
@@ -64,12 +39,10 @@ export function createDatabase(dbPath: string): DrizzleDB {
 }
 
 export function closeDatabase(): void {
-  if (_sqlite) {
-    try { _sqlite.close(); } catch {
-      // Connection already closed or error during close
-    }
-    _sqlite = null;
+  if (sqlite) {
+    try { sqlite.close(); } catch { /* already closed */ }
   }
-  _db = null;
-  _currentKey = null;
+  sqlite = null;
+  db = null;
+  currentPath = null;
 }

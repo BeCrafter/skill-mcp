@@ -7,16 +7,12 @@ import type { ISkillProvider } from "../../provider/interface.js";
 import type { SkillService } from "../../services/skill.service.js";
 import type { ContextBuilder } from "../../permission/context-builder.js";
 import { attachMcpAuthFromHeaders } from "../../permission/context-builder.js";
-import type { PipelineRunStore } from "../../pipeline/run-store.js";
-import type { UsageMeterService } from "../../services/usage-meter.service.js";
 
 export interface SseMcpHandlerDeps {
   skillService: SkillService;
   skillProvider: ISkillProvider;
   serverName: string;
   serverVersion: string;
-  pipelineRunStore?: PipelineRunStore;
-  usageMeter?: UsageMeterService;
 }
 
 const SSE_IDLE_TIMEOUT_MS = 2 * 60 * 1000;   // 2 min (was 30 min) — faster cleanup on disconnect
@@ -57,7 +53,7 @@ export async function createSseMcpHandler(
 
     if (req.method === "GET" && url === "/mcp/sse") {
       try {
-        const server = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder, deps.pipelineRunStore, deps.usageMeter);
+        const server = await createMcpServer(deps.skillService, deps.skillProvider, deps.serverName, deps.serverVersion, contextBuilder);
         const transport = new SSEServerTransport("/mcp/messages", res);
         // Use transport's own sessionId — it embeds this in the endpoint event sent to the client,
         // so POST requests will arrive with this exact ID.

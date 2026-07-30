@@ -21,11 +21,11 @@ export const metrics = {
     registers: [registry],
   }),
 
-  // ISkillProvider latency — separates local-fs/cache from remote gateway.
+  // Local provider latency (storage/cache backed Registry reads).
   providerLatency: new Histogram({
     name: "skill_mcp_provider_latency_seconds",
     help: "ISkillProvider operation latency in seconds",
-    labelNames: ["provider", "operation", "status"], // provider=local|remote
+    labelNames: ["provider", "operation", "status"],
     buckets: [0.001, 0.01, 0.05, 0.1, 0.5, 1, 5],
     registers: [registry],
   }),
@@ -119,7 +119,7 @@ export const metrics = {
 
   // Skill import latency + outcome (T-303). Source label distinguishes
   // local-fs vs git pulls; failure counter is incremented even when the
-  // staging-commit pipeline aborts mid-flight.
+  // staging commit aborts mid-flight.
   importDuration: new Histogram({
     name: "skill_mcp_import_duration_seconds",
     help: "Skill import duration in seconds",
@@ -141,17 +141,6 @@ export const metrics = {
     name: "skill_mcp_injection_alert_total",
     help: "Total prompt injection patterns matched in skill content",
     labelNames: ["pattern", "source"], // source=view|import|lint
-    registers: [registry],
-  }),
-
-  // Pipeline run rows whose JSON columns failed to parse during hydration
-  // (T-501). One row may increment multiple labels if several columns are
-  // corrupt. A non-zero count on any label means the row was dropped from
-  // findById and the caller treats it as not found.
-  pipelineRunRowCorrupted: new Counter({
-    name: "skill_mcp_pipeline_runs_row_corrupted_total",
-    help: "Pipeline run rows dropped because a JSON column failed to parse",
-    labelNames: ["column"], // column=definition|inputs|batches|completedStages
     registers: [registry],
   }),
 
@@ -210,52 +199,14 @@ export const metrics = {
     registers: [registry],
   }),
 
-  // P1-16 — Webhook outbound metrics (review §5.5.1).
-  // `webhookDeliveryFinal` captures terminal outcomes for dashboards (success
-  // vs dead_letter ratio); `webhookDeliveryRetry` increments when a row is
-  // pushed back into pending for another attempt; `webhookDispatchDuration`
-  // is the per-attempt POST latency histogram (seconds).
-  webhookDeliveryFinal: new Counter({
-    name: "skill_mcp_webhook_delivery_final_total",
-    help: "Total webhook deliveries that reached a terminal status",
-    labelNames: ["outcome"], // outcome=success|dead_letter
-    registers: [registry],
-  }),
-
-  webhookDeliveryRetry: new Counter({
-    name: "skill_mcp_webhook_delivery_retry_total",
-    help: "Total webhook deliveries rescheduled for retry",
-    labelNames: ["event"],
-    registers: [registry],
-  }),
-
-  webhookDispatchDuration: new Histogram({
-    name: "skill_mcp_webhook_dispatch_duration_seconds",
-    help: "Wall-clock time from POST start to HTTP response (or timeout)",
-    labelNames: ["event"],
-    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
-    registers: [registry],
-  }),
-
-  // P1-13 — Usage metering events recorded. `status=ok` on insert success,
-  // `status=error` on DB failure (the request still proceeds — usage write
-  // is fire-and-forget). `event_type` is included so dashboards can split
-  // skill.view vs pipeline.run vs api.call vs storage.write volume.
-  usageEventsRecorded: new Counter({
-    name: "skill_mcp_usage_events_total",
-    help: "Total usage metering events recorded (or attempted)",
-    labelNames: ["event_type", "status"], // status=ok|error
-    registers: [registry],
-  }),
-
-  // T-605 — cloud-service responses that fail RemoteSkillProvider's zod
-  // schema validation. A non-zero count means the gateway and cloud schemas
-  // are drifting; UpstreamError is thrown immediately so callers get a clean
-  // 502 instead of a deep TypeError.
+  // C2 remote proxy — responses rejected by RemoteSkillProvider schema
+  // validation. A non-zero count means the proxy and storage schemas are
+  // drifting; UpstreamError is thrown so callers get a clean 502 instead of
+  // a deep TypeError.
   remoteValidationErrors: new Counter({
     name: "skill_mcp_remote_validation_errors_total",
     help: "Cloud service responses rejected by RemoteSkillProvider schema validation",
-    labelNames: ["method"], // method=listSkills|getSkillMeta|getSkillMetaById|getSkillFiles|getSkillFileTree
+    labelNames: ["method"], // method=listSkills|getSkillMeta|getSkillMetaById|getSkillFiles|getSkillFileTree|search
     registers: [registry],
   }),
 };

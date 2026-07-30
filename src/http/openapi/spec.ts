@@ -45,8 +45,8 @@ export function buildOpenApiSpec(): OpenApiDoc {
       title: "Skill MCP HTTP API",
       version: PACKAGE_VERSION,
       description:
-        "REST surface of the Skill MCP server. Admin endpoints manage skills, users, roles, and import jobs; gateway endpoints serve authenticated clients. " +
-        "MCP tools (`skill_list`, `skill_view`, `skill_file`) are exposed via the MCP transport at `/mcp` and `/mcp/sse` and are NOT documented here. " +
+        "REST surface of the Skill MCP server. Admin endpoints manage skills, users, and roles; gateway endpoints serve authenticated clients. " +
+        "MCP tools (`skill_list`, `skill_search`, `skill_view`, `skill_file`, `skill_feedback`) are exposed via the MCP transport at `/mcp` and `/mcp/sse` and are NOT documented here. " +
         "All responses use `application/json` unless noted. Authentication is via `Authorization: Bearer <token>` (issued by `skill-mcp user create`). " +
         "Error contract: every non-2xx response has shape `{ success: false, error: { code, message, ...details } }`. " +
         "Codes are stable identifiers safe for programmatic branching; messages are human-readable and may be localized in future releases.",
@@ -59,7 +59,6 @@ export function buildOpenApiSpec(): OpenApiDoc {
     tags: [
       { name: "Health", description: "Health check" },
       { name: "Admin / Skills", description: "Skill CRUD, import, lifecycle" },
-      { name: "Admin / Jobs", description: "Async import jobs (P0-10)" },
       { name: "Admin / Users", description: "User and bearer-token management (P0-4 token rotation)" },
       { name: "Admin / Roles", description: "Roles and tag bindings (RBAC)" },
       { name: "Gateway / Skills", description: "Authenticated client-facing skill access" },
@@ -109,25 +108,6 @@ export function buildOpenApiSpec(): OpenApiDoc {
             visibility: { $ref: "#/components/schemas/Visibility" },
             createdAt: { type: "integer", format: "int64" },
             updatedAt: { type: "integer", format: "int64" },
-          },
-        },
-        ImportJobStatus: { type: "string", enum: ["queued", "running", "succeeded", "failed"] },
-        ImportJobView: {
-          type: "object",
-          description: "Note: `options` (source/branch/token) is intentionally omitted from poll responses to avoid leaking secrets.",
-          required: ["id", "status", "progress", "source", "created_at"],
-          properties: {
-            id: { type: "string" },
-            status: { $ref: "#/components/schemas/ImportJobStatus" },
-            progress: { type: "integer", minimum: 0, maximum: 100 },
-            message: { type: "string", nullable: true },
-            source: { type: "string" },
-            result: { type: "object", nullable: true },
-            error: { type: "string", nullable: true },
-            created_by_user_id: { type: "string", nullable: true },
-            created_at: { type: "integer", format: "int64" },
-            started_at: { type: "integer", format: "int64", nullable: true },
-            finished_at: { type: "integer", format: "int64", nullable: true },
           },
         },
         UserPublic: {
@@ -187,32 +167,6 @@ export function buildOpenApiSpec(): OpenApiDoc {
       "/admin/skills/{slug}/archive": { post: { tags: ["Admin / Skills"], summary: "Lifecycle: archive (terminal)", parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Transitioned" }, "409": { description: "Illegal lifecycle transition" } } } },
       "/admin/skills/{slug}/republish": { post: { tags: ["Admin / Skills"], summary: "Lifecycle: republish from deprecated", parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Transitioned" }, "409": { description: "Illegal lifecycle transition" } } } },
       "/admin/skills/{slug}/lifecycle/next": { get: { tags: ["Admin / Skills"], summary: "Get the set of legal next states", parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { current: { $ref: "#/components/schemas/SkillStatus" }, next: { type: "array", items: { $ref: "#/components/schemas/SkillStatus" } } } } } } } } } },
-
-      "/admin/skills/import/async": {
-        post: {
-          tags: ["Admin / Jobs"],
-          summary: "Enqueue async import job (P0-10)",
-          description: "Accepts a JSON body with `source` (local path or git URL). Returns 202 with a job id; poll `/admin/jobs/{jobId}` for terminal state.",
-          requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["source"], properties: { source: { type: "string" }, category: { type: "string" }, tags: { type: "array", items: { type: "string" } }, description: { type: "string" }, target_id: { type: "string" }, version_bump: { type: "string", enum: ["major", "minor", "patch"], default: "patch" }, overwrite: { type: "boolean", default: false }, allow_duplicate: { type: "boolean", default: false }, slug: { type: "string" }, branch: { type: "string" }, sub_dir: { type: "string" } } } } } },
-          responses: {
-            "202": { description: "Accepted", content: { "application/json": { schema: { type: "object", properties: { success: { type: "boolean" }, data: { type: "object", properties: { job_id: { type: "string" }, status: { $ref: "#/components/schemas/ImportJobStatus" }, poll_url: { type: "string" } } } } } } } },
-            "400": { description: "Missing source or unsupported content type", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
-          },
-        },
-      },
-      "/admin/jobs": {
-        get: {
-          tags: ["Admin / Jobs"],
-          summary: "List import jobs",
-          parameters: [
-            { name: "status", in: "query", schema: { $ref: "#/components/schemas/ImportJobStatus" } },
-            { name: "limit", in: "query", schema: { type: "integer", default: 50 } },
-          ],
-          responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { success: { type: "boolean" }, data: { type: "array", items: { $ref: "#/components/schemas/ImportJobView" } }, total: { type: "integer" } } } } } } },
-        },
-      },
-      "/admin/jobs/{jobId}": { get: { tags: ["Admin / Jobs"], summary: "Get job status", parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { success: { type: "boolean" }, data: { $ref: "#/components/schemas/ImportJobView" } } } } } }, "404": { $ref: "#/components/responses/NotFound" } } } },
-      "/admin/jobs/{jobId}/progress": { get: { tags: ["Admin / Jobs"], summary: "Lightweight progress projection", parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "OK" }, "404": { $ref: "#/components/responses/NotFound" } } } },
 
       "/admin/users": {
         get: { tags: ["Admin / Users"], summary: "List users", responses: { "200": { description: "OK" } } },

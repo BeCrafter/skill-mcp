@@ -33,16 +33,20 @@ function parseExpiry(input: { token_expires_at?: number | null; expires_in?: num
 
 const PRIVILEGED_ROLE_NAMES = new Set(["superadmin", "admin"]);
 
-/** Check if caller can operate on target. Superadmin targets are protected from other superadmins, but can operate on themselves. */
-function assertCanOperateOn(target: { userType: string; id: string }, operatorId: string, operatorUserType?: string): void {
+/** Check if caller can operate on target.
+ *  - Superadmin targets: mutually protected; only self may be operated on (self-delete blocked separately).
+ *  - Admin targets: only superadmin may operate (admin cannot modify/rotate/delete any admin, incl self).
+ *  - `mutate=false` (reads): admin may view self.
+ *  - `mutate=true` (modify/rotate/delete): admin self-operation blocked. */
+function assertCanOperateOn(target: { userType: string; id: string }, operatorId: string, operatorUserType?: string, mutate = false): void {
   if (target.userType === "superadmin") {
-    // 超管之间互相保护，但允许操作自己
+    // 超管之间互相保护，但允许操作自己（自删由 DELETE handler 单独拦截）
     if (target.id === operatorId) return;
     throw new AppError("Cannot operate on superadmin user", "SUPERADMIN_PROTECTED", 403);
   }
   if (target.userType === "admin" && operatorUserType !== "superadmin") {
-    // admin 操作 admin 需要 superadmin 权限，但允许操作自己
-    if (target.id === operatorId) return;
+    // 读取：admin 可查看自己；变更（modify/rotate/delete）：admin 不可操作任何 admin（含自己），需 superadmin
+    if (!mutate && target.id === operatorId) return;
     throw new AppError("Only superadmin can operate on admin users", "SUPERADMIN_REQUIRED", 403);
   }
 }
@@ -126,7 +130,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     const userId = ctx.params.userId;
     const target = await userRepo.findById(userId);
     if (!target) throw new UserNotFoundError();
-    assertCanOperateOn(target, rc.userId, rc.userType);
+    assertCanOperateOn(target, rc.userId, rc.userType, true);
 
     type RotateBody = { token_expires_at?: number | null; expires_in?: number | null; grace_seconds?: number | null };
     const data = await readJsonBody<RotateBody>(ctx.req).catch(() => ({} as RotateBody));
@@ -193,7 +197,7 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
     const data = await readJsonBody<{ name?: string; status?: string; user_type?: string }>(ctx.req);
     const target = await userRepo.findById(userId);
     if (!target) throw new UserNotFoundError();
-    assertCanOperateOn(target, rc.userId, rc.userType);
+    assertCanOperateOn(target, rc.userId, rc.userType, true);
 
     const updateInput: { name?: string; status?: string; userType?: string } = {};
     if (data.name !== undefined) updateInput.name = data.name;
@@ -218,9 +222,13 @@ export function registerAdminUserRoutes(router: Router, deps: AppDependencies): 
   router.delete("/api/admin/users/:userId", async (ctx) => {
     const rc = ctx.requestContext!;
     const userId = ctx.params.userId;
+    // 自删一律拒绝（"任何人都不行"），HTTP 与 CLI 一致
+    if (userId === rc.userId) {
+      throw new AppError("Cannot delete your own account", "SELF_DELETE_FORBIDDEN", 403);
+    }
     const target = await userRepo.findById(userId);
     if (!target) throw new UserNotFoundError();
-    assertCanOperateOn(target, rc.userId, rc.userType);
+    assertCanOperateOn(target, rc.userId, rc.userType, true);
     await userRoleRepo.deleteByUserId(userId);
     const deleted = await userRepo.delete(userId);
     if (!deleted) throw new UserNotFoundError();

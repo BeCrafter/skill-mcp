@@ -241,7 +241,6 @@ export async function syncPullAction(slug: string, opts: { serverUrl?: string } 
   const { SkillImporter } = await import("../../import/importer.js");
   const { SkillFileRepository } = await import("../../db/repositories/skill-file.repository.js");
   const { SkillVersionRepository } = await import("../../db/repositories/skill-version.repository.js");
-  const { SkillEvalRepository } = await import("../../db/repositories/skill-eval.repository.js");
   const { CompositeCacheProvider } = await import("../../cache/composite.provider.js");
   const { LocalFileSystemProvider } = await import("../../storage/local-fs.provider.js");
   const { DomainEventBus } = await import("../../events/event-bus.js");
@@ -251,7 +250,6 @@ export async function syncPullAction(slug: string, opts: { serverUrl?: string } 
 
   const skillFileRepo = new SkillFileRepository(db);
   const versionRepo = new SkillVersionRepository(db);
-  const evalRepo = new SkillEvalRepository(db);
   const cache = new CompositeCacheProvider({ memory: config.cache.memory, file: config.cache.file });
   const basePath = config.storage.type === "local-fs" ? config.storage.basePath : "./data/skills";
   const storage = new LocalFileSystemProvider(basePath);
@@ -262,7 +260,7 @@ export async function syncPullAction(slug: string, opts: { serverUrl?: string } 
 
   const importer = new SkillImporter(
     storage, skillRepo, skillFileRepo, cache, logger, eventBus,
-    versionRepo, undefined, evalRepo, config.security.enableInjectionScan,
+    versionRepo, config.security.enableInjectionScan,
   );
 
   try {

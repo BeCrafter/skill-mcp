@@ -1,7 +1,7 @@
 {
   "name": "skill-mcp",
   "version": "0.1.1-beta.0",
-  "description": "Cloud Skill File System & MCP Permission Gateway",
+  "description": "Local permission-aware Skill Registry with BM25 search",
   "type": "module",
   "files": [
     "dist",
@@ -39,13 +39,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
-    "@opentelemetry/resources": "^2.7.1",
-    "@opentelemetry/sdk-node": "^0.218.0",
-    "@opentelemetry/sdk-trace-node": "^2.7.1",
-    "@opentelemetry/semantic-conventions": "^1.41.1",
-    "ali-oss": "^6.23.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.8.1",
     "commander": "^13.1.0",
@@ -61,7 +54,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
-    "@types/ali-oss": "^6.23.3",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",

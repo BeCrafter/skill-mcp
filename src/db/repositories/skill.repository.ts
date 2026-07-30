@@ -5,18 +5,13 @@ import { skills, skillTags } from "../schema.js";
 import type { SkillMeta, SkillMetaInput, SkillRetrievalMeta, SkillStatus, VersionBump } from "../../types/index.js";
 import { metrics } from "../../telemetry/metrics.js";
 import { getLogger } from "../../utils/logger.js";
-import { withSpanSync } from "../../telemetry/spans.js";
 
 const REPO = "skill";
 
 function timed<T>(method: string, fn: () => T): T {
-  // P0-6 — `db.query` span (§17.6) wraps the existing prom-client timer so
-  // every method already routed through `timed()` gets a trace span without
-  // touching individual call sites. Sync variant because better-sqlite3 is
-  // synchronous; the OTel API allows nesting inside an active async parent.
   const end = metrics.dbQueryDuration.startTimer({ repo: REPO, method });
   try {
-    const result = withSpanSync("db.query", { attributes: { "db.repo": REPO, "db.method": method } }, fn);
+    const result = fn();
     end({ status: "ok" });
     return result;
   } catch (err) {

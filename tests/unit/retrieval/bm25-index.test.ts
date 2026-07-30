@@ -81,6 +81,14 @@ describe("BM25Index", () => {
     expect(hits).toHaveLength(3);
   });
 
+  it("filters to authorized candidates before applying the result limit", () => {
+    const idx = new BM25Index();
+    idx.upsert("private-high", "needle needle needle needle");
+    idx.upsert("public-low", "needle");
+    const hits = idx.search("needle", { limit: 1, allowedSkillIds: new Set(["public-low"]) });
+    expect(hits).toEqual([expect.objectContaining({ skillId: "public-low" })]);
+  });
+
   it("ties broken deterministically by skillId ascending", () => {
     const idx = new BM25Index();
     idx.upsert("zeta", "alpha");

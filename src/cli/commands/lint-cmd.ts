@@ -79,17 +79,6 @@ export async function lintAction(path: string): Promise<void> {
     checks.push(`signals  ${present.join(", ")}`);
   }
 
-  // P1-12 stage 1 — Check: eval_cases
-  const hasEvalCases = Array.isArray(meta.evalCases) && meta.evalCases.length > 0;
-  if (!hasEvalCases) {
-    issues.push({
-      level: "info",
-      message: "no eval_cases declared — version-bump regression (P1-12 stage 3) will skip this skill; add at least one case so future upgrades can be auto-verified",
-    });
-  } else {
-    checks.push(`eval_cases  ${meta.evalCases!.length} case(s)`);
-  }
-
   // Check 5: Version format
   if (meta.version) {
     const versionRegex = /^\d+\.\d+\.\d+(-[\w.]+)?$/;

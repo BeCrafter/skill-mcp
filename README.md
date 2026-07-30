@@ -1,680 +1,165 @@
 # Skill MCP Server
 
-**Cloud Skill File System & MCP Permission Gateway**
+**Local SQLite Skill Registry with RBAC, BM25 search, and MCP transport.**
 
-A Model Context Protocol (MCP) server that provides a managed skill file system for AI assistants. Import, version, and serve reusable skill packages through standard MCP tools with built-in security scanning, RBAC, and pipeline orchestration.
+A Model Context Protocol (MCP) server that manages reusable skill packages for AI assistants.
+Import, version, and serve skill packages through standard MCP tools with built-in security scanning
+and role-based access control.
 
 ## Features
 
-- **MCP Protocol** — Expose skills as MCP tools compatible with any MCP client
-- **Multi-Transport** — Supports stdio, SSE, and Streamable HTTP transports
-- **Pipeline Engine** — DAG-based skill orchestration with parallel execution
+- **MCP Protocol** — 5 tools: `skill_list`, `skill_search`, `skill_view`, `skill_file`, `skill_feedback`
+- **Multi-Transport** — stdio, SSE, and Streamable HTTP transports
+- **BM25 Search** — in-memory keyword search over name, description, triggers, `when_to_use`, and
+  `embedding_text`. RBAC visibility is applied *before* scoring and limiting.
 - **Three-tier RBAC** — Superadmin / Admin / User with role-based tag permissions
 - **JWT Authentication** — Admin login via username + password with JWT access/refresh tokens
-- **CLI Dual Mode** — Local DB direct access or remote HTTP API via `--server-url`
-- **Skill Feedback** — Collect feedback on skill effectiveness for data-driven improvements
-- **Skill Import** — Import skill packages from local directories or Git repositories
+- **Skill Import** — Import skill packages from local directories or Git repositories (synchronous)
 - **Security Scanning** — Built-in prompt injection detection on all imported skill content
 - **Versioning** — Automatic semantic versioning with content-hash tracking and rollback support
 - **Caching** — Layered memory (LRU) + file-based caching for fast skill retrieval
-- **SQLite Storage** — Persistent metadata storage via Drizzle ORM + better-sqlite3
-- **Semantic Search** — BM25 keyword search (default) with optional vector/hybrid via OpenAI/Ollama embeddings
-- **Webhooks** — Outbound webhook subscriptions with HMAC signing, retry queue, and delivery tracking
+- **SQLite Storage** — Persistent metadata via Drizzle ORM + better-sqlite3; local-fs for skill files
 - **OpenAPI & Swagger** — Built-in API reference at `/api/docs` for HTTP mode deployments
 - **Audit Logging** — Automatic tracking of skill mutations with before/after snapshots
-- **Async Import Worker** — Background job queue for importing skills from remote sources
-- **Eval Framework** — Define test cases for skills with automated regression gating
-- **Metrics & Tracing** — Prometheus metrics at `/metrics` and optional OpenTelemetry tracing
-- **CLI Management** — Full command-line interface for importing, listing, searching, and managing skills
-- **Self-upgrade Check** — `skill-mcp upgrade` checks npm registry + mirror for newer versions
-
-## 📚 Documentation Navigation
-
-### For Different Roles
-
-**👨‍💻 New Developers**
-1. Start with [Quick Start](./docs/QUICK_START.md) (5 minutes)
-2. Read [Contributing Guide](./CONTRIBUTING.md) (development process)
-3. Check [Claude Code Guide](./CLAUDE.md) (IDE setup)
-
-**🚀 DevOps / Deployment**
-- [Production Deployment](./docs/PRODUCTION_DEPLOYMENT.md) — Production setup
-- [Scenarios](./docs/SCENARIOS/) — Different deployment modes (A/B/C)
-
-**🏗️ Architects / Maintainers**
-- [Architecture Overview](./docs/ARCHITECTURE.md) — System design
-- [Organization Rules](./docs/ORGANIZATION.md) — Code structure
-- [API Reference](./docs/API_REFERENCE.md) — MCP tools & REST APIs
-- [Advanced Topics](./docs/ADVANCED/) — Pipeline engine, RBAC, tech specs
-
-**🧪 QA / Testing**
-- [Testing Guide](./docs/TESTING_GUIDE.md) — How to run tests
-- [CLI Verification Checklist](./docs/CLI_VERIFICATION_CHECKLIST.md) — Full CLI command acceptance checklist
-
-**📦 Publishing & Release**
-- [Publishing Guide](./docs/PUBLISHING.md) — How to publish to npm
-
-**📖 Additional Resources**
-- [Code Organization Analysis](./docs.local/CODE_ORGANIZATION_ANALYSIS.md) — Codebase structure analysis
-
-## Prerequisites
-
-- Node.js >= 22.0.0
-
-## Installation
-
-### From npm (recommended)
-
-```bash
-# 安装最新稳定版
-npm install -g skill-mcp
-
-# 安装特定版本
-npm install -g skill-mcp@0.0.1
-
-# 安装预发布版本
-npm install -g skill-mcp@next      # 最新预发布版
-npm install -g skill-mcp@alpha     # Alpha 测试版
-npm install -g skill-mcp@beta      # Beta 测试版
-npm install -g skill-mcp@rc        # 候选发布版
-```
-
-### From source
-
-```bash
-git clone https://github.com/BeCrafter/skill-mcp.git
-cd skill-mcp
-npm install
-npm run build
-```
-
-## 📂 Data Storage Location
-
-By default, all skill data, database, and cache files are stored in your user home directory:
-
-```
-~/.skill-mcp/
-├── data/
-│   └── skills/          # Skill packages
-├── skill-mcp.db         # SQLite database
-└── cache/               # File cache
-```
-
-This means **skill-mcp works from any directory** — you can run commands like `skill-mcp list` from any folder and access the same data.
-
-### Customize Storage Location
-
-Override the default paths using environment variables:
-
-```bash
-# Custom data directory
-export DATABASE_PATH=/custom/path/skill-mcp.db
-export STORAGE_BASE_PATH=/custom/path/skills
-export CACHE_FILE_DIR=/custom/path/cache
-
-npm start
-```
-
-Or set them per-command:
-
-```bash
-DATABASE_PATH=/data/prod.db skill-mcp list
-```
-
-## 📋 Choose Your Deployment Scenario
-
-This project supports **three flexible deployment modes**:
-
-| Scenario | Transport | Storage | Use Case |
-|----------|-----------|---------|----------|
-| **A** - Local | stdio | Local | Development, single user |
-| **B** - Mixed | stdio | Remote | Local MCP + shared storage |
-| **C** - Distributed | HTTP | Local/Remote | Production, multi-client |
-
-👉 **[Quick Start Guide →](./docs/QUICK_START.md)**
-
-- **Scenario A** - [Local Development](./docs/SCENARIOS/SCENARIO_A.md)
-- **Scenario B** - [Hybrid Deployment](./docs/SCENARIOS/SCENARIO_B.md)
-- **Scenario C** - [Distributed Deployment](./docs/SCENARIOS/SCENARIO_C.md)
-- **Full Architecture** - [Complete Reference](./docs/ARCHITECTURE.md)
+- **Prometheus Metrics** — `/metrics` endpoint with import, cache, rate-limit, and permission counters
+- **CLI Management** — Full CLI for importing, listing, searching, and managing skills
+- **C2 Remote Proxy** — When `CLOUD_SERVICE_URL` is set, the server fronts a remote storage
+  Registry via `RemoteSkillProvider`; `skill_search` delegates to the remote's BM25 index.
+  Deploy as `--profile c2` via `docker compose`.
 
 ## Quick Start
 
-### 1. Initialize the System (First Time Only)
-
 ```bash
-# Initialize with superadmin (JWT secret auto-generated and saved to ~/.skill-mcp/config.json)
-npx skill-mcp init --username admin --password YourStrongPassword
-
-# Login to obtain JWT credentials
-npx skill-mcp auth login --username admin
+npx skill-mcp init --username admin --password <password>   # prints a bearer token
+npx skill-mcp import ./my-skill/
+npx skill-mcp serve --auth-token <token>   # stdio requires auth after init
 ```
 
-### 2. Start the MCP Server
+The server starts and accepts MCP connections on stdio. For HTTP mode:
 
 ```bash
-# Scenario A: Local stdio (recommended for development)
-npm start
-
-# Scenario C: HTTP server (production)
-TRANSPORT_TYPE=http npm start
-
-# Proxy mode: Automatically detected when CLOUD_SERVICE_URL is set
-CLOUD_SERVICE_URL=http://cloud-service:3001 npm start
+npx skill-mcp serve --transport http --port 3000
 ```
 
-### 3. Import a Skill
-
-```bash
-# From a local directory
-npx skill-mcp import ./path/to/skill-package
-
-# From a Git repository
-npx skill-mcp import https://github.com/org/skill-repo --branch main
-
-# With metadata
-npx skill-mcp import ./my-skill --category "writing" --tags "prompt,creative"
-```
-
-### 3. Manage Skills
-
-```bash
-# List all skills
-npx skill-mcp list
-
-# View skill details
-npx skill-mcp info prompt-writer
-
-# Search skills
-npx skill-mcp search --name prompt
-
-# Update metadata
-npx skill-mcp update prompt-writer --category "productivity" --display-name "Prompt Writer Pro"
-
-# View version history
-npx skill-mcp versions prompt-writer
-
-# Rollback to previous version
-npx skill-mcp rollback prompt-writer --to 0.0.1
-
-# Remove a skill
-npx skill-mcp remove old-skill --force
-```
-
-### 4. Pipeline Orchestration
-
-```bash
-# Validate pipeline YAML
-npx skill-mcp pipeline validate ./pipeline.yaml
-
-# Visualize pipeline DAG
-npx skill-mcp pipeline graph ./pipeline.yaml
-
-# Execute pipeline (dry-run)
-npx skill-mcp pipeline run ./pipeline.yaml --input pr_url=https://... --dry-run
-```
-
-### 5. RBAC Management
-
-```bash
-# Create a role
-npx skill-mcp role create --name "data-team" --tags "data,analysis" --description "Data science team"
-
-# Create an admin user (with login credentials)
-npx skill-mcp user create --name "Alice" --username alice --password Passw0rd --user-type admin --role-ids "role-uuid-1"
-
-# Create a regular user (API token only, no login)
-npx skill-mcp user create --name "Bob" --role-ids "role-uuid-1,role-uuid-2"
-
-# List users
-npx skill-mcp user list
-
-# Assign roles
-npx skill-mcp user assign-roles user-id-1 --role-ids "role-uuid-1"
-
-# Auth management
-npx skill-mcp auth whoami
-npx skill-mcp auth logout
-```
-
-### 6. Skill Linting
-
-```bash
-# Lint a skill package directory
-npx skill-mcp lint ./path/to/skill-package
-```
+Open `http://localhost:3000/api/docs` for the Swagger UI.
 
 ## MCP Tools
 
 | Tool | Description |
-|------|-------------|
-| `skill_list` | List all published skills with optional filtering |
-| `skill_search` | Search skills by name, description, or content similarity |
-| `skill_view` | View the full entry content of a specific skill |
-| `skill_file` | Read individual files from a skill package |
-| `skill_pipeline` | Execute a pipeline (DAG orchestration of skills) |
-| `skill_feedback` | Submit feedback on skill effectiveness |
+| --- | --- |
+| `skill_list` | List accessible skills (RBAC-filtered) |
+| `skill_search` | BM25 keyword search with permission-aware ranking |
+| `skill_view` | Get a skill's entry file (SKILL.md) |
+| `skill_file` | Read one or more files from a skill |
+| `skill_feedback` | Record feedback on a skill's effectiveness |
 
-## Configuration
+## CLI Commands Reference
 
-Configuration is loaded from environment variables or a `skill-mcp.config.json` file (auto-detected). All fields have sensible defaults:
+| Command | Description |
+| --- | --- |
+| `init` | Initialise the data directory and config |
+| `serve` | Start the MCP server (default: stdio) |
+| `import <source>` | Import a skill from a local dir or Git URL |
+| `list` | List installed skills |
+| `search --name <name>` | Search skills by name |
+| `info <slug>` | Show skill metadata |
+| `remove <slug>` | Remove a skill |
+| `update <slug>` | Update a skill's metadata |
+| `versions <slug>` | List versions of a skill |
+| `rollback <slug>` | Roll back to a previous version |
+| `sync check [slug]` | Check for remote skill updates |
+| `sync pull <slug>` | Pull a remote skill update |
+| `lint <source>` | Validate a skill package without importing it |
+| `manifest:migrate <dir>` | Migrate a skill directory to the latest manifest schema |
+| `user create/list/get/delete/assign-roles/rotate-token` | Manage users |
+| `role create/list/get/update/delete` | Manage roles and tag bindings |
+| `auth (login/logout/whoami/reset-password)` | Authentication management |
 
-```jsonc
-{
-  "app": {
-    "name": "skill-mcp",
-    "env": "production",           // "development" | "production" | "test"
-    "version": "0.0.1"
-  },
-  "deployment": {
-    "mcpOnly": false,             // If true, only MCP + health (no Admin/Gateway APIs)
-    "apiOnly": false              // If true, only REST + health (no MCP)
-  },
-  "gateway": {                    // Only when proxying to a remote service
-    "cloudServiceUrl": "http://cloud-service:3001",
-    "authToken": "your-token"
-  },
-  "storage": {
-    "type": "local-fs",         // Currently only "local-fs" supported
-    "basePath": "./data/skills"
-  },
-  "database": {
-    "path": "./data/skill-mcp.db"
-  },
-  "cache": {
-    "memory": { "enabled": true, "maxSize": 500 },
-    "file": { "enabled": true, "cacheDir": "./data/cache" }
-  },
-  "transport": {
-    "type": "stdio",              // "stdio" | "sse" | "http"
-    "port": 3000
-  },
-  "security": {
-    "enableInjectionScan": true,
-    "hstsEnabled": false
-  }
-}
-```
+Use `--server-url <url>` to point CLI commands at a remote v0.1 Registry instead of the local DB.
 
-### Environment Variables
+## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NODE_ENV` | Environment | `development` |
-| `MCP_ONLY_MODE` | Disable Admin + Gateway APIs (MCP only) | `false` |
-| `API_ONLY_MODE` | Disable MCP endpoint (REST only) | `false` |
-| `STORAGE_TYPE` | Storage backend | `local-fs` |
-| `STORAGE_BASE_PATH` | Skills directory | `~/.skill-mcp/data/skills` |
-| `DATABASE_PATH` | SQLite database path | `~/.skill-mcp/skill-mcp.db` |
-| `DATABASE_URL` | Database URL (takes precedence over `DATABASE_PATH`) | - |
-| `CACHE_MEMORY_ENABLED` | Enable in-memory LRU cache | `true` |
-| `CACHE_MEMORY_MAX_SIZE` | Max memory cache entries | `500` |
-| `CACHE_FILE_ENABLED` | Enable file-based cache | `true` |
-| `CACHE_FILE_DIR` | Cache directory | `~/.skill-mcp/cache` |
-| `TRANSPORT_TYPE` | Transport type | `stdio` |
-| `TRANSPORT_PORT` | HTTP port | `3000` |
-| `CLOUD_SERVICE_URL` | Remote service URL (auto-enables proxy mode) | - |
-| `SKILL_MCP_AUTH_TOKEN` | Bearer token for stdio auth + proxy outbound calls | - |
-| `AUTH_JWT_SECRET` | JWT signing secret for admin login (min 32 chars, auto-generated by `init`) | - |
-| `SKILL_MCP_SERVER_URL` | Remote server URL for CLI remote mode | - |
+See `.env.example` for a complete annotated list.
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `DATABASE_PATH` | SQLite database file path | `~/.skill-mcp/skill-mcp.db` |
+| `STORAGE_BASE_PATH` | Skill file storage directory | `~/.skill-mcp/data/skills` |
+| `TRANSPORT_TYPE` | MCP transport: `stdio`, `sse`, or `http` | `stdio` |
+| `TRANSPORT_PORT` | HTTP/S port | `3000` |
+| `CLOUD_SERVICE_URL` | Enable C2 remote-proxy mode (front a remote Registry) | (local mode) |
+| `MCP_ONLY_MODE` | Expose only MCP + health endpoints | `false` |
+| `API_ONLY_MODE` | Expose only REST API + health | `false` |
+| `SKILL_MCP_AUTH_TOKEN` | Bearer token for MCP auth / remote-proxy auth | — |
+| `SKILL_MCP_SERVER_URL` | Remote Registry URL for CLI management | (local DB) |
+| `AUTH_JWT_SECRET` | JWT signing secret (min 32 chars) | auto-generated |
 | `SECURITY_INJECTION_SCAN` | Enable prompt injection detection | `true` |
-| `LOG_LEVEL` | Logging level | `info` |
-| `OTEL_ENABLED` | Enable OpenTelemetry tracing (`true` / `false`) | `false` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP endpoint URL; falls back to `ConsoleSpanExporter` when unset | - |
-| `OTEL_SERVICE_NAME` | `service.name` resource attribute | `skill-mcp` |
-| `OTEL_SERVICE_VERSION` | `service.version` resource attribute | package.json version |
-| `AUTH_JWT_ACCESS_EXPIRES_IN` | Access token lifetime in seconds | `7200` (2h) |
-| `AUTH_JWT_REFRESH_EXPIRES_IN` | Refresh token lifetime in seconds | `604800` (7d) |
-| `AUTH_JWT_ISSUER` | JWT issuer claim | `skill-mcp` |
-| `RATE_LIMIT_ENABLED` | Master switch for rate limiting (`true` / `false`) | `true` |
-| `RATE_LIMIT_ADMIN_CAPACITY` | Admin route token bucket capacity (burst size) | `60` |
-| `RATE_LIMIT_ADMIN_REFILL_PER_SEC` | Admin route token refill rate per second | `10` |
-| `RATE_LIMIT_GATEWAY_CAPACITY` | Gateway route token bucket capacity (burst size) | `120` |
-| `RATE_LIMIT_GATEWAY_REFILL_PER_SEC` | Gateway route token refill rate per second | `20` |
-| `SECURITY_HSTS_ENABLED` | Emit `Strict-Transport-Security` header (only when TLS-terminated) | `false` |
-| `SKILL_MCP_METRICS_AUTH_OPTIONAL` | Allow unauthenticated access to `/metrics` | `false` |
-| `SKILL_MCP_CONFIG` | Path to JSON config file (overrides env vars) | `~/.skill-mcp/config.json` |
-| `SKILL_MCP_PKG_MANAGER` | Override package manager for `upgrade` command | auto-detected |
-| `OPENAI_API_KEY` | OpenAI API key for LLM eval provider | - |
-| `OPENAI_BASE_URL` | OpenAI-compatible base URL for LLM eval | `https://api.openai.com/v1` |
-| `OPENAI_EVAL_MODEL` | Model name for LLM eval provider | `gpt-4o-mini` |
+| `LOG_LEVEL` | Log level: `trace`, `debug`, `info`, `warn`, `error` | `info` |
 
-### Stdio Permission Isolation
+## Deployment Scenarios
 
-`stdio` transport has no HTTP headers, so permission isolation is configured by injecting a bearer token at process startup. CLI flag `--auth-token` overrides the env var.
-
-```json
-{
-  "mcpServers": {
-    "skill-mcp": {
-      "command": "skill-mcp",
-      "args": ["serve"],
-      "env": { "SKILL_MCP_AUTH_TOKEN": "sk-live-xxxx" }
-    }
-  }
-}
+**Scenario A — Local stdio** (personal IDE / agent)
+```
+TRANSPORT_TYPE=stdio  DATABASE_PATH=./data/skill-mcp.db  STORAGE_BASE_PATH=./data/skills
 ```
 
-If the database has any active user or tag-protected skill but no token is configured, the server refuses to start to avoid silent anonymous access. Empty databases continue to start anonymously.
-
-### Gateway HTTP Authentication
-
-`/api/gateway/*` is gated by an authentication middleware: every request must include `Authorization: Bearer <token>`. Missing or invalid tokens return `401` before the handler runs. The only anonymous endpoint is `GET /api/health` (kept open for LB and container liveness probes).
-
-```http
-401 Unauthorized
-Content-Type: application/json
-
-{ "success": false, "error": "Authentication required" }
+**Scenario C1 — Single HTTP server** (all-in-one)
 ```
-
-Issue a token by creating a role + user on the server:
-
-```bash
-skill-mcp role create --name dev --tags "frontend"
-skill-mcp user create --name alice --role-ids <role-id>
-# → prints sk-live-xxxx; client sends `Authorization: Bearer sk-live-xxxx`
+TRANSPORT_TYPE=http  TRANSPORT_PORT=3000
 ```
+`docker compose --profile c1 up -d`
 
-For Proxy → Backend internal calls, create a dedicated `svc-gateway` user on the backend side and configure its token as `SKILL_MCP_AUTH_TOKEN` on the proxy.
-
-`/mcp/*` (SSE / Streamable HTTP) and stdio transports are unaffected — stdio uses the `SKILL_MCP_AUTH_TOKEN` startup-injection path described above.
-
-### JWT Authentication
-
-Admin/superadmin users authenticate via JWT (username + password login). All users also have opaque API tokens for MCP tool access.
-
-```bash
-# Initialize system (creates superadmin + default roles, auto-generates JWT secret)
-skill-mcp init --username admin --password YourStrongPassword
-
-# Login
-skill-mcp auth login --username admin
-
-# Login to remote server
-skill-mcp auth login --username admin --server-url http://server:3000
-
-# Change password
-# (via API: POST /api/auth/change-password)
+**Scenario C2 — Distributed proxy** (storage + MCP frontends behind Caddy gateway)
 ```
+# Storage (authoritative)
+TRANSPORT_TYPE=http  TRANSPORT_PORT=3000  API_ONLY_MODE=true
+SKILL_MCP_AUTH_TOKEN=<shared-token>
 
-**JWT Configuration**:
-- `AUTH_JWT_SECRET`: Signing secret (min 32 chars). Auto-generated by `init` and saved to `~/.skill-mcp/config.json`
-- Access token: 2h lifetime, refresh token: 7d lifetime
-- HS256 (HMAC-SHA256) signing algorithm
-
-## Skill Package Format
-
-A skill package is a directory containing:
-
+# MCP node (proxy)
+TRANSPORT_TYPE=http  TRANSPORT_PORT=4000  MCP_ONLY_MODE=true
+CLOUD_SERVICE_URL=http://storage:3000  SKILL_MCP_AUTH_TOKEN=<shared-token>
 ```
-my-skill/
-├── SKILL.md          # Main skill content + YAML frontmatter (required)
-├── references/       # Supporting reference files
-│   └── examples.md
-└── templates/        # Template files
-    └── checklist.md
-```
-
-### SKILL.md frontmatter
-
-The skill's metadata lives in YAML frontmatter at the top of `SKILL.md`:
-
-```yaml
----
-manifest_schema: "1.0"   # P1-21 — see "Manifest Schema Versioning" below
-name: my-skill
-version: 0.0.1
-description: Short skill description for the listing API
-entry: SKILL.md
-files:
-  - references/examples.md
-tags: [writing, prompt]
-category: writing
----
-
-# Skill body in markdown
-```
-
-### Manifest Schema Versioning (P1-21)
-
-The optional `manifest_schema` field declares which contract version the
-package targets. The current schema is **`1.0`**.
-
-| Client `manifest_schema` | This server (1.x) | Future server (2.x) |
-|--------------------------|-------------------|---------------------|
-| missing / `0.x`          | ✅ coerced to `1.0` + deprecation warning | ⚠️ may be rejected once 2.x ships |
-| `1.0` (any 1.y)          | ✅                | ✅ (back-compat window: 2 minors)   |
-| `2.0+`                   | ❌ "server too old, please upgrade" | ✅ |
-
-Migrate existing packages with the bundled CLI:
-
-```bash
-# Dry-run a tree (default)
-skill-mcp manifest:migrate ./my-skills
-
-# Rewrite SKILL.md in place
-skill-mcp manifest:migrate ./my-skills --apply
-
-# Or emit a unified diff for code review / `git apply`
-skill-mcp manifest:migrate ./my-skills --patch | git apply
-```
-
-> **Legacy `manifest.json`** is deprecated — the importer warns when it sees one, and prefers `SKILL.md` frontmatter. The schema versioning rules above apply identically to either source location.
-
-## Pipeline Format
-
-A pipeline is a YAML file defining a DAG (Directed Acyclic Graph) of skill stages:
-
-```yaml
-name: code-review-pipeline
-description: Automated code review with security and style checks
-
-inputs:
-  pr_url:
-    type: string
-    required: true
-
-stages:
-  read-pr:
-    skill: github-pr-reader
-    inputs:
-      url: ${{ inputs.pr_url }}
-    outputs: [diff, files]
-
-  security-scan:
-    skill: security-scanner
-    depends_on: [read-pr]
-    inputs:
-      code: ${{ stages.read-pr.outputs.diff }}
-    outputs: [vulnerabilities]
-
-  style-check:
-    skill: style-checker
-    depends_on: [read-pr]
-    inputs:
-      files: ${{ stages.read-pr.outputs.files }}
-    outputs: [violations]
-
-  generate-report:
-    skill: report-writer
-    depends_on: [security-scan, style-check]
-    inputs:
-      security: ${{ stages.security-scan.outputs }}
-      style: ${{ stages.style-check.outputs }}
-    outputs: [report]
-
-output:
-  report: ${{ stages.generate-report.outputs.report }}
-```
+`docker compose --profile c2 up -d`
 
 ## Project Structure
 
 ```
 src/
-├── cli/              # CLI commands (import, list, serve, pipeline, user, role, etc.)
-├── config/           # Configuration schema and loader
-├── mcp/              # MCP server, tools, transport, and system prompt
-│   ├── tools/        # MCP tool implementations
-│   ├── transport/    # MCP transport (stdio, SSE, HTTP streamable)
-│   └── prompt/       # System prompt builder
-├── services/         # Business logic (skill service, access log, search, webhook, usage, import worker)
-├── provider/         # Data providers (local, remote)
-├── pipeline/         # Pipeline engine (DAG, executor, parser)
-├── permission/       # Permission filters and RBAC
-├── storage/          # Storage providers (local FS, aliyun OSS)
-├── cache/            # Cache providers (memory LRU, file, composite)
-├── db/               # Database schema, migrations, repositories
-├── import/           # Skill import pipeline (validator, sources)
-├── http/             # HTTP server, router, middleware, handlers, OpenAPI
-│   ├── handlers/     # Admin (skills/users/roles/webhooks/import-jobs) and gateway handlers
-│   ├── openapi/      # OpenAPI 3.1 spec and Swagger UI
-│   └── middleware/   # Auth, rate-limit, request-id, error-map
-├── events/           # Event system (event bus, cache subscriber, webhook subscriber)
-├── telemetry/        # Prometheus metrics and OpenTelemetry tracing
-├── retrieval/        # Semantic retrieval (BM25 index, vector index, hybrid scorer)
-├── eval/             # Skill evaluation framework (echo/LLM providers, runner)
-├── types/            # TypeScript type definitions
-└── utils/            # Shared utilities (security, errors, manifest, JWT)
+├── cli/          CLI commands
+├── config/       Configuration loading + schema (zod)
+├── cache/        L1 (memory) / L2 (file) cache providers
+├── db/           Drizzle schema, migrations, repositories
+├── events/       Domain event bus + cache subscriber
+├── http/         Handlers, middleware, router, OpenAPI spec
+├── import/       Skill importer (local + git sources)
+├── mcp/          MCP tools, server, transport, prompts
+├── permission/   RBAC tag filter, context builder
+├── provider/     ISkillProvider: local + remote implementations
+├── retrieval/    BM25 in-memory index
+├── services/     SkillService, SkillSearchService, AccessLogService
+├── storage/      LocalFileSystemProvider
+├── telemetry/    Prometheus metrics
+├── types/        Shared TypeScript interfaces
+└── utils/        Manifest parsing, security, logging, errors
 ```
 
-## CLI Commands Reference
-
-| Command | Description |
-|---------|-------------|
-| `init` | Initialize system with superadmin account (first-time setup) |
-| `auth login` | Login as admin/superadmin to obtain JWT (supports `--server-url` for remote) |
-| `auth logout` | Clear local JWT credentials |
-| `auth whoami` | Show current logged-in user info |
-| `auth reset-password` | Reset admin password (requires admin+ login, supports remote mode) |
-| `serve` | Start MCP server |
-| `import <source>` | Import skill from local path or Git repo |
-| `list` | List all skills |
-| `info <slug>` | Show skill details |
-| `search --name <name>` | Search skills by name |
-| `update <slug>` | Update skill metadata |
-| `remove <slug>` | Remove a skill |
-| `versions <slug>` | Show version history |
-| `rollback <slug>` | Rollback to previous version |
-| `lint <path>` | Lint skill package |
-| `manifest:migrate <dir>` | Scan & migrate `manifest_schema` (P1-21, supports `--apply` / `--patch`) |
-| `migrate:check` | Pre-flight migration check: parse source/target DB URLs, detect dialect changes, list SQLite→PG migration idioms |
-| `upgrade` | Check for newer version of skill-mcp on npm |
-| `pipeline validate` | Validate pipeline YAML |
-| `pipeline graph` | Visualize pipeline DAG |
-| `pipeline run` | Execute pipeline |
-| `eval list` | List eval cases |
-| `eval run` | Run eval cases |
-| `eval results` | Show eval results |
-| `user list/create/get/delete/assign-roles` | Manage users (requires admin+ login, supports remote mode) |
-| `user create --username <u> --password <p> --user-type <type>` | Create user with login credentials (admin/superadmin only for --user-type admin) |
-| `role list/create/get/update/delete` | Manage roles (requires admin+ login, supports remote mode) |
-| `sync check [slug]` | Check sync status of imported skills |
-| `sync pull <slug>` | Pull latest from remote source |
-| `user rotate-token <userId>` | Rotate API token for a user |
-
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm run dev` | Watch-mode compilation |
-| `npm start` | Run the server |
-| `npm test` | Run tests with Vitest |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run test:coverage` | Generate coverage report |
-| `npm run lint` | Lint source files |
-| `npm run lint:fix` | Lint and auto-fix |
-| `npm run db:migrate` | Run database migrations |
-| `npm run db:generate` | Generate Drizzle migration files |
-| `npm run db:studio` | Launch Drizzle Studio UI |
-| `npm run docs:sync` | Check README.md sync status |
-| `npm run serve` | Start server in HTTP mode |
-| `npm run import` | Import a skill package |
-| `npm run list` | List all installed skills |
-| `npm run release:patch` | Bump patch version and create tag |
-| `npm run release:minor` | Bump minor version and create tag |
-| `npm run release:major` | Bump major version and create tag |
-| `npm run release:alpha` | Bump alpha prerelease and create tag |
-| `npm run release:beta` | Bump beta prerelease and create tag |
-| `npm run release:rc` | Bump RC prerelease and create tag |
-| `npm run release:dev` | Bump dev prerelease and create tag |
-| `npm run prepublishOnly` | Pre-publish build check |
-
-## Testing
-
-Tests are written with Vitest and located in `tests/`:
-
-```
-tests/
-└── unit/
-    ├── utils/           # Security scanning, validation, error handling
-    ├── cache/           # LRU cache provider
-    ├── prompt/          # System prompt generation
-    └── import/          # Package validation
-```
+## Development
 
 ```bash
-# Run all tests
+npm install
+npm run build
+npm run lint
 npm test
-
-# Run with coverage
-npm run test:coverage
-
-# Watch mode
-npm run test:watch
+npm run docs:sync
 ```
 
-## RBAC Overview
+Keep `README.md`, `README.zh.md`, and `docs/releases/v0.1.md` aligned with the
+v0.1 public surface. Do not commit generated `dist/`, local data, or secrets.
 
-The server implements a two-layer permission system:
+## Documentation
 
-### User Types (Operation Permissions)
-
-| Type | Login | Capabilities |
-|------|-------|-------------|
-| `superadmin` | username + password → JWT | Full control: manage users, roles, skills. Created via `skill-mcp init`. Cannot be modified by other users. |
-| `admin` | username + password → JWT | Manage skills, roles, and regular users. Cannot create/modify admin or superadmin users. |
-| `user` | API token only (no login) | Browse published skills, use MCP tools, submit feedback. No management operations. |
-
-### Role Tags (Data Visibility)
-
-- **Tags**: Capability tags assigned to skills (`skills.tags`)
-- **Roles**: Collections of tags that grant visibility to private skills
-- **Users**: Assigned to roles for skill-level access control
-
-**Visibility Rules**:
-- `skill.visibility = "public"` → Accessible to all
-- `skill.visibility = "private"` + `skill.tags ∩ user.tags ≠ ∅` → Accessible if user has matching tag
-- `skill.visibility = "private"` + `skill.tags ∩ user.tags = ∅` → Not accessible
-
-> **User type** controls **what you can do** (operation permissions). **Role tags** control **what you can see** (data visibility). These are independent layers.
-
-## CLI Remote Mode
-
-All management commands support remote operation via `--server-url` or `SKILL_MCP_SERVER_URL`:
-
-```bash
-# Remote mode via environment variable
-export SKILL_MCP_SERVER_URL=http://server:3000
-skill-mcp user list    # calls HTTP API
-skill-mcp role create --name dev --tags "backend"
-
-# Remote mode via command-line flag
-skill-mcp user list --server-url http://server:3000
-
-# Local mode (default, direct DB access)
-skill-mcp user list    # reads local database directly
-```
-
-**Login requirements**: `user *`, `role *`, `import`, `remove`, `update`, `rollback` commands require admin+ login. `list`, `info`, `search`, `serve`, `pipeline`, `lint` are login-free.
-
-## Security
-
-- **Prompt Injection Scanning** — All imported skill content is scanned for known injection patterns
-- **Path Traversal Protection** — File path validation prevents directory traversal attacks
-- **File Type Safety** — Binary files are rejected; only text-based formats are allowed
-- **Per-user RBAC** — Admin/superadmin users authenticate via JWT (username + password login); regular users authenticate with API bearer tokens issued by `skill-mcp user create`. User type (`superadmin`/`admin`/`user`) determines operation permissions; role tags determine skill visibility. For service accounts, reuse the user table with a `svc-*` naming convention.
+Full docs live under [`docs/`](./docs/README.md) — see the [index](./docs/README.md)
+for CLI guide, deployment scenarios, RBAC, and the v0.1 scope contract.
 
 ## License
 

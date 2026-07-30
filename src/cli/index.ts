@@ -11,16 +11,12 @@ import { updateAction } from "./commands/update-cmd.js";
 import { versionsAction } from "./commands/versions-cmd.js";
 import { rollbackAction } from "./commands/rollback-cmd.js";
 import { lintAction } from "./commands/lint-cmd.js";
-import { pipelineValidateAction, pipelineGraphAction, pipelineRunAction } from "./commands/pipeline-cmd.js";
 import { userListAction, userCreateAction, userGetAction, userDeleteAction, userAssignRolesAction, userRotateTokenAction } from "./commands/user-cmd.js";
 import { roleListAction, roleCreateAction, roleGetAction, roleUpdateAction, roleDeleteAction } from "./commands/role-cmd.js";
-import { migrateCheckAction } from "./commands/migrate-cmd.js";
 import { manifestMigrateAction } from "./commands/manifest-migrate-cmd.js";
-import { evalListAction, evalRunAction, evalResultsAction } from "./commands/eval-cmd.js";
 import { loginAction, logoutAction, whoamiAction, resetPasswordAction } from "./commands/auth-cmd.js";
 import { initAction } from "./commands/init-cmd.js";
 import { syncCheckAction, syncCheckAllAction, syncPullAction } from "./commands/sync-cmd.js";
-import { upgradeAction } from "./commands/upgrade-cmd.js";
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
@@ -85,15 +81,12 @@ export async function createCli(): Promise<Command> {
           const CATEGORIES: Array<{ label: string; icon: string; names: string[] }> = [
             { label: "Skills",       icon: "◆", names: ["list", "search", "info", "import", "update", "versions", "rollback", "remove", "lint", "sync"] },
             { label: "Admin",        icon: "◆", names: ["auth", "user", "role"] },
-            { label: "Tools",        icon: "◆", names: ["migrate:check", "manifest:migrate"] },
+            { label: "Tools",        icon: "◆", names: ["manifest:migrate"] },
           ];
 
 
           const allCmds = subs;
           const used = new Set<string>();
-
-          // Hidden experimental commands
-          for (const name of ["eval", "pipeline"]) used.add(name);
 
           // Options
           if (opts.length > 0) {
@@ -103,7 +96,7 @@ export async function createCli(): Promise<Command> {
           }
 
           // Flat commands (no group heading)
-          const flatNames = ["init", "serve", "upgrade"];
+          const flatNames = ["init", "serve"];
           const flatCmds = allCmds
             .filter(s => flatNames.includes(s.name()))
             .sort((a, b) => flatNames.indexOf(a.name()) - flatNames.indexOf(b.name()));
@@ -167,7 +160,7 @@ export async function createCli(): Promise<Command> {
           lines.push("");
 
         } else if (subs.length > 0) {
-          // ── Mid-level: parent with subcommands (user, role, auth, eval, pipeline) ──
+          // ── Mid-level: parent with subcommands (user, role, auth) ──
           lines.push("");
           lines.push(`  ${c.bold(cmd.name().toUpperCase())}  ${c.dim(cmd.description())}`);
           lines.push(`  ${sep(60)}`);
@@ -249,15 +242,13 @@ export async function createCli(): Promise<Command> {
     .option("--port <number>", "HTTP port (for sse/http)", String(config.transport.port))
     .option("--mcp-only", "Expose MCP endpoints only")
     .option("--api-only", "Expose REST API only")
-    .option("--remote-url <url>", "Remote service URL for skill proxy")
-    .option("--auth-token <token>", "Stdio mode: bearer token (overrides SKILL_MCP_AUTH_TOKEN); also used for remote proxy auth in stdio mode")
+    .option("--auth-token <token>", "Stdio bearer token (overrides SKILL_MCP_AUTH_TOKEN)")
     .action(async (opts) => {
       await serveAction({
         transport: opts.transport as "stdio" | "sse" | "http",
         port: parseInt(opts.port, 10),
         mcpOnly: (opts.mcpOnly as boolean) ?? config.deployment.mcpOnly,
         apiOnly: (opts.apiOnly as boolean) ?? config.deployment.apiOnly,
-        remoteUrl: opts.remoteUrl as string | undefined,
         authToken: opts.authToken as string | undefined,
       });
     });
@@ -390,16 +381,6 @@ export async function createCli(): Promise<Command> {
     });
 
   // =========================================================
-  // Migration tools (P0-8 — SQLite → Postgres readiness)
-  // =========================================================
-  program
-    .command("migrate:check")
-    .description("Check database compatibility for SQLite → Postgres migration")
-    .action(async (opts) => {
-      await migrateCheckAction({ targetUrl: opts.target as string | undefined });
-    });
-
-  // =========================================================
   // Manifest schema migration (P1-21 — review §14.5)
   // =========================================================
   program
@@ -414,66 +395,6 @@ export async function createCli(): Promise<Command> {
       });
     });
 
-  // =========================================================
-  // Pipeline management commands
-  // =========================================================
-  const pipelineCmd = program
-    .command("pipeline")
-    .description("Manage skill pipelines (DAG-based orchestration)");
-
-  pipelineCmd
-    .command("validate <yaml-path>")
-    .description("Validate pipeline YAML definition")
-    .action(async (yamlPath) => {
-      await pipelineValidateAction(yamlPath);
-    });
-
-  pipelineCmd
-    .command("graph <yaml-path>")
-    .description("Visualize pipeline DAG as ASCII")
-    .action(async (yamlPath) => {
-      await pipelineGraphAction(yamlPath);
-    });
-
-  pipelineCmd
-    .command("run <yaml-path>")
-    .description("Execute pipeline (dry-run by default)")
-    .option("--input <key=value...>", "Pipeline inputs (repeatable)", (value, prev: string[]) => {
-      return prev ? [...prev, value] : [value];
-    }, [] as string[])
-    .option("--dry-run", "Dry-run mode (default: true)", true)
-    .action(async (yamlPath, opts) => {
-      await pipelineRunAction(yamlPath, {
-        input: opts.input as string[] | undefined,
-        dryRun: opts.dryRun as boolean,
-      });
-    });
-
-  // =========================================================
-  // P1-12 stage 2 — Eval framework (case persistence + runner)
-  // =========================================================
-  const evalCmd = program
-    .command("eval")
-    .description("[EXPERIMENTAL] Manage skill evaluation")
-
-  evalCmd
-    .command("list <slug>")
-    .description("List eval cases")
-    .action(async (slug, opts) => { await evalListAction(slug, { serverUrl: opts.serverUrl }); });
-
-  evalCmd
-    .command("run <slug>")
-    .description("Run eval cases")
-    .action(async (slug, opts) => { await evalRunAction(slug, { serverUrl: opts.serverUrl }); });
-
-  evalCmd
-    .command("results <slug>")
-    .description("Show eval results")
-    .option("--limit <n>", "Max rows to display (default 20)", "20")
-    .action(async (slug, opts) => {
-      await evalResultsAction(slug, { limit: parseInt(opts.limit as string, 10), serverUrl: opts.serverUrl });
-    });
-
   // ── System initialization ──────────────────────────────────────────
   program
     .command("init")
@@ -482,21 +403,6 @@ export async function createCli(): Promise<Command> {
     .requiredOption("--password <password>", "Superadmin password (min 8 chars)")
     .action(async (opts) => {
       await initAction({ username: opts.username, password: opts.password });
-    });
-
-  // =========================================================
-  // Upgrade command
-  // =========================================================
-  program
-    .command("upgrade")
-    .description("Check for a newer version and upgrade skill-mcp")
-    .option("--dry-run", "Only check for updates without upgrading")
-    .option("-y, --yes", "Skip confirmation prompt")
-    .action(async (opts) => {
-      await upgradeAction({
-        dryRun: opts.dryRun as boolean | undefined,
-        yes: opts.yes as boolean | undefined,
-      });
     });
 
   // ── Auth commands ─────────────────────────────────────────────────

@@ -6,7 +6,6 @@ import {
   BadRequestError,
   SkillNotFoundError,
   PermissionDeniedError,
-  UpstreamError,
 } from "@/utils/errors.js";
 
 function makeCtx(): HttpContext & { _written: { status?: number; body?: unknown }; res: ServerResponseMock } {
@@ -66,13 +65,6 @@ describe("errorMap middleware (T-101)", () => {
     await errorMap()(ctx, async () => { throw new PermissionDeniedError("private-skill"); });
     expect(ctx._written.status).toBe(403);
     expect((ctx._written.body as { code: string }).code).toBe("PERMISSION_DENIED");
-  });
-
-  it("translates UpstreamError → 502", async () => {
-    const ctx = makeCtx();
-    await errorMap()(ctx, async () => { throw new UpstreamError("cloud down", 503); });
-    expect(ctx._written.status).toBe(502);
-    expect((ctx._written.body as { code: string }).code).toBe("UPSTREAM_ERROR");
   });
 
   it("translates plain Error → 500 with fallback message", async () => {

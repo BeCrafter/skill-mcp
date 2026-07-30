@@ -12,17 +12,6 @@ import type { ICacheProvider } from "./cache/provider.interface.js";
 import type { SkillImporter } from "./import/importer.js";
 import type { DomainEventBus } from "./events/event-bus.js";
 import type { CacheEpochManager } from "./cache/cache-epochs.js";
-import type { SkillEvalRepository } from "./db/repositories/skill-eval.repository.js";
-import type { EvalRunner } from "./eval/runner.js";
-import type { PipelineRunStore } from "./pipeline/run-store.js";
-import type { ImportJobRepository } from "./db/repositories/import-job.repository.js";
-import type { BackgroundImportWorker } from "./services/import-worker.js";
-import type { UsageEventRepository } from "./db/repositories/usage-event.repository.js";
-import type { UsageMeterService } from "./services/usage-meter.service.js";
-import type { WebhookRepository } from "./db/repositories/webhook.repository.js";
-import type { WebhookDeliveryRepository } from "./db/repositories/webhook-delivery.repository.js";
-import type { WebhookService } from "./services/webhook.service.js";
-import type { WebhookWorker } from "./services/webhook-worker.js";
 
 export interface AppDependencies {
   skillService: SkillService;
@@ -41,17 +30,6 @@ export interface AppDependencies {
   roleRepo?: RoleRepository;
   userRoleRepo?: UserRoleRepository;
   feedbackRepo?: SkillFeedbackRepository;
-  evalRepo?: SkillEvalRepository;
-  evalRunner?: EvalRunner;
-  pipelineRunStore?: PipelineRunStore;
-  importJobRepo?: ImportJobRepository;
-  importWorker?: BackgroundImportWorker;
-  usageEventRepo?: UsageEventRepository;
-  usageMeter?: UsageMeterService;
-  webhookRepo?: WebhookRepository;
-  webhookDeliveryRepo?: WebhookDeliveryRepository;
-  webhookService?: WebhookService;
-  webhookWorker?: WebhookWorker;
   jwtSecret?: string;
   jwtIssuer?: string;
   jwtAccessExpiresIn?: number;

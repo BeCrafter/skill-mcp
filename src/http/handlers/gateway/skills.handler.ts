@@ -37,6 +37,20 @@ export function registerGatewaySkillRoutes(router: Router, deps: AppDependencies
     json(ctx.res, 200, { success: true, data: paginated, total: skills.length, offset, limit });
   });
 
+  // C2 remote-proxy: BM25 search delegated from MCP-only proxy instances.
+  // RBAC and ranking are handled locally by the storage Registry (which has
+  // the hydrated index and the user/role store). The proxy's `skill_search`
+  // reaches this endpoint via RemoteSkillProvider.search.
+  router.get("/api/gateway/skills/search", async (ctx) => {
+    const context = ctx.requestContext!;
+    const q = ctx.query.get("q") ?? "";
+    if (q.trim().length === 0) throw new BadRequestError("Missing search query (q)");
+    const limit = Math.min(parseInt(ctx.query.get("limit") ?? "20", 10) || 20, 50);
+    const tags = ctx.query.get("tags")?.split(",").filter(Boolean);
+    const hits = await skillService.searchAccessibleSkills(context, q, { limit, tags });
+    json(ctx.res, 200, { success: true, data: hits, total: hits.length });
+  });
+
   router.get("/api/gateway/skills/:identifier", async (ctx) => {
     const context = ctx.requestContext!;
     const identifier = ctx.params.identifier;

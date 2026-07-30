@@ -43,6 +43,6 @@ npm run docs:sync -- --quiet
 
 ## 相关文档
 
-- [部署场景](../docs/SCENARIOS/) - 详细的部署场景说明
+- [部署文档](../docs/deployment/README.md) - 详细的部署形态说明
 - [Docker 部署](../docker/README.md) - Docker 部署配置
-- [生产部署](../docs/PRODUCTION_DEPLOYMENT.md) - 生产环境部署指南
+- [分布式 C2 部署](../docs/deployment/distributed-c2.md) - 生产环境部署指南

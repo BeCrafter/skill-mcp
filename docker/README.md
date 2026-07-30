@@ -1,17 +1,17 @@
 # Docker 部署配置
 
-本目录包含 skill-mcp 的 Docker 部署配置，覆盖全部 5 种部署场景。
+本目录包含 skill-mcp 的 Docker 部署配置，覆盖全部部署场景（5 个 profile + 场景 A）。
 
 ## 场景速查
 
 | 场景 | Profile | 适用 | 命令 |
 |------|---------|------|------|
-| **A** | *(无)* | 本地 stdio 开发 | 无需 Docker |
-| **B** | `backend` | 远程后端 + 本地 stdio proxy | `./docker/start.sh backend` |
-| **C1** | `c1` | 单体 HTTP 开发/测试 | `./docker/start.sh c1` |
-| **C1+HTTPS** | `c1-gateway` | 单体 + HTTPS 网关 | `./docker/start.sh c1-gateway` |
-| **C2** | `c2` | 分布式生产 | `./docker/start.sh c2` |
-| **C2+HTTPS** | `gateway` | 分布式 + HTTPS 网关 | `MCP_BACKEND=mcp:4000 STORAGE_BACKEND=storage:3000 ./docker/start.sh gateway` |
+| **A** | *(none)* | Local stdio dev | No Docker needed |
+| **B / backend** | `backend` | API-only backend (REST management) | `./docker/start.sh backend` |
+| **C1** | `c1` | Single-node HTTP dev/test | `./docker/start.sh c1` |
+| **C1+HTTPS** | `c1-gateway` | Single-node + HTTPS gateway | `./docker/start.sh c1-gateway` |
+| **C2** | `c2` | Distributed production | `./docker/start.sh c2` |
+| **C2+HTTPS** | `gateway` | Distributed + HTTPS gateway | `./docker/start.sh gateway` |
 
 ## 目录结构
 
@@ -37,9 +37,9 @@ export DOMAIN=your-domain.com   # 设置域名启用自动 HTTPS
 export ACME_EMAIL=admin@example.com
 ./docker/start.sh c1-gateway
 
-# 场景 B：仅启动远程后端（配合本地 stdio proxy）
+# 场景 B / backend：API-only 后端
 ./docker/start.sh backend
-# 本地接入：skill-mcp serve --remote-url http://localhost:3001
+# CLI 管理：skill-mcp --server-url http://localhost:3001 list
 
 # 场景 C2：分布式部署（生产推荐）
 export STORAGE_SVC_TOKEN=<your-token>
@@ -74,12 +74,12 @@ DOMAIN=your-domain.com docker compose --profile c1-gateway up -d --build
 curl https://your-domain.com/api/health
 ```
 
-#### 场景 B：远程后端
+#### 场景 B / backend：API-only 后端
 
 ```bash
 docker compose --profile backend up -d --build
-# 本地启动 stdio proxy 指向远程后端
-skill-mcp serve --remote-url http://localhost:3001
+# CLI management points at the remote backend
+skill-mcp --server-url http://localhost:3001 list
 ```
 
 #### 场景 C2：分布式部署
@@ -91,8 +91,8 @@ export STORAGE_SVC_TOKEN=$(skill-mcp user create svc-gateway --role <role-id> | 
 # 2. 启动服务
 docker compose --profile c2 up -d --build
 
-# 3. 验证
-curl http://localhost:3000/api/health
+# 3. 验证（c2 的 storage 为内部网络，无主机端口）
+docker compose --profile c2 exec storage curl -s http://localhost:3000/api/health
 curl http://localhost:4001/api/health
 curl http://localhost:4002/api/health
 ```
@@ -107,7 +107,7 @@ export STORAGE_SVC_TOKEN=<your-token>
 export MCP_BACKEND="mcp1:4000 mcp2:4000" STORAGE_BACKEND=storage:3000
 
 # 2. 启动服务
-MCP_BACKEND=mcp:4000 STORAGE_BACKEND=storage:3000 \
+MCP_BACKEND="mcp1:4000 mcp2:4000" STORAGE_BACKEND=storage:3000 \
   docker compose --profile c2 --profile gateway up -d
 
 # 3. 访问
@@ -135,15 +135,11 @@ MCP1_PORT=4001                  # C2 MCP 实例 1 对外端口
 MCP2_PORT=4002                  # C2 MCP 实例 2 对外端口
 
 # 存储配置
-STORAGE_TYPE=local-fs           # local-fs 或 aliyun-oss
+STORAGE_TYPE=local-fs           # local-fs (v0.1: local-fs only)
 STORAGE_BASE_PATH=/data/skills
 
-# C2 资源配置
-STORAGE_CPU=2
-STORAGE_MEM=4G
-MCP_CPU=1
-MCP_MEM=2G
-MCP_REPLICAS=2                  # MCP 实例数
+# C2 service tokens (required)
+STORAGE_SVC_TOKEN=<your-token>
 
 # HTTPS 配置
 DOMAIN=your-domain.com
@@ -196,7 +192,7 @@ Caddyfile 通过环境变量 `MCP_BACKEND` / `STORAGE_BACKEND` 指定后端：
 docker compose --profile c2 logs -f
 
 # 特定服务
-docker compose --profile c2 logs -f mcp
+docker compose --profile c2 logs -f mcp1
 
 # Caddy 访问日志
 docker compose --profile gateway exec gateway cat /data/access.log
@@ -208,14 +204,15 @@ C2 默认启动 mcp1 + mcp2 两个 MCP 实例。如需更多实例，可在 `doc
 
 ### 备份数据
 
+镜像仅含 `curl`（无 `sqlite3`），DB 在 `/app/data/skill-mcp.db`。用 `docker cp` 导出后在宿主机操作：
+
 ```bash
 # 备份数据库
-docker compose --profile c2 exec storage \
-  sqlite3 /data/skill-mcp.db ".backup /data/backup.db"
+docker compose --profile c2 cp storage:/app/data/skill-mcp.db ./backup-$(date +%F).db
 
 # 备份技能包
-docker compose --profile c2 exec storage \
-  tar czf /data/skills-backup.tar.gz /data/skills
+docker compose --profile c2 cp storage:/app/data/skills ./skills-backup
+tar czf skills-backup.tar.gz skills-backup
 ```
 
 ### 更新服务
@@ -232,8 +229,6 @@ docker compose --profile c2 up -d --no-deps mcp2
 ```
 
 ## 故障排查
-
-详见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)，包含 6 个常见问题的完整排查步骤。
 
 ### 健康检查失败
 
@@ -290,7 +285,7 @@ npx @modelcontextprotocol/inspector
 # 连接：https://localhost/mcp
 ```
 
-> 另见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) 第 5 节，包含更多替代方案（跳过 TLS 验证、纯 HTTP 模式、生产域名）。
+> 替代方案：跳过 TLS 验证、纯 HTTP 模式或使用生产域名。
 
 ### 性能问题
 
@@ -298,13 +293,13 @@ npx @modelcontextprotocol/inspector
 # 查看资源使用
 docker stats
 
-# 查看数据库延迟
-docker compose --profile c2 exec storage \
-  sqlite3 /data/skill-mcp.db "SELECT COUNT(*) FROM skills;"
+# 查看数据库（导出后用宿主机 sqlite3）
+docker compose --profile c2 cp storage:/app/data/skill-mcp.db ./skill-mcp.db
+sqlite3 ./skill-mcp.db "SELECT COUNT(*) FROM skills;"
 
 # 清理缓存
-docker compose --profile c2 exec mcp1 rm -rf /data/cache/*
-docker compose --profile c2 exec mcp2 rm -rf /data/cache/*
+docker compose --profile c2 exec mcp1 rm -rf /app/data/cache/*
+docker compose --profile c2 exec mcp2 rm -rf /app/data/cache/*
 ```
 
 ## 迁移指南
@@ -319,11 +314,11 @@ docker compose --profile c2 exec mcp2 rm -rf /data/cache/*
 
 ### 新增场景
 
-- **`backend` (Scenario B)**：独立启动 API-only 后端，配合本地 `skill-mcp serve --remote-url` 使用
+- **`backend`**：API-only 后端（REST 管理的 C1 限制模式），配合 `skill-mcp --server-url` 使用
 - **`c1-gateway`**：C1 单体 + HTTPS 网关，Caddy 直连 `app:3000`
 
 ## 更多信息
 
-- [生产部署指南](../docs/PRODUCTION_DEPLOYMENT.md)
-- [场景详解](../docs/SCENARIOS/)
+- [部署文档](../docs/deployment/README.md)
+- [分布式 C2 部署](../docs/deployment/distributed-c2.md)
 - [Caddy 文档](https://caddyserver.com/docs/)

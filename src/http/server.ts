@@ -13,7 +13,6 @@ import type { AppConfig } from "../config/schema.js";
 import type { UserRepository } from "../db/repositories/user.repository.js";
 import type { UserRoleRepository } from "../db/repositories/user-role.repository.js";
 import type { SkillRepository } from "../db/repositories/skill.repository.js";
-import type { UsageMeterService } from "../services/usage-meter.service.js";
 
 export interface RequestHandlerDeps {
   appConfig: AppConfig;
@@ -24,7 +23,6 @@ export interface RequestHandlerDeps {
   userRepo?: UserRepository;
   userRoleRepo?: UserRoleRepository;
   skillRepo?: SkillRepository;
-  usageMeter?: UsageMeterService;
   jwtSecret?: string;
   jwtIssuer?: string;
   authRouter?: Router;
@@ -55,26 +53,10 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
     res.setHeader("Link", `<${canonical}>; rel="successor-version"`);
   }
 
-  function recordMetrics(route: string, method: string, statusCode: number, startTime: number, ctx?: HttpContext) {
+  function recordMetrics(route: string, method: string, statusCode: number, startTime: number, _ctx?: HttpContext) {
     const duration = (Date.now() - startTime) / 1000;
     metrics.httpRequests.inc({ route, method, status_code: statusCode });
     metrics.httpDuration.observe({ route }, duration);
-    // P1-13 — usage metering. Fire-and-forget; rejected requests count too
-    // because billing for "calls made" includes 4xx/5xx ratio (the metadata
-    // carries status_code so partition queries can split if needed).
-    // Skip the unmatched-route bucket so fuzzed `/wp-admin` hits don't inflate
-    // the metering ledger. Skip /metrics to avoid feedback loops where a
-    // Prometheus scrape registers as an api.call.
-    if (deps.usageMeter && route !== UNMATCHED_ROUTE_LABEL && route !== "/metrics") {
-      const userId = ctx?.requestContext?.userId;
-      void deps.usageMeter.record({
-        userId,
-        eventType: "api.call",
-        resourceId: route,
-        quantity: 1,
-        metadata: { method, status_code: statusCode },
-      });
-    }
   }
 
   return async (req: IncomingMessage, res: ServerResponse) => {

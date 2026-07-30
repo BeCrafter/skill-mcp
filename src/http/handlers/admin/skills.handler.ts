@@ -253,11 +253,7 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
   for (const [verb, target] of Object.entries(LIFECYCLE_VERBS)) {
     router.post(`/api/admin/skills/:slug/${verb}`, async (ctx) => {
       const slug = requireSlug(ctx);
-      // P1-12 stage 3 — `?force=true` bypasses the publish-time eval
-      // regression gate. Only meaningful for publish + republish targets;
-      // deprecate/archive paths ignore the flag because the gate doesn't run.
-      const force = ctx.query.get("force") === "true";
-      const updated = await skillService.adminTransitionLifecycle(slug, target, { skipEvalGate: force });
+      const updated = await skillService.adminTransitionLifecycle(slug, target);
       json(ctx.res, 200, { success: true, data: toSkillMetaPublic(updated) });
     });
   }
@@ -346,36 +342,5 @@ export function registerAdminSkillRoutes(router: Router, deps: AppDependencies):
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
-
-  // ── Eval endpoints ─────────────────────────────────────────────
-
-  router.get("/api/admin/skills/:slug/eval/cases", async (ctx) => {
-    const slug = requireSlug(ctx);
-    const skill = await deps.skillRepo?.findBySlug(slug);
-    if (!skill) throw new BadRequestError(`Skill not found: ${slug}`);
-    const evalRepo = deps.evalRepo;
-    if (!evalRepo) throw new BadRequestError("Eval not configured");
-    const cases = evalRepo.findCasesBySkillId(skill.id);
-    json(ctx.res, 200, { success: true, data: cases });
-  });
-
-  router.post("/api/admin/skills/:slug/eval/run", async (ctx) => {
-    const slug = requireSlug(ctx);
-    const evalRunner = deps.evalRunner;
-    if (!evalRunner) throw new BadRequestError("Eval runner not configured");
-    const summary = await evalRunner.runForSlug(slug);
-    json(ctx.res, 200, { success: true, data: summary });
-  });
-
-  router.get("/api/admin/skills/:slug/eval/results", async (ctx) => {
-    const slug = requireSlug(ctx);
-    const skill = await deps.skillRepo?.findBySlug(slug);
-    if (!skill) throw new BadRequestError(`Skill not found: ${slug}`);
-    const evalRepo = deps.evalRepo;
-    if (!evalRepo) throw new BadRequestError("Eval not configured");
-    const limit = parseInt(ctx.query.get("limit") ?? "20", 10);
-    const runs = evalRepo.findRunsBySkillVersion(skill.id, skill.version);
-    json(ctx.res, 200, { success: true, data: runs.slice(-limit) });
   });
 }
