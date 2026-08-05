@@ -8,11 +8,17 @@
 #
 # MCP_BACKEND 支持多个上游（空格分隔），Caddy 自动负载均衡：
 #   MCP_BACKEND="mcp1:4000 mcp2:4000"
+#
+# ⚠ 启动前必须设置 MCP_BACKEND 和 STORAGE_BACKEND 环境变量，
+#   不要依赖 Caddyfile 内的默认值。不同 profile 的后端地址不同。
 
 {$DOMAIN:localhost} {
     # MCP 端点 — 负载均衡到多个上游
     handle /mcp* {
-        reverse_proxy {$MCP_BACKEND:localhost:4000}
+        reverse_proxy {$MCP_BACKEND:localhost:4000} {
+            lb_try_duration 30s
+            lb_try_interval 2s
+        }
     }
 
     # Gateway API — 转发客户端认证 header
@@ -27,10 +33,10 @@
         reverse_proxy {$STORAGE_BACKEND:localhost:3000}
     }
 
-    # 安全头（仅 HTTPS 生效）
+    # 安全头。HSTS 仅在 TLS 终止时由 Caddy 自动发送（HTTP 模式下忽略该指令）。
+    # Caddy 内部也会自动添加 X-Content-Type-Options: nosniff。
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
     }
 

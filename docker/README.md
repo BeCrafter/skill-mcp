@@ -86,7 +86,7 @@ skill-mcp --server-url http://localhost:3001 list
 
 ```bash
 # 1. 创建服务账号并获取 token
-export STORAGE_SVC_TOKEN=$(skill-mcp user create svc-gateway --role <role-id> | grep -oP 'token: \K.*')
+export STORAGE_SVC_TOKEN=$(skill-mcp user create --username svc-gateway --user-type user --role-ids <role-id> | grep -oP 'token: \K.*')
 
 # 2. 启动服务
 docker compose --profile c2 up -d --build
@@ -164,11 +164,11 @@ STORAGE_SVC_TOKEN=<your-token>
 
 ### 配置方式
 
-Caddyfile 通过环境变量 `MCP_BACKEND` / `STORAGE_BACKEND` 指定后端：
-- **C2+gateway**: `MCP_BACKEND="mcp1:4000 mcp2:4000"`, `STORAGE_BACKEND=storage:3000`（默认）
+Caddyfile 通过环境变量 `MCP_BACKEND` / `STORAGE_BACKEND` 指定后端，**启动前必须显式设置这两个变量**：
+- **C2+gateway**: `MCP_BACKEND="mcp1:4000 mcp2:4000"`, `STORAGE_BACKEND=storage:3000`
 - **C1+gateway**: `MCP_BACKEND=app:3000`, `STORAGE_BACKEND=app:3000`
 
-`MCP_BACKEND` 支持多个上游（空格分隔），Caddy 自动负载均衡。
+`MCP_BACKEND` 支持多个上游（空格分隔），Caddy 自动负载均衡（`lb_try_duration 30s`，启动初期后端非 ready 时自动重试）。
 
 ### 自动 HTTPS
 

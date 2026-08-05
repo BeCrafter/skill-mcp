@@ -130,7 +130,7 @@ services:
       SKILL_MCP_AUTH_TOKEN: ${STORAGE_SVC_TOKEN:-changeme}
       MCP_ONLY_MODE: "true"
     volumes:
-      - mcp1-data:/app/data
+      - storage-data:/app/data:rw
     networks:
       - internal
       - external
@@ -167,7 +167,7 @@ services:
       SKILL_MCP_AUTH_TOKEN: ${STORAGE_SVC_TOKEN:-changeme}
       MCP_ONLY_MODE: "true"
     volumes:
-      - mcp2-data:/app/data
+      - storage-data:/app/data:rw
     networks:
       - internal
       - external
@@ -195,8 +195,8 @@ services:
     profiles: ["gateway", "c1-gateway"]
     restart: always
     ports:
-      - "80:80"
-      - "443:443"
+      - "${CADDY_HTTP_PORT:-8080}:80"
+      - "${CADDY_HTTPS_PORT:-8443}:443"
     environment:
       - DOMAIN=${DOMAIN:-localhost}
       - MCP_BACKEND=${MCP_BACKEND:-app:3000}
@@ -230,8 +230,6 @@ volumes:
   app-data:
   backend-data:
   storage-data:
-  mcp1-data:
-  mcp2-data:
   caddy-data:
   caddy-config:
 

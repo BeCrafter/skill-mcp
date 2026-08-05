@@ -50,7 +50,7 @@ check_env() {
         if [[ -z "$STORAGE_SVC_TOKEN" ]]; then
             echo -e "${YELLOW}警告: STORAGE_SVC_TOKEN 未设置${NC}"
             echo -e "${YELLOW}使用默认值 'changeme'，建议设置正确的 token:${NC}"
-            echo -e "${BLUE}export STORAGE_SVC_TOKEN=\$(skill-mcp user create svc-gateway --role <role-id> | grep -oP 'token: \K.*')${NC}"
+            echo -e "${BLUE}export STORAGE_SVC_TOKEN=\$(skill-mcp user create --username svc-gateway --user-type user --role-ids <role-id> | grep -oP 'token: \K.*')${NC}"
             echo ""
         fi
     fi

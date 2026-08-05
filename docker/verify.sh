@@ -231,15 +231,15 @@ verify_c1_gateway() {
     wait_healthy "gateway" 60
     local cname; cname=$(container_for "app")
 
-    # Layer 1: 无鉴权边界 (via Caddy)
+    # Layer 1: 无鉴权边界 (via Caddy on CADDY_HTTP_PORT)
     check "gateway /api/health → 200" \
-        'curl -sf http://localhost/api/health | grep -q "\"status\":\"ok\""'
+        'curl -sf http://localhost:${CADDY_HTTP_PORT:-8080}/api/health | grep -q "\"status\":\"ok\""'
 
     check "gateway /api/gateway/skills (no auth) → 401" \
-        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost/api/gateway/skills)" = "401"'
+        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost:${CADDY_HTTP_PORT:-8080}/api/gateway/skills)" = "401"'
 
     check "gateway /mcp GET → 406" \
-        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost/mcp)" = "406"'
+        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost:${CADDY_HTTP_PORT:-8080}/mcp)" = "406"'
 
     # Layer 2: 鉴权后业务功能 (direct to app, Caddy header_up forwarding is
     # unreliable in current Caddy v2 — test direct to prove auth system works)
@@ -255,8 +255,8 @@ verify_c1_gateway() {
         FAIL=$((FAIL + 2))
     fi
 
-    # Layer 3: MCP 协议握手 (via Caddy → app)
-    mcp_checks http://localhost/mcp "gateway"
+    # Layer 3: MCP 协议握手 (via Caddy → app on CADDY_HTTP_PORT)
+    mcp_checks http://localhost:${CADDY_HTTP_PORT:-8080}/mcp "gateway"
 
     cleanup --profile c1-gateway
 }
@@ -359,15 +359,15 @@ verify_c2_gateway() {
     wait_healthy "gateway" 60
     local scname; scname=$(container_for "storage")
 
-    # Layer 1: 无鉴权边界 (via Caddy)
+    # Layer 1: 无鉴权边界 (via Caddy on CADDY_HTTP_PORT)
     check "gateway /api/health → 200" \
-        'curl -sf http://localhost/api/health | grep -q "\"status\":\"ok\""'
+        'curl -sf http://localhost:${CADDY_HTTP_PORT:-8080}/api/health | grep -q "\"status\":\"ok\""'
 
     check "gateway /api/gateway/skills (no auth) → 401" \
-        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost/api/gateway/skills)" = "401"'
+        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost:${CADDY_HTTP_PORT:-8080}/api/gateway/skills)" = "401"'
 
     check "gateway /mcp GET → 406" \
-        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost/mcp)" = "406"'
+        'test "$(curl -so /dev/null -w "%{http_code}" http://localhost:${CADDY_HTTP_PORT:-8080}/mcp)" = "406"'
 
     # Layer 2: 鉴权后业务功能 (test via gateway container → storage,
     # since storage has no host port mapping in C2. Caddy auth header
@@ -387,7 +387,7 @@ verify_c2_gateway() {
 
     # Layer 3: MCP 协议 (Caddy → mcp → storage)
     # Only test initialize through Caddy; tools/list is flaky without session affinity
-    mcp_checks http://localhost/mcp "c2+gateway" tools_list=false
+    mcp_checks http://localhost:${CADDY_HTTP_PORT:-8080}/mcp "c2+gateway" tools_list=false
 
     cleanup "--profile c2 --profile gateway"
 }

@@ -6,7 +6,7 @@ RUN apk add --no-cache python3 make g++
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
 # Stage 2: Build
@@ -42,7 +42,7 @@ COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
 # Create data directories and set ownership
 RUN mkdir -p /app/data /app/data/skills /app/data/cache && \
     chown -R nodejs:nodejs /app/data && \
-    chmod -R 777 /app/data
+    chmod -R 755 /app/data
 
 # Switch to non-root user
 USER nodejs
