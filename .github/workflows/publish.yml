@@ -33,7 +33,7 @@ jobs:
 
       # 仅 stable 与 rc 创建 GitHub Release;alpha/beta/dev/next 只发 npm。
       - name: Create GitHub Release
-        if: ${{ !contains(github.ref_name, '-') || contains(github.ref_name, '-rc.') }}
+        if: ${{ startsWith(github.ref_name, 'v') && (!contains(github.ref_name, '-') || contains(github.ref_name, '-rc.')) }}
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
